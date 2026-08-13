@@ -1,0 +1,27 @@
+{
+  "summary": "Frontend-only regression verification of the runOnJS(true) patch on cookingTablePanGesture in /app/frontend/app/kitchen.tsx (line 551). Verified: (1) App boots cleanly and main menu renders (New Game / Load Game / Settings / Support). (2) All reachable non-game routes (/settings, /support, /logbook) mount without red screens or JS errors. (3) /kitchen mounts successfully, kitchen scene renders (Day 1 soup intro state - Old Innkeeper bubble, character avatars, craft slots, table slots, bag hotbar). (4) Multiple drag gestures (5 different swipes across craft grid + table grid area) executed on the kitchen surface produce ZERO JS console errors and ZERO pageerror events - the modified cookingTablePanGesture safely early-returns (tsRef.current !== 'COOKING_CRAFT_READY') without throwing. (5) No new red-screen errors were introduced by adding .runOnJS(true). NOTE: The actual native Expo Go RNGH+Reanimated crash cannot be reproduced in web preview (worklets don't run on a real UI thread under React Native Web), as explicitly acknowledged in the review request; regression-only verification was performed as instructed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "None from regression standpoint. Main agent should verify the native fix on a real device / dev-client build (Expo Go) since web preview cannot reproduce the RNGH worklet crash. Recommend a physical device drag&drop smoke test on Kitchen in COOKING_CRAFT_READY state before shipping."
+  ],
+  "critical_code_review_comments": [
+    "kitchen.tsx:549-624: cookingTablePanGesture correctly has .runOnJS(true) inserted right after Gesture.Pan(). No other gestures modified (grep confirmed only 1 occurrence of runOnJS(true)).",
+    "The gesture callbacks read plain JS refs (cookingGestureCBs.current, tsRef.current, layouts.current, tableItemsRef.current, craftIngSlotsRef.current, craftToolRef.current) and mutate Reanimated shared values (cookingIsDragging.value, soupX.value, soupY.value, dragOffsetX/Y.value, soupVis.value, soupScale.value) plus call withTiming(). Writing shared values from JS thread is supported; withTiming from JS thread is also supported. No worklet-only APIs invoked that would break under runOnJS(true).",
+    "Early guard at line 561 (`if (tsRef.current !== 'COOKING_CRAFT_READY') return;`) inside onUpdate cleanly short-circuits when kitchen is in intro/tutorial state, which is why 5 drag attempts in soup-intro state produced 0 errors.",
+    "No other gestures were changed (verified by grep - only cookingTablePanGesture has runOnJS(true))."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend only)", "frontend": "100% (5/5 review-request scenarios passed)"},
+  "seed_data_creation": "None - tested against default fresh-install state (Day 1 soup intro).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The runOnJS(true) change is a native-crash workaround that only manifests in Expo Go native runtime. Web preview shows the change is JS-safe (no new console/page errors, kitchen mounts, drags do not throw). To actually validate the crash fix, a native dev-client run is required. Fresh install lands in soup-intro tutorial (not COOKING_CRAFT_READY); reaching that state via automation was skipped as instructed. localStorage injection recipe available in iteration_38.context for reaching COOKING_CRAFT_READY if needed later.",
+  "rca_of_issue": "No regressions introduced. The .runOnJS(true) modifier converts the entire Pan gesture callback chain to run on the JS thread rather than the UI/worklet thread, avoiding the native RNGH+Reanimated crash that occurred when the worklet accessed plain JS refs (cookingGestureCBs.current etc.) via runOnJS boundary calls. Because all shared-value mutations and withTiming() work correctly from the JS thread as well, functionality is preserved. Web preview verification confirmed: app boots, all reachable routes render, kitchen mounts, and drag interactions produce no JS errors."
+}

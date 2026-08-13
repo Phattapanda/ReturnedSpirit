@@ -548,6 +548,7 @@ export default function KitchenScreen() {
   // All state access goes through the `cookingGestureCBs` callback-ref, which is refreshed each render.
   const cookingTablePanGesture = useMemo(
     () => Gesture.Pan()
+      .runOnJS(true)
       .minDistance(8)
       .onStart((e) => {
         // Store start position so onUpdate can find the source slot
