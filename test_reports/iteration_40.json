@@ -1,0 +1,29 @@
+{
+  "summary": "Frontend-only regression verification of the two-line follow-up fix in /app/frontend/app/kitchen.tsx: (1) drag-lifecycle flag switched from useSharedValue to useRef (cookingIsDraggingRef, line 315; read/written in gesture callbacks at 558/561/598/601/610/616/619/620) and (2) flying drag <Animated.View style={flyStyle}> now has pointerEvents=\"none\" (line 2769). Verified all 5 review-request scenarios via web preview at mobile viewport 375x667: (a) App boots and Main Menu renders with New Game / Load Game / Settings / Support labels visible, no red screen at route '/'. (b) /kitchen mounts and renders the Day-1 soup-intro tutorial scene (Kitchen title, MO+Old Innkeeper avatars, locked support slot, craft grid, table grid, Recipe & CRAFT buttons, bag hotbar with herb) with no red screen and no JS error. (c) Five repeated drag swipes across the kitchen craft/table surface produced ZERO pageerror events and ZERO new JS console errors. The kitchen remained responsive after drags (bag slot picked up herb interaction; screen redraw succeeded). (d) Navigating to /settings, /support and /logbook all mounted cleanly with no red screens (Settings sliders, Support form and Logbook history all rendered). (e) Only pre-existing deprecation warnings observed (shadow*/textShadow* style props, and a new 'props.pointerEvents is deprecated. Use style.pointerEvents' warning that is a direct consequence of the pointerEvents=\"none\" prop added by this fix). No functional errors introduced. NOTE: As explicitly acknowledged in the review request, the actual native RNGH+Reanimated behavior (invisible drag item blocking touches / worklet+ref race) cannot be reproduced in React Native Web; regression-only verification was performed as instructed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "kitchen.tsx flyStyle Animated.View", "issue": "React Native Web logs deprecation warning: 'props.pointerEvents is deprecated. Use style.pointerEvents'. Recommendation: move pointerEvents=\"none\" into the style object (e.g. style={[flyStyle, { pointerEvents: 'none' }]}) so both native and web are future-proof. Reference: /app/frontend/app/kitchen.tsx:2769. Non-blocking — behavior is preserved on native."}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "OPTIONAL cleanup: move the newly-added pointerEvents=\"none\" from JSX prop into the style object on the flying drag Animated.View (kitchen.tsx:2769) to silence the RN-Web deprecation warning. Behavior is unchanged — this is cosmetic.",
+    "Native validation still required: the invisible-flying-item touch-blocking and second-drag failure are native RNGH/Reanimated issues that web preview cannot reproduce. Please smoke-test on Expo Go / dev-client on device in COOKING_CRAFT_READY state (drag ingredient → craft slot → drop → try to drag again → tap CRAFT) before shipping."
+  ],
+  "critical_code_review_comments": [
+    "kitchen.tsx:313-315 — cookingIsDraggingRef is a plain synchronous JS ref (useRef(false)); reads/writes at 558,561,598,601,610,616,619,620 are all inside .runOnJS(true) gesture callbacks (line 553), so they execute on the JS thread. Correct pattern — refs are safe to mutate synchronously on JS thread; no worklet-boundary race.",
+    "kitchen.tsx:2769 — <Animated.View style={flyStyle} pointerEvents=\"none\"> correctly makes the always-mounted (opacity 0 when idle) drag ghost non-interactive so it cannot capture taps on slots/CRAFT after drop. Minor: prop is deprecated on RN-Web (should move into style), but native honours it.",
+    "Animation SharedValues (soupX/Y, soupVis, soupScale, dragOffsetX/Y) untouched — verified via grep. .runOnJS(true) modifier still present at line 553. No recipe/tutorial/save logic changes detected."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend only)", "frontend": "100% (5/5 review-request scenarios passed)"},
+  "seed_data_creation": "None — tested against default fresh-install state (Day 1 soup-intro tutorial).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "This follow-up patch (JS-ref + pointerEvents=none on flying drag) is JS-safe and produces no console/page errors in web preview. Fresh install lands in soup-intro tutorial (not COOKING_CRAFT_READY); reaching COOKING_CRAFT_READY via automation was skipped per the review request. Only new observation is a React Native Web deprecation warning 'props.pointerEvents is deprecated' introduced by the fix — cosmetic only. The actual native bug (second drag failing, invisible ghost blocking touches) needs on-device verification.",
+  "rca_of_issue": "The prior iteration (39) already added .runOnJS(true) so gesture callbacks execute on the JS thread. That is why using a Reanimated SharedValue for cookingIsDragging was fragile — reading `.value` from the JS thread works but mixing it with the ref-based state machine (cookingGestureCBs.current, tsRef.current) invited a race after the first drag. Switching to useRef(false) keeps the flag entirely on the JS thread and synchronous, matching the rest of the drag-lifecycle state. Independently, the always-mounted flying Animated.View was still capturing pointer events after drop even at opacity 0 in some native cases; pointerEvents=\"none\" makes it unambiguously non-interactive so subsequent taps on slots/CRAFT reach the correct receiver. Web-preview regression test confirms both changes introduce no new JS errors, no red screens, and no navigation regressions."
+}

@@ -310,7 +310,9 @@ export default function KitchenScreen() {
   const cookingPendingTable  = useRef<(BagItem | null)[]>([]);
   // Cooking drag-and-drop (like Day 1 soupGesture)
   const cookingDraggedSlotRef = useRef<number>(-1);
-  const cookingIsDragging = useSharedValue(false);
+  // Synchronous JS-thread drag-lifecycle flag (gesture runs .runOnJS(true), so a plain
+  // ref is the reliable control state — SharedValue is only used for visual animation).
+  const cookingIsDraggingRef = useRef(false);
   // Tracks source slot for UI hiding during drag (triggers re-render)
   const [cookingDragActiveSlot, setCookingDragActiveSlot] = useState<number>(-1);
   // Tracks dragged item id for valid-target highlighting (ref = always latest, no stale closure)
@@ -553,10 +555,10 @@ export default function KitchenScreen() {
       .onStart((e) => {
         // Store start position so onUpdate can find the source slot
         cookingDragStartPos.current = { x: e.absoluteX, y: e.absoluteY };
-        cookingIsDragging.value = false;
+        cookingIsDraggingRef.current = false;
       })
       .onUpdate((e) => {
-        if (!cookingIsDragging.value) {
+        if (!cookingIsDraggingRef.current) {
           // Identify draggable item at touch-start position
           if (tsRef.current !== "COOKING_CRAFT_READY") return;
           const { x: sx, y: sy } = cookingDragStartPos.current;
@@ -593,10 +595,10 @@ export default function KitchenScreen() {
           soupY.value = cy;
           soupVis.value = withTiming(1, { duration: 80 });
           soupScale.value = 1;
-          cookingIsDragging.value = true;
+          cookingIsDraggingRef.current = true;
           cookingGestureCBs.current.onStart(foundSlot, item.id);
         }
-        if (cookingIsDragging.value) {
+        if (cookingIsDraggingRef.current) {
           const ix = e.absoluteX + dragOffsetX.value;
           const iy = e.absoluteY + dragOffsetY.value;
           soupX.value = ix;
@@ -605,17 +607,17 @@ export default function KitchenScreen() {
         }
       })
       .onEnd((e) => {
-        if (cookingIsDragging.value) {
+        if (cookingIsDraggingRef.current) {
           cookingGestureCBs.current.onDrop(
             e.absoluteX + dragOffsetX.value,
             e.absoluteY + dragOffsetY.value,
           );
         }
-        cookingIsDragging.value = false;
+        cookingIsDraggingRef.current = false;
       })
       .onFinalize(() => {
-        if (cookingIsDragging.value) {
-          cookingIsDragging.value = false;
+        if (cookingIsDraggingRef.current) {
+          cookingIsDraggingRef.current = false;
           soupVis.value = withTiming(0, { duration: 150 });
           cookingGestureCBs.current.onCancel();
         }
@@ -2764,7 +2766,7 @@ export default function KitchenScreen() {
       </View>
 
       {/* ── Flying / dragging item (absolute, always rendered) */}
-      <Animated.View style={flyStyle}>
+      <Animated.View style={flyStyle} pointerEvents="none">
         <Image
           source={ITEM_IMAGES[flyingItemId] ?? IMG.herbsoup}
           style={{ width: "100%", height: "100%" }}
