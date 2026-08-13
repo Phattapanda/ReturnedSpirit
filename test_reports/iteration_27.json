@@ -1,0 +1,49 @@
+{
+  "summary": "Static code review + UI smoke test for DYNAMISCHER MORGEN-/ABENDZUSTAND patch. All 18 feature requirements verified via code inspection. Expo loads without errors on port 3000.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "canGoDownstairs uses `staminaSpentToday >= 0` for dayIdx>=2 — always evaluates to true (intentional, as 0 is a valid spent value meaning never actually restricts downstairs). This is correct per spec but worth noting.",
+    "handleGoToSleep checks `timeOfDay === 'morning'` first, then `dayIdx >= 2` for message — correct branching matches spec.",
+    "resolveDormitoryTimeOfDay correctly handles di<=1 with tutorial flags and di>=2 dynamically (spent >= 20 → evening).",
+    "processDayAndWake resets staminaSpentToday BEFORE createSnapshot call (step 6b before step 7) — correct ordering ensures snapshot includes reset value.",
+    "new-game.tsx multiRemove includes '@game:stamina_spent_today' at line 118 — correct."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A (frontend-only test)",
+    "frontend": "100%"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Patch verified: DSK.STAMINA_SPENT_TODAY in dormitory.tsx (line 50), GSK.STAMINA_SPENT_TODAY in garden.tsx (line 59), resolveDormitoryTimeOfDay handles dayIdx<=1 tutorial and dayIdx>=2 dynamic logic, handleGoToSleep differentiates message by dayIdx, handleGoDownstairs only blocks on dayIdx<=1, processDayAndWake resets spent before snapshot, @game:stamina_spent_today in ALL_SNAPSHOT_KEYS and in new-game.tsx multiRemove. No issues found.",
+  "feature_verification": {
+    "DSK.STAMINA_SPENT_TODAY in dormitory.tsx": "PASS - line 50",
+    "GSK.STAMINA_SPENT_TODAY in garden.tsx": "PASS - line 59",
+    "staminaSpentToday state in dormitory": "PASS - line 163",
+    "mount effect loads staminaSpentToday from AsyncStorage": "PASS - lines 296-299",
+    "resolveDormitoryTimeOfDay dayIdx<=1 uses tutorial logic": "PASS - lines 261-269",
+    "resolveDormitoryTimeOfDay dayIdx>=2 dynamic: spent<20=morning": "PASS - line 271",
+    "resolveDormitoryTimeOfDay dayIdx>=2 dynamic: spent>=20=evening": "PASS - line 271",
+    "handleGoToSleep morning dayIdx>=2 shows 'not tired enough'": "PASS - lines 423-425",
+    "handleGoToSleep morning dayIdx<=1 shows 'too early to sleep again'": "PASS - lines 426-427",
+    "canGoDownstairs true for dayIdx>=2": "PASS - line 739",
+    "handleGoDownstairs dayIdx<=1 mustSleep restriction": "PASS - line 671",
+    "processDayAndWake resets staminaSpentToday=0 before snapshot": "PASS - lines 510-511",
+    "@game:stamina_spent_today in ALL_SNAPSHOT_KEYS": "PASS - save-manager.ts line 26",
+    "garden deductStamina increments staminaSpentToday and saves": "PASS - lines 782-784",
+    "new-game.tsx removes @game:stamina_spent_today": "PASS - line 118",
+    "No bundle errors Expo runs on port 3000": "PASS"
+  }
+}

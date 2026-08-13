@@ -1,0 +1,42 @@
+{
+  "summary": "Tuesday morning flow, PlayerBag, ActivityBar, Harvest, Well, StatusModal - large feature set tested via UI automation with AsyncStorage state injection. All core flows verified. One stale-closure bug found in bucket gift resume path.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "garden.tsx / startBucketGiftFlow()",
+        "issue": "Stale closure bug: when loading garden in TUTORIAL_HARVEST_COMPLETE resume state, startBucketGiftFlow() is called from useEffect with stale playerBag (DEFAULT_BAG, unlocked:false). The bucket is added correctly but the saved bag has unlocked:false, causing bag icon to show lock after bucket gift in resume scenario.",
+        "testID": "N/A",
+        "priority": "MEDIUM",
+        "reproduction": "Set @garden:has_harvested_tutorial_herbs=true, @garden:activity_bar_unlocked not set, @game:player_bag with unlocked:true. Load garden. Dismiss bucket gift bubble. Check @game:player_bag - unlocked will be false.",
+        "fix": "Use a playerBagRef (useRef kept in sync via useEffect) and reference playerBagRef.current inside startBucketGiftFlow instead of the closure-captured playerBag state."
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Fix stale closure in garden.tsx startBucketGiftFlow(): use playerBagRef.current instead of playerBag from closure. Add playerBagRef = useRef(DEFAULT_BAG) and sync it in useEffect when playerBag changes.",
+    "The Tuesday morning kitchen prompt (TUESDAY_KITCHEN_GARDEN_PROMPT) and dormitory thought bubble could only be verified via code review since useFocusEffect skips on first mount - logic is correct but cannot be UI-tested via direct URL navigation."
+  ],
+  "critical_code_review_comments": [
+    "garden.tsx line 1019-1031: startBucketGiftFlow uses playerBag from stale closure - will write unlocked:false to bag on resume path",
+    "STAT_LABELS in player-stats.ts keys differ from STAT_DESCRIPTIONS keys (STAT_LABELS uses camelCase, STAT_DESCRIPTIONS uses UPPERCASE) - StatusModal uses STAT_DESCRIPTIONS correctly but slight inconsistency",
+    "garden.tsx is 1926 lines - exceeds 700-line guideline, should be split"
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A",
+    "frontend": "93%"
+  },
+  "seed_data_creation": "Injected AsyncStorage state directly via playwright evaluate for various Tuesday flow stages",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Tuesday flow mostly working. Main bug: stale closure in startBucketGiftFlow causes unlocked:false on resume. Normal forward flow (bag gift → inspect → harvest → bucket gift → well) all verified working. StatusModal, ActivityBar, crop stage assets all confirmed. Kitchen.tsx Tuesday morning prompt tested via code review only (requires in-app navigation, not direct URL).",
+  "rca_of_issue": "Bug: startBucketGiftFlow captures playerBag from React closure at time of useEffect execution. When called from useEffect (resume path), playerBag is still DEFAULT_BAG (unlocked:false) because setState calls are async and haven't re-rendered yet. Fix: add `const playerBagRef = useRef<PlayerBagData>(DEFAULT_BAG); useEffect(() => { playerBagRef.current = playerBag; }, [playerBag]);` and use `playerBagRef.current` inside startBucketGiftFlow."
+}

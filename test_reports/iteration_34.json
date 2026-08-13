@@ -1,0 +1,58 @@
+{
+  "summary": "Tested all 5 features from TAG-2-GARDEN PATCH: Shoulder Bag discard bug fix, Activity Bar PNG icons, StatusModal GP hint, Collect Wood/Stone floating reward, and TH-Protection discard guard. All passed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {
+        "component": "RNAnimated (garden.tsx actionFlashes)",
+        "issue": "useNativeDriver warning on web: 'Animated: useNativeDriver is not supported because the native animated module is missing. Falling back to JS-based animation.' Non-breaking - animation still works.",
+        "priority": "LOW"
+      }
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "PlayerBag.tsx: handleSlotPress() correctly opens discard dialog on EVERY short tap in garden context (setDiscardTarget) with no blocking flag - correct.",
+    "PlayerBag.tsx: handleDiscardNo() simply sets discardTarget=null with no lingering state - reopens cleanly on next tap.",
+    "PlayerBag.tsx: discardLocked = dayIdx <= 3 (MO=0, TU=1, WE=2, TH=3) triggers thought bubble 'We still need it.' instead of actual discard - correct TH-protection.",
+    "ActivityBar.tsx: ACTIVITY_ICONS map uses well.png, wood.png, stone.png, workout2.png - 0 SVG/Ionicons confirmed.",
+    "StatusModal.tsx: gpHint style shows '10 Growth Points needed.' in smaller text (fontSize:10, opacity:0.45) below Growth Points label - correct.",
+    "garden.tsx: triggerActionFlash(IMG.wood, '+1') renders 120x120 wood.png + green '#44CC44' +1 text; woodLocked.current prevents double-reward - correct.",
+    "garden.tsx: triggerActionFlash(IMG.stone, '+1') same pattern for stone - correct.",
+    "calcEffectiveStaminaCost(5, endurance=1) = Math.max(1, 5 - floor(1/5)) = 5 stamina per collect - correctly deducted."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A",
+    "frontend": "100%"
+  },
+  "seed_data_creation": "Injected Tuesday game state via localStorage for testing: player_bag with herbbag/wood items, activity bar unlocked, dayIdx=1",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All TAG-2 features verified working on web preview. Garden can be reached via AsyncStorage injection: set @game:day_index=1, @garden:activity_bar_unlocked=true, @game:player_bag with unlocked:true, @game:bag_inspected=true, @garden:has_seen_introduction=true.",
+  "test_results": {
+    "app_starts_no_error": "PASS - Main menu loaded, no red screen, no console errors",
+    "main_menu_background": "PASS - Tavern interior background visible (mainpage.webp)",
+    "garden_accessible": "PASS - Garden loaded with activity bar and bag icon",
+    "bag_opens": "PASS - Shoulder Bag modal opens on tap of bag1.png icon",
+    "discard_dialog_on_tap": "PASS - 'You can't unpack anything here. Do you want to throw it away?' dialog shown",
+    "no_button_closes_dialog": "PASS - Dialog dismissed on No, no residual state",
+    "discard_dialog_reopens_5x": "PASS - 5/5 taps opened discard dialog (no blocking flag)",
+    "activity_bar_png_icons": "PASS - well.png (129x138), wood.png (256x220), stone.png (257x242), workout2.png (257x158) confirmed, 0 SVG/Ionicons",
+    "status_modal_gp_hint": "PASS - '10 Growth Points needed.' visible as small hint text below Growth Points label",
+    "th_protection_yes": "PASS - dayIdx=1, pressing Yes shows 'We still need it.' thought bubble, item NOT discarded",
+    "collect_wood_stamina_deduction": "PASS - Stamina deducted on Collect Wood tap",
+    "collect_wood_flash_animation": "PASS - wood.png large flash image visible centered on screen",
+    "collect_wood_plus1_green": "PASS - Green '+1' text visible below wood image during flash",
+    "collect_stone_flash_animation": "PASS - stone.png large flash + green '+1' confirmed",
+    "wood_resource_persisted": "PASS - @shared:resources wood count incremented to 1",
+    "stone_resource_persisted": "PASS - @shared:resources stone count incremented to 1"
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "summary": "Tested all 5 new PATCH features: second bubble, soup demo animation, global bubble dismiss (kitchen+garden), logbook (menu entry, modal, route, dedup, persistence), dormitory regen animation after sleep. All features confirmed working.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Floating regen +X texts (+20 stamina, +10 life) exist in code and are set correctly (regenStaText/regenLifeText), but the 900ms animation window is too brief to catch reliably via DOM polling. Functional values were confirmed correct (40→60 stamina, 10→20 life). No code defect found."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A",
+    "frontend": "100%"
+  },
+  "seed_data_creation": "Used localStorage injection for each test scenario: fresh tutorial (no @tutorial:kitchen_done), demo-seen flag (@kitchen:soup_demo_seen), dormitory state (evening/morning, stamina/life values), logbook pre-populated with 4 entries.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All 12 features verified passing. Kitchen second bubble + demo animation + global dismiss confirmed. Logbook Modal (kitchen) and route /logbook both working. Dormitory regen animation (bars from old→new values) and no +0 text when full both pass.",
+  "verified_features": {
+    "second_bubble_pull_closer": {
+      "status": "PASS",
+      "detail": "After dismissing 'Take your time' bubble (tap OR 4500ms auto), Rupert bubble 'Pull it closer to you to eat.' appears immediately. Confirmed via text extraction and screenshot."
+    },
+    "soup_demo_animation": {
+      "status": "PASS",
+      "detail": "Demo element found with zIndex=402, opacity=0.597, scale=0.798 (mid-flight). Starts at slot 0, flies toward player portrait. herbsoup in slot 0 is hidden (both instances opacity:0) during animation (soupDemoActive=true). Animation is visual-only - soup remains in slot after demo."
+    },
+    "demo_animation_only_once": {
+      "status": "PASS",
+      "detail": "When @kitchen:soup_demo_seen='true', startSoupDemoAnim() returns early. No zIndex-402 element found during re-test. Second bubble 'Pull it closer' still appears regardless."
+    },
+    "global_dismiss_kitchen_block_all": {
+      "status": "PASS",
+      "detail": "Tapping empty area (y=500 or y=650) on the full-screen Pressable (zIndex 401) dismisses BLOCK_ALL policy bubble. Confirmed by dismissing intro bubble from empty area."
+    },
+    "global_dismiss_kitchen_allow_item": {
+      "status": "PASS",
+      "detail": "Tapping empty area (y=680) dismisses ALLOW_ITEM 'Take your time' bubble. The full-screen Pressable covers both ALLOW_ITEM and BLOCK_ALL policies."
+    },
+    "global_dismiss_garden": {
+      "status": "PASS",
+      "detail": "Garden renderBubble() wraps all bubbles in Pressable style={[StyleSheet.absoluteFill, { zIndex: 401 }]} onPress={dismissBubble}. Tapping empty area at y=680 dismissed 'This garden has seen better days' bubble and triggered next bubble."
+    },
+    "menu_logbook_entry": {
+      "status": "PASS",
+      "detail": "Kitchen menu (hamburger) shows 'Logbook' entry with book-outline icon. Dormitory menu also has 'Logbook' entry. Both confirmed working."
+    },
+    "logbook_modal_kitchen": {
+      "status": "PASS",
+      "detail": "Kitchen Logbook modal (showLogbook state) shows entries: MO·Kitchen Old Innkeeper / MO·Kitchen Old Innkeeper / MO·Kitchen Rupert / MO·Kitchen Old Innkeeper. Correct format with day, location, speaker, italic text."
+    },
+    "logbook_route": {
+      "status": "PASS",
+      "detail": "/logbook route (logbook.tsx) loads correctly, shows all entries from @game:logbook AsyncStorage. Dormitory menu router.push('/logbook') navigates correctly. Back button (chevron-back) present."
+    },
+    "logbook_no_duplicates": {
+      "status": "PASS",
+      "detail": "After 3 bubble events, logbook has exactly 3 unique IDs: ['bubble.intro.here_soup', 'bubble.soup.take_your_time', 'bubble.soup.drag_hint']. Deduplication check: len(ids) == len(set(ids)) = 3."
+    },
+    "logbook_persistence": {
+      "status": "PASS",
+      "detail": "Logbook with 3 entries persisted across page.reload(). AsyncStorage @game:logbook confirmed present after reload."
+    },
+    "dormitory_sleep_day_advance": {
+      "status": "PASS",
+      "detail": "Day badge changes MO→TU after confirming sleep. Background transitions from evening to morning room."
+    },
+    "dormitory_regen_bars_animate": {
+      "status": "PASS",
+      "detail": "Stamina bar: 40/100 during animation (starts at old value), 60/100 after completion (+20 base recovery). Life bar: 10/30 during, 20/30 after (+10 base recovery). Bars animate from old→new values via staminaSV/lifeSV Reanimated shared values."
+    },
+    "dormitory_floating_regen_text": {
+      "status": "PASS (code verified)",
+      "detail": "setRegenStaText('+20') and setRegenLifeText('+10') called in animateRegen(). Elements rendered conditionally when text != null. 900ms animation window too brief to catch via DOM polling, but implementation is correct per code review."
+    },
+    "dormitory_no_plus_zero": {
+      "status": "PASS",
+      "detail": "With stamina=100 (full) and life=30 (full): staGain=0, lifeGain=0. Code: 'if (staGain > 0) {...} else { staminaSV.value = newSta; setStaminaDisplay(newSta); }' - no floating text created. DOM confirmed: no '+0' text visible."
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "summary": "Iteration 18: SceneBackground integration testing for Kitchen, Garden, and Dormitory screens. All three screens render their respective background images correctly via SceneBackground component with no legacy Image layers. Evening/morning toggle in Dormitory works correctly after sleep.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A",
+    "frontend": "100%"
+  },
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All SceneBackground integrations verified. Kitchen renders kitchen1.png (naturalWidth 841), Garden renders garden1.png (naturalWidth 841), Dormitory renders room1_evening.png on entry and correctly switches to room1_morning.png after sleep action. All location bar PNG icons visible in all screens. No legacy CSS or duplicate Image layers found.",
+  "test_results": {
+    "kitchen_scene_background": "PASS - kitchen1.png loaded (naturalWidth: 841), no legacy Image layer, fills viewport with no cropping",
+    "kitchen_location_bar_icons": "PASS - gotokitchen, gotogarden, gotodining, gotodormitory, gotomail, goexplore all loaded",
+    "garden_scene_background": "PASS - garden1.png loaded (naturalWidth: 841), no legacy cover-zoom Image, fills viewport correctly",
+    "dormitory_evening": "PASS - room1_evening.png loaded on initial entry (naturalWidth: 841)",
+    "dormitory_morning_after_sleep": "PASS - room1_morning.png loaded after sleep (naturalWidth: 841), 'A new day begins.' text shown, day advanced from MO to TU",
+    "no_runtime_errors": "PASS - No JS errors, only deprecation warnings for shadow/textShadow props and pointerEvents"
+  }
+}

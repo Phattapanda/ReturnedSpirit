@@ -1,0 +1,43 @@
+{
+  "summary": "Tested the harvest stale-closure fix (playerBagRef.current) in garden.tsx. All 4 required features verified and passing.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "N/A",
+    "frontend": "100%"
+  },
+  "seed_data_creation": "Used localStorage injection: Tuesday state (dayIdx=1), playerBag={unlocked:true,slots:[null×6]}, bag_inspected=true, plot={readyToHarvest:true,status:'ready',baseYield:5}, inventory_bag_unlocked=true",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Harvest stale-closure fix fully verified. playerBagRef.current used correctly in both planAddToBag check and animation callback. All harvest flows pass.",
+  "verified_features": {
+    "fix1_no_free_space_error": {
+      "status": "PASS",
+      "detail": "No 'No free space available.' error shown. playerBagRef.current returns fresh bag state (6 null slots), planAddToBag correctly finds slot 0 empty and transfers herbbag. The stale closure fix works."
+    },
+    "fix2_harvest_animation": {
+      "status": "PASS",
+      "detail": "herbbag.png fly animation confirmed: DOM check at 200ms showed absoluteHighZIndexCount=1, flyingImageCount=1, flyingImgSrcs=['herbbag.png']. Screenshot at 400ms shows herbbag icon visibly flying from crop area toward bag icon."
+    },
+    "fix3_plot_cleared_after_animation": {
+      "status": "PASS",
+      "detail": "At 100ms after click: plot.readyToHarvest=true, plot.status='ready', bag.hasHerbbag=false (plot NOT yet cleared). After 1200ms: plot.status='empty', bag.hasHerbbag=true. Plot cleared AFTER animation as expected."
+    },
+    "fix4_double_harvest_prevention": {
+      "status": "PASS",
+      "detail": "3 rapid taps (50ms apart) only produced 1 herbbag in bag with quantity=1. harvestLocked ref prevents concurrent harvests."
+    }
+  }
+}
