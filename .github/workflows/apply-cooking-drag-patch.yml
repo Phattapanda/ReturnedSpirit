@@ -30,3 +30,5 @@ jobs:
           git add frontend/app/kitchen.tsx
           git commit -m "Fix cooking drag using per-item soup gesture pattern"
           git push origin HEAD:fix/cooking-drag-soup-pattern
+
+# trigger after workflow registration
