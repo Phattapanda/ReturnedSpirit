@@ -1,0 +1,32 @@
+name: Apply cooking drag patch
+
+on:
+  push:
+    branches:
+      - fix/cooking-drag-soup-pattern
+    paths:
+      - .github/workflows/apply-cooking-drag-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/cooking-drag-soup-pattern
+          fetch-depth: 0
+
+      - name: Apply patch
+        run: git apply --check .github/patches/cooking-drag-soup-pattern.patch && git apply .github/patches/cooking-drag-soup-pattern.patch
+
+      - name: Commit patched kitchen
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/app/kitchen.tsx
+          git commit -m "Fix cooking drag using per-item soup gesture pattern"
+          git push origin HEAD:fix/cooking-drag-soup-pattern
