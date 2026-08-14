@@ -1,0 +1,132 @@
+--- a/frontend/app/kitchen.tsx
++++ b/frontend/app/kitchen.tsx
+@@ -1290,19 +1290,24 @@
+   function updateCraftResultPreview() {
+     // Need current refs - use immediate state via functional setter
+     setCraftIngSlots(prevIng => {
+       setCraftTool(prevTool => {
+-        // Count herbs and bucketwater quantities across all ingredient slots
++        // Herb Soup is an exact recipe: 2 herbs + 1 bucket of water + 1 old pot.
++        // Any additional ingredient item makes the recipe invalid.
+         let herbsQty = 0;
+         let bucketwaterQty = 0;
++        let hasUnexpectedIngredient = false;
+         for (const slot of prevIng) {
+           if (!slot) continue;
+           if (slot.id === "herbs") herbsQty += slot.quantity;
+-          if (slot.id === "bucketwater") bucketwaterQty += slot.quantity;
++          else if (slot.id === "bucketwater") bucketwaterQty += slot.quantity;
++          else hasUnexpectedIngredient = true;
+         }
+-        // Valid only if exact 2:1 ratio: herbs === bucketwater * 2 (e.g. 2:1, 4:2)
+-        const toolMet = prevTool?.id === HERB_SOUP_RECIPE.tool;
+-        const ratioValid = bucketwaterQty >= 1 && herbsQty === bucketwaterQty * 2;
++        const toolMet = prevTool?.id === HERB_SOUP_RECIPE.tool && prevTool.quantity === 1;
++        const ingredientsMet = !hasUnexpectedIngredient && herbsQty === 2 && bucketwaterQty === 1;
+         setCraftResult(
+-          (toolMet && ratioValid)
+-            ? { id: "herbsoup", itemType: "herbsoup", name: "Herb Soup", quantity: herbsQty, attributes: ["edible"] }
++          (toolMet && ingredientsMet)
++            ? { id: "herbsoup", itemType: "herbsoup", name: "Herb Soup", quantity: 2, attributes: ["edible"] }
+             : null,
+         );
+         return prevTool;
+       });
+@@ -1313,15 +1318,30 @@
+   function handleCraft() {
+     if (craftingLocked.current) return;
+     if (!craftResult) return;
+     craftingLocked.current = true;
+-    audioManager.playSoundEffect('cookingpot', { maxDurationMs: 6000 });
+ 
+-    // Compute bucketwater count from craft slots to determine multiplier
++    // Defensive execution-time validation so a stale preview can never consume
++    // unrelated items or craft a recipe that is no longer exact.
++    let herbsQty = 0;
+     let bucketwaterCount = 0;
++    let hasUnexpectedIngredient = false;
+     for (const slot of craftIngSlots) {
+-      if (slot?.id === "bucketwater") bucketwaterCount += slot.quantity;
++      if (!slot) continue;
++      if (slot.id === "herbs") herbsQty += slot.quantity;
++      else if (slot.id === "bucketwater") bucketwaterCount += slot.quantity;
++      else hasUnexpectedIngredient = true;
++    }
++    const exactRecipe =
++      !hasUnexpectedIngredient &&
++      herbsQty === 2 &&
++      bucketwaterCount === 1 &&
++      craftTool?.id === HERB_SOUP_RECIPE.tool &&
++      craftTool.quantity === 1;
++    if (!exactRecipe) {
++      craftingLocked.current = false;
++      setCraftResult(null);
++      showPlayerBubble('"There is no recipe for that."');
++      return;
+     }
+-    if (bucketwaterCount < 1) bucketwaterCount = 1; // safety fallback
+-    const herbsoupQty = bucketwaterCount * 2;
++
++    audioManager.playSoundEffect('cookingpot', { maxDurationMs: 6000 });
+ 
+-    // Output: ONE stack of herbsoup + ONE stack of empty buckets (one per bucketwater used)
++    // Output: 2 herb soups + the emptied bucket. The old pot is a reusable tool and stays.
+     const outputs: BagItem[] = [
+-      { id: "herbsoup", itemType: "herbsoup", name: "Herb Soup", quantity: herbsoupQty, attributes: ["edible"] },
+-      { id: "bucket",   itemType: "bucket",   name: "Empty Bucket", quantity: bucketwaterCount, attributes: ["vessel"] },
++      { id: "herbsoup", itemType: "herbsoup", name: "Herb Soup", quantity: 2, attributes: ["edible"] },
++      { id: "bucket",   itemType: "bucket",   name: "Empty Bucket", quantity: 1, attributes: ["vessel"] },
+     ];
+     const newTable = tableItems.slice();
+     let placed = 0;
+@@ -1335,17 +1355,47 @@
+       showPlayerBubble('"No free space available."');
+       return;
+     }
+-    // Clear craft slots
+-    setCraftIngSlots([null, null, null]);
+-    setCraftTool(null);
++
++    // Consume only the actual recipe ingredients. Never blanket-clear the input
++    // slots: that could delete unrelated items if validation ever changes again.
++    let herbsToConsume = 2;
++    let waterToConsume = 1;
++    const newIng = craftIngSlots.map((slot): BagItem | null => {
++      if (!slot) return null;
++      if (slot.id === "herbs" && herbsToConsume > 0) {
++        const consumed = Math.min(slot.quantity, herbsToConsume);
++        herbsToConsume -= consumed;
++        const remaining = slot.quantity - consumed;
++        return remaining > 0 ? { ...slot, quantity: remaining } : null;
++      }
++      if (slot.id === "bucketwater" && waterToConsume > 0) {
++        const consumed = Math.min(slot.quantity, waterToConsume);
++        waterToConsume -= consumed;
++        const remaining = slot.quantity - consumed;
++        return remaining > 0 ? { ...slot, quantity: remaining } : null;
++      }
++      return slot;
++    });
++
++    if (herbsToConsume !== 0 || waterToConsume !== 0) {
++      craftingLocked.current = false;
++      showPlayerBubble('"There is no recipe for that."');
++      return;
++    }
++
++    // Keep refs synchronous with the state update, just like the repaired drag system.
++    tableItemsRef.current = newTable;
++    craftIngSlotsRef.current = newIng;
++    craftToolRef.current = craftTool;
++
++    setCraftIngSlots(newIng);
+     setCraftResult(null);
+     setTableItems(newTable);
+     AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(newTable)).catch(() => {});
+-    AsyncStorage.setItem(SK.CRAFT_INGREDIENTS, JSON.stringify([null, null, null])).catch(() => {});
+-    AsyncStorage.setItem(SK.CRAFT_TOOL_SLOT, JSON.stringify(null)).catch(() => {});
++    AsyncStorage.setItem(SK.CRAFT_INGREDIENTS, JSON.stringify(newIng)).catch(() => {});
++    AsyncStorage.setItem(SK.CRAFT_TOOL_SLOT, JSON.stringify(craftTool)).catch(() => {});
+     AsyncStorage.setItem(SK.COOKING_STEP, "3").catch(() => {});
+ 
+     setTutState("COOKING_CRAFT_DONE");
