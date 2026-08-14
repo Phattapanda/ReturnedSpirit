@@ -1,0 +1,527 @@
+--- a/frontend/app/kitchen.tsx
++++ b/frontend/app/kitchen.tsx
+@@ -1,4 +1,4 @@
+-import React, { useState, useRef, useEffect, useMemo } from "react";
++import React, { useState, useRef, useEffect } from "react";
+ import {
+   View,
+   Text,
+@@ -308,24 +308,12 @@
+   // Refs to pass table state safely into Reanimated worklet callbacks
+   const cookingFlyTargetSlot = useRef<number>(-1);
+   const cookingPendingTable  = useRef<(BagItem | null)[]>([]);
+-  // Cooking drag-and-drop (like Day 1 soupGesture)
++  // Cooking drag-and-drop: each occupied input slot owns its GestureDetector,
++  // mirroring the reliable Day-1 soup pattern. The source slot is therefore known
++  // before the gesture starts; no global hit-test/source discovery is needed.
+   const cookingDraggedSlotRef = useRef<number>(-1);
+-  // Synchronous JS-thread drag-lifecycle flag (gesture runs .runOnJS(true), so a plain
+-  // ref is the reliable control state — SharedValue is only used for visual animation).
+-  const cookingIsDraggingRef = useRef(false);
+-  // Tracks source slot for UI hiding during drag (triggers re-render)
+   const [cookingDragActiveSlot, setCookingDragActiveSlot] = useState<number>(-1);
+-  // Tracks dragged item id for valid-target highlighting (ref = always latest, no stale closure)
+   const cookingDragItemIdRef = useRef<string>("");
+-  // Touch-start position used by the stable table-pan gesture to find the source slot
+-  const cookingDragStartPos = useRef({ x: 0, y: 0 });
+-  // Callback ref: set on every render so the stable gesture always has fresh closures
+-  const cookingGestureCBs = useRef({
+-    onStart : (_si: number, _id: string) => {},
+-    onHover : (_x: number, _y: number) => {},
+-    onDrop  : (_x: number, _y: number) => {},
+-    onCancel: () => {},
+-  });
+ 
+   // ── Tutorial state
+   const [ts, setTs] = useState<TState>("LOADING");
+@@ -544,86 +532,8 @@
+     tableSlots: (LRect | null)[]; craftSlots: (LRect | null)[];
+   }>({ player: null, rupert: null, tableSlots: Array(12).fill(null), craftSlots: Array(4).fill(null) });
+ 
+-  // ── Stable component-level cooking drag gesture (mirrors Day 1 panGesture architecture) ──
+-  // Created ONCE with useMemo – never recreated on re-renders, so RNGH never loses the active
+-  // gesture when React re-renders from state updates (hoveredSlot, cookingDragActiveSlot, etc.)
+-  // All state access goes through the `cookingGestureCBs` callback-ref, which is refreshed each render.
+-  const cookingTablePanGesture = useMemo(
+-    () => Gesture.Pan()
+-      .runOnJS(true)
+-      .minDistance(8)
+-      .onStart((e) => {
+-        // Store start position so onUpdate can find the source slot
+-        cookingDragStartPos.current = { x: e.absoluteX, y: e.absoluteY };
+-        cookingIsDraggingRef.current = false;
+-      })
+-      .onUpdate((e) => {
+-        if (!cookingIsDraggingRef.current) {
+-          // Identify draggable item at touch-start position
+-          if (tsRef.current !== "COOKING_CRAFT_READY") return;
+-          const { x: sx, y: sy } = cookingDragStartPos.current;
+-          const lts = layouts.current.tableSlots;
+-          const lcs = layouts.current.craftSlots;
+-          let foundSlot = -1;
+-          let foundSlotL: LRect | null | undefined = null;
+-          // 1) Table slots (0-11)
+-          for (let i = 0; i < lts.length; i++) {
+-            if (lts[i] && inRect(sx, sy, lts[i]!)) { foundSlot = i; foundSlotL = lts[i]; break; }
+-          }
+-          // 2) Craft ingredient slots (12-14)
+-          if (foundSlot < 0) {
+-            for (let i = 0; i < 3; i++) {
+-              if (lcs[i] && inRect(sx, sy, lcs[i]!)) { foundSlot = 12 + i; foundSlotL = lcs[i]; break; }
+-            }
+-          }
+-          // 3) Tool slot (15)
+-          if (foundSlot < 0 && lcs[3] && inRect(sx, sy, lcs[3]!)) { foundSlot = 15; foundSlotL = lcs[3]; }
+-          if (foundSlot < 0) return;
+-          // Read item from the matching slot source
+-          let item: BagItem | null | undefined;
+-          if (foundSlot <= 11)       item = tableItemsRef.current[foundSlot];
+-          else if (foundSlot <= 14)  item = craftIngSlotsRef.current[foundSlot - 12];
+-          else if (foundSlot === 15) item = craftToolRef.current;
+-          if (!item) return;
+-          // Compute slot center so drag feels anchored (no jump on pickup)
+-          const slotL = foundSlotL;
+-          const cx = slotL ? (slotL.cx ?? slotL.x + slotL.w / 2) : sx;
+-          const cy = slotL ? (slotL.cy ?? slotL.y + slotL.h / 2) : sy;
+-          dragOffsetX.value = cx - sx;
+-          dragOffsetY.value = cy - sy;
+-          soupX.value = cx;
+-          soupY.value = cy;
+-          soupVis.value = withTiming(1, { duration: 80 });
+-          soupScale.value = 1;
+-          cookingIsDraggingRef.current = true;
+-          cookingGestureCBs.current.onStart(foundSlot, item.id);
+-        }
+-        if (cookingIsDraggingRef.current) {
+-          const ix = e.absoluteX + dragOffsetX.value;
+-          const iy = e.absoluteY + dragOffsetY.value;
+-          soupX.value = ix;
+-          soupY.value = iy;
+-          cookingGestureCBs.current.onHover(ix, iy);
+-        }
+-      })
+-      .onEnd((e) => {
+-        if (cookingIsDraggingRef.current) {
+-          cookingGestureCBs.current.onDrop(
+-            e.absoluteX + dragOffsetX.value,
+-            e.absoluteY + dragOffsetY.value,
+-          );
+-        }
+-        cookingIsDraggingRef.current = false;
+-      })
+-      .onFinalize(() => {
+-        if (cookingIsDraggingRef.current) {
+-          cookingIsDraggingRef.current = false;
+-          soupVis.value = withTiming(0, { duration: 150 });
+-          cookingGestureCBs.current.onCancel();
+-        }
+-      }),
+-    [], // eslint-disable-line react-hooks/exhaustive-deps
+-  );
++  // Cooking item gestures are created per occupied slot further below, next to
++  // the existing Day-1 soup gesture helpers.
+ 
+   // ── Animated styles
+   const staminaFillStyle = useAnimatedStyle(() => ({
+@@ -647,8 +557,6 @@
+     transform: [{ scale: gardenPulse.value }],
+   }));
+ 
+-  // (layout measurement refs moved before cookingTablePanGesture useMemo to avoid TDZ)
+-
+   // ─────────────────────────────────────────────────────────────────────────
+   // Sync tsRef with state
+   // ─────────────────────────────────────────────────────────────────────────
+@@ -1796,24 +1704,20 @@
+     });
+   }
+ 
+-  /** Update hovered slot during cooking drag with item-type validation. */
++  /** Update hovered slot during cooking drag. Every Table/Craft/Tool input is valid. */
+   function updateCookingHoveredSlot(itemX: number, itemY: number) {
+     const srcSlot = cookingDraggedSlotRef.current;
+     const lts = layouts.current.tableSlots;
+     const lcs = layouts.current.craftSlots;
+     let next: number | null = null;
+ 
+-    // Check craft ingredient slots (skip source slot)
+     for (let i = 0; i < 3; i++) {
+       if (12 + i === srcSlot) continue;
+-      if (!lcs[i] || !inRect(itemX, itemY, lcs[i]!)) continue;
+-      next = 12 + i; break;
++      if (lcs[i] && inRect(itemX, itemY, lcs[i]!)) { next = 12 + i; break; }
+     }
+-    // Check craft tool slot (skip if source)
+     if (next === null && srcSlot !== 15 && lcs[3] && inRect(itemX, itemY, lcs[3]!)) {
+       next = 15;
+     }
+-    // Check table slots (valid for any item, but not the source slot)
+     if (next === null) {
+       for (let i = 0; i < lts.length; i++) {
+         if (i === srcSlot) continue;
+@@ -1826,80 +1730,158 @@
+     }
+   }
+ 
+-  /** Called from worklet when user starts dragging a cooking item. */
+-  function onCookingDragStarted(slotIdx: number, itemId: string) {
++  /** Begin a cooking drag whose source slot is already known by its GestureDetector. */
++  function onCookingDragStarted(slotIdx: number, itemId: string, absX: number, absY: number) {
+     if (tsRef.current !== "COOKING_CRAFT_READY") return;
+     cookingDraggedSlotRef.current = slotIdx;
+     cookingDragItemIdRef.current = itemId;
+     setCookingDragActiveSlot(slotIdx);
+     setFlyingItemId(itemId);
+     setSoupDragging(true);
+-    // Get layout from correct slot group (table, craft ingredient, or tool)
+-    let slotL: LRect | null | undefined;
+-    if (slotIdx <= 11)       slotL = layouts.current.tableSlots[slotIdx];
+-    else if (slotIdx <= 14)  slotL = layouts.current.craftSlots[slotIdx - 12];
+-    else if (slotIdx === 15) slotL = layouts.current.craftSlots[3];
+-    if (slotL) { soupX.value = slotL.cx ?? slotL.x + slotL.w / 2; soupY.value = slotL.cy ?? slotL.y + slotL.h / 2; }
++
++    const slotRef = slotIdx <= 11
++      ? tableSlotRefs.current[slotIdx]
++      : craftSlotRefs.current[slotIdx === 15 ? 3 : slotIdx - 12];
++
++    const applyOffset = (cx: number, cy: number) => {
++      dragOffsetX.value = cx - absX;
++      dragOffsetY.value = cy - absY;
++      soupX.value = cx;
++      soupY.value = cy;
++    };
++
++    if (slotRef) {
++      slotRef.measureInWindow((x, y, w, h) => {
++        if (w > 0) soupFlySize.value = w * 0.80;
++        const rect = { x, y, w, h, cx: x + w / 2, cy: y + h / 2 };
++        if (slotIdx <= 11) layouts.current.tableSlots[slotIdx] = rect;
++        else layouts.current.craftSlots[slotIdx === 15 ? 3 : slotIdx - 12] = rect;
++        applyOffset(rect.cx!, rect.cy!);
++      });
++      return;
++    }
++
++    const cached = slotIdx <= 11
++      ? layouts.current.tableSlots[slotIdx]
++      : layouts.current.craftSlots[slotIdx === 15 ? 3 : slotIdx - 12];
++    applyOffset(
++      cached ? (cached.cx ?? cached.x + cached.w / 2) : absX,
++      cached ? (cached.cy ?? cached.y + cached.h / 2) : absY,
++    );
+   }
+ 
+-  /** Called from worklet when user releases a cooking item drag. */
+-  function handleCookingItemDrop(absX: number, absY: number) {
++  function onCookingDragCancelled() {
++    cookingDraggedSlotRef.current = -1;
++    cookingDragItemIdRef.current = "";
++    setSoupDragging(false);
++    setCookingDragActiveSlot(-1);
++    hoveredSlotRef.current = null;
++    setHoveredSlot(null);
++  }
++
++  /**
++   * Per-item cooking pan gesture, intentionally mirroring the reliable Day-1 soup gesture:
++   * movement/animation stays on the UI thread; React state and slot logic cross via runOnJS.
++   */
++  function createCookingItemGesture(sourceSlot: number, itemId: string) {
++    return Gesture.Pan()
++      .minDistance(10)
++      .onStart((e) => {
++        cancelAnimation(soupX);
++        cancelAnimation(soupY);
++        cancelAnimation(soupVis);
++        cancelAnimation(soupScale);
++        soupVis.value = 1;
++        soupScale.value = 1;
++        runOnJS(onCookingDragStarted)(sourceSlot, itemId, e.absoluteX, e.absoluteY);
++      })
++      .onUpdate((e) => {
++        const itemX = e.absoluteX + dragOffsetX.value;
++        const itemY = e.absoluteY + dragOffsetY.value;
++        soupX.value = itemX;
++        soupY.value = itemY;
++        runOnJS(updateCookingHoveredSlot)(itemX, itemY);
++      })
++      .onEnd((e) => {
++        runOnJS(handleCookingItemDrop)(
++          sourceSlot,
++          e.absoluteX + dragOffsetX.value,
++          e.absoluteY + dragOffsetY.value,
++        );
++      })
++      .onFinalize((_, success) => {
++        if (!success) {
++          soupVis.value = withTiming(0, { duration: 100 });
++          runOnJS(onCookingDragCancelled)();
++        }
++      });
++  }
++
++  /** Drop a cooking item. Source is supplied by the item's own GestureDetector. */
++  function handleCookingItemDrop(srcSlot: number, absX: number, absY: number) {
++    cookingDraggedSlotRef.current = -1;
++    cookingDragItemIdRef.current = "";
+     setSoupDragging(false);
+     setCookingDragActiveSlot(-1);
+     setHoveredSlot(null);
+     hoveredSlotRef.current = null;
+-    soupVis.value = withTiming(0, { duration: 150 });
++    soupVis.value = withTiming(0, { duration: 100 });
+     if (tsRef.current !== "COOKING_CRAFT_READY") return;
+-    const srcSlot = cookingDraggedSlotRef.current;
+-    cookingDraggedSlotRef.current = -1;
+-    if (srcSlot < 0) return;
+ 
+     const lcs = layouts.current.craftSlots;
+     const lts = layouts.current.tableSlots;
+-
+-    // Determine destination slot from drop position
+     let destSlot = -1;
+-    for (let i = 0; i < 3; i++) {                              // craft ing 12-14
++
++    for (let i = 0; i < 3; i++) {
+       if (lcs[i] && inRect(absX, absY, lcs[i]!)) { destSlot = 12 + i; break; }
+     }
+-    if (destSlot < 0 && lcs[3] && inRect(absX, absY, lcs[3]!)) destSlot = 15; // tool
++    if (destSlot < 0 && lcs[3] && inRect(absX, absY, lcs[3]!)) destSlot = 15;
+     if (destSlot < 0) {
+-      for (let i = 0; i < lts.length; i++) {                   // table 0-11
++      for (let i = 0; i < lts.length; i++) {
+         if (lts[i] && inRect(absX, absY, lts[i]!)) { destSlot = i; break; }
+       }
+     }
+-    if (destSlot < 0 || destSlot === srcSlot) return; // nowhere valid / same slot
+ 
+-    // Read current items – helper
++    // Invalid/same-slot drop: nothing in data moves; source image simply reappears.
++    if (destSlot < 0 || destSlot === srcSlot) return;
++
++    // Read from refs so rapid repeated drags always see the latest slot contents.
++    const curTable = tableItemsRef.current;
++    const curIng = craftIngSlotsRef.current;
++    const curTool = craftToolRef.current;
+     const getItem = (slot: number): BagItem | null => {
+-      if (slot <= 11)      return tableItems[slot];
+-      if (slot <= 14)      return craftIngSlots[slot - 12];
+-      if (slot === 15)     return craftTool;
++      if (slot <= 11) return curTable[slot];
++      if (slot <= 14) return curIng[slot - 12];
++      if (slot === 15) return curTool;
+       return null;
+     };
++
+     const srcItem = getItem(srcSlot);
+     if (!srcItem) return;
+-    const destItem = getItem(destSlot); // null = empty slot
++    const destItem = getItem(destSlot);
+ 
+-    // Perform atomic swap: srcSlot ← destItem, destSlot ← srcItem
+-    const newTable = tableItems.slice();
+-    const newIng   = craftIngSlots.slice() as (BagItem | null)[];
+-    let   newTool  = craftTool;
+-
+-    if (srcSlot <= 11)       newTable[srcSlot]       = destItem;
+-    else if (srcSlot <= 14)  newIng[srcSlot - 12]    = destItem;
+-    else if (srcSlot === 15) newTool                 = destItem;
+-
+-    if (destSlot <= 11)       newTable[destSlot]      = srcItem;
+-    else if (destSlot <= 14)  newIng[destSlot - 12]   = srcItem;
+-    else if (destSlot === 15) newTool                 = srcItem;
++    const newTable = curTable.slice();
++    const newIng = curIng.slice() as (BagItem | null)[];
++    let newTool = curTool;
++
++    if (srcSlot <= 11) newTable[srcSlot] = destItem;
++    else if (srcSlot <= 14) newIng[srcSlot - 12] = destItem;
++    else if (srcSlot === 15) newTool = destItem;
++
++    if (destSlot <= 11) newTable[destSlot] = srcItem;
++    else if (destSlot <= 14) newIng[destSlot - 12] = srcItem;
++    else if (destSlot === 15) newTool = srcItem;
++
++    // Keep refs in sync immediately, before React effects run, so the next drag is reliable.
++    tableItemsRef.current = newTable;
++    craftIngSlotsRef.current = newIng;
++    craftToolRef.current = newTool;
+ 
+-    // Commit state + storage
+     setTableItems(newTable);
+-    AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(newTable)).catch(() => {});
+     setCraftIngSlots(newIng);
+-    AsyncStorage.setItem(SK.CRAFT_INGREDIENTS, JSON.stringify(newIng)).catch(() => {});
+     setCraftTool(newTool);
++    AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(newTable)).catch(() => {});
++    AsyncStorage.setItem(SK.CRAFT_INGREDIENTS, JSON.stringify(newIng)).catch(() => {});
+     AsyncStorage.setItem(SK.CRAFT_TOOL_SLOT, JSON.stringify(newTool)).catch(() => {});
+ 
+     audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
+@@ -2280,7 +2262,7 @@
+   // Render helpers
+   // ─────────────────────────────────────────────────────────────────────────
+   const tutActive = ts !== "IDLE" && ts !== "LOADING" && ts !== "TUTORIAL_DONE";
+-  const tutInteractable = ts === "SOUP_ON_TABLE" || ts === "TOOLTIP_VISIBLE" || ts === "SOUP_AVAILABLE" || ts === "COOKING_SHARE_EAT";
++  const tutInteractable = ts === "SOUP_ON_TABLE" || ts === "TOOLTIP_VISIBLE" || ts === "SOUP_AVAILABLE" || ts === "COOKING_CRAFT_READY" || ts === "COOKING_SHARE_EAT";
+   const showDlgOverlay = dlgActive || ts === "QUESTION_CHOICE" || ts === "NAME_INPUT";
+ 
+   // Current dialog line
+@@ -2330,22 +2312,25 @@
+     const isSelectedHerbs   = selectedHerbsSlot === slotIdx && item.id === "herbs";
+     const isCookingHerbbag  = inCookingPhase && item.id === "herbbag";
+ 
+-    // ── Craft-phase draggable items — ALL table items draggable in COOKING_CRAFT_READY ──
+-    // NO per-slot GestureDetector – the stable cookingTablePanGesture (at table+craft level)
+-    // handles all drags.  Only render the item image; source disappears while dragging.
++    // ── Craft-phase draggable items ─────────────────────────────────────────
++    // Each occupied slot owns its GestureDetector, just like the Day-1 soup.
++    // The wrapper remains mounted while the image is hidden during drag.
+     const isDraggable = ts === "COOKING_CRAFT_READY";
+ 
+     if (isDraggable) {
+       const isBeingDragged = soupDragging && cookingDragActiveSlot === slotIdx;
++      const gesture = createCookingItemGesture(slotIdx, item.id);
+       return (
+-        <View style={{ width: "100%", height: "100%", alignItems: "center", justifyContent: "center" }}>
+-          {!isBeingDragged && imgSrc && (
+-            <Image source={imgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
+-          )}
+-          {!isBeingDragged && item.quantity > 1 && (
+-            <Text style={styles.tableItemQty}>{item.quantity}</Text>
+-          )}
+-        </View>
++        <GestureDetector gesture={gesture}>
++          <View style={styles.soupSlotTouch}>
++            {!isBeingDragged && imgSrc && (
++              <Image source={imgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
++            )}
++            {!isBeingDragged && item.quantity > 1 && (
++              <Text style={styles.tableItemQty}>{item.quantity}</Text>
++            )}
++          </View>
++        </GestureDetector>
+       );
+     }
+ 
+@@ -2441,18 +2426,7 @@
+       </Pressable>
+     );
+   }
+-  // ── Refresh cooking gesture callbacks each render (fresh closures over current state) ──
+-  cookingGestureCBs.current = {
+-    onStart : onCookingDragStarted,
+-    onHover : updateCookingHoveredSlot,
+-    onDrop  : handleCookingItemDrop,
+-    onCancel: () => {
+-      setSoupDragging(false);
+-      setCookingDragActiveSlot(-1);
+-      setHoveredSlot(null);
+-      hoveredSlotRef.current = null;
+-    },
+-  };
++
+ 
+   return (
+     <View style={styles.root}>
+@@ -2558,9 +2532,8 @@
+           />
+         </View>
+ 
+-        {/* Craft grid + Table grid — cooking pan gesture wraps BOTH during COOKING_CRAFT_READY
+-             so items can be dragged from table ↔ craft ↔ tool in any direction.
+-             Outside COOKING_CRAFT_READY the soup-drag (panGesture) must not be interfered. */}
++        {/* Craft grid + Table grid. During COOKING_CRAFT_READY each occupied input slot
++             owns its own Pan gesture, matching the reliable Day-1 soup architecture. */}
+         {(() => {
+           const craftGrid = (
+             <View style={styles.gridContainer}>
+@@ -2579,38 +2552,54 @@
+                         hoveredSlot === (12 + i) && soupDragging && styles.slotHovered,
+                       ]}
+                     >
+-                      {craftItem && !craftBeingDragged ? (
+-                        <Pressable
+-                          style={styles.soupSlotTouch}
+-                          onPress={() => returnCraftIngToTable(i)}
+-                        >
+-                          <View style={{ width: "100%", height: "100%", alignItems: "center", justifyContent: "center" }}>
+-                            {craftImgSrc && <Image source={craftImgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />}
+-                            {craftItem.quantity > 1 && <Text style={styles.tableItemQty}>{craftItem.quantity}</Text>}
+-                          </View>
+-                        </Pressable>
++                      {craftItem ? (
++                        ts === "COOKING_CRAFT_READY" ? (
++                          <GestureDetector gesture={createCookingItemGesture(12 + i, craftItem.id)}>
++                            <View style={styles.soupSlotTouch}>
++                              {!craftBeingDragged && craftImgSrc && (
++                                <Image source={craftImgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
++                              )}
++                              {!craftBeingDragged && craftItem.quantity > 1 && (
++                                <Text style={styles.tableItemQty}>{craftItem.quantity}</Text>
++                              )}
++                            </View>
++                          </GestureDetector>
++                        ) : (
++                          <Pressable style={styles.soupSlotTouch} onPress={() => returnCraftIngToTable(i)}>
++                            <View style={{ width: "100%", height: "100%", alignItems: "center", justifyContent: "center" }}>
++                              {craftImgSrc && <Image source={craftImgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />}
++                              {craftItem.quantity > 1 && <Text style={styles.tableItemQty}>{craftItem.quantity}</Text>}
++                            </View>
++                          </Pressable>
++                        )
+                       ) : (
+-                        !craftBeingDragged ? renderSoupInSlot(12 + i) : null
++                        renderSoupInSlot(12 + i)
+                       )}
+                     </View>
+                   );
+                 })}
+                 {/* Tool slot */}
+-                <Pressable
++                <View
+                   ref={(r) => { craftSlotRefs.current[3] = r; }}
+                   style={[styles.craftSlot, styles.craftSlotTool, hoveredSlot === 15 && soupDragging && styles.slotHovered]}
+-                  onPress={() => craftTool && returnCraftToolToTable()}
+-                  activeOpacity={0.8}
+                 >
+                   {!craftTool && <Ionicons name="hand-right-outline" size={26} color="#8B6914" />}
+-                  {craftTool && !(soupDragging && cookingDragActiveSlot === 15) && (
+-                    <View style={{ width: "100%", height: "100%", alignItems: "center", justifyContent: "center" }}>
++                  {craftTool && ts === "COOKING_CRAFT_READY" ? (
++                    <GestureDetector gesture={createCookingItemGesture(15, craftTool.id)}>
++                      <View style={styles.soupSlotTouch}>
++                        {!(soupDragging && cookingDragActiveSlot === 15) && ITEM_IMAGES[craftTool.id] && (
++                          <Image source={ITEM_IMAGES[craftTool.id]} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
++                        )}
++                      </View>
++                    </GestureDetector>
++                  ) : craftTool ? (
++                    <Pressable style={styles.soupSlotTouch} onPress={returnCraftToolToTable}>
+                       {ITEM_IMAGES[craftTool.id] && (
+-                        <Image source={ITEM_IMAGES[craftTool.id]} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
++                        <Image source={ITEM_IMAGES[craftTool.id]} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
+                       )}
+-                    </View>
+-                  )}
+-                </Pressable>
++                    </Pressable>
++                  ) : null}
++                </View>
+                 {/* Result / Recipe slot — output only, never a drag target */}
+                 <TouchableOpacity
+                   style={[styles.craftSlot, styles.craftSlotRecipe, craftResult ? { borderColor: "#5A9F5A", borderWidth: 1.5 } : {}]}
+@@ -2664,13 +2653,6 @@
+               ))}
+             </View>
+           );
+-          if (ts === "COOKING_CRAFT_READY") {
+-            return (
+-              <GestureDetector gesture={cookingTablePanGesture}>
+-                <View>{craftGrid}{tableGrid}</View>
+-              </GestureDetector>
+-            );
+-          }
+           return <View>{craftGrid}{tableGrid}</View>;
+         })()}
+       </ScrollView>
