@@ -1,0 +1,35 @@
+name: Apply cooking recipe consumption patch
+
+on:
+  push:
+    branches:
+      - fix/cooking-recipe-consumption
+    paths:
+      - .github/workflows/apply-cooking-recipe-consumption.yml
+      - .github/patches/cooking-recipe-consumption.patch
+
+permissions:
+  contents: write
+
+jobs:
+  apply-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/cooking-recipe-consumption
+          fetch-depth: 0
+
+      - name: Apply patch
+        run: |
+          git apply --check .github/patches/cooking-recipe-consumption.patch
+          git apply .github/patches/cooking-recipe-consumption.patch
+
+      - name: Commit patched kitchen
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/app/kitchen.tsx
+          git commit -m "Fix exact cooking recipe and preserve reusable tool"
+          git push origin HEAD:fix/cooking-recipe-consumption
