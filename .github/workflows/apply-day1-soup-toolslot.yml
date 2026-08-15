@@ -1,0 +1,42 @@
+name: Apply Day-1 soup Tool-slot fix
+
+on:
+  push:
+    branches:
+      - fix/day1-soup-toolslot-drop
+
+permissions:
+  contents: write
+
+jobs:
+  apply-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/day1-soup-toolslot-drop
+          fetch-depth: 0
+
+      - name: Apply Day-1 soup Tool-slot patch
+        run: python .github/scripts/patch-day1-soup-toolslot.py
+
+      - name: Verify intended code is present
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('frontend/app/kitchen.tsx').read_text()
+          assert 'Day-1 Herb Soup may use ingredient slots 0-2, but never the Tool slot' in text
+          assert 'Day-1 Herb Soup may be moved into ingredient slots 0-2 only.' in text
+          assert text.count('for (let i = 0; i < 3; i++)') >= 4
+          print('verification passed')
+          PY
+
+      - name: Commit patched kitchen
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/app/kitchen.tsx
+          git diff --cached --quiet && exit 0
+          git commit -m "Prevent Day-1 soup from entering Tool slot"
+          git push
