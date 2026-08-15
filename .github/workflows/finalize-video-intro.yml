@@ -1,0 +1,57 @@
+name: Finalize video intro
+
+on:
+  push:
+    branches:
+      - feat/video-intro
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/video-intro
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Switch intro to bundled MP4
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('frontend/app/intro.tsx')
+          s = p.read_text()
+          old = '''// The MP4 will live in frontend/assets/video/intro.mp4.
+// While this feature branch is being tested, use its raw GitHub URL so the
+// screen still bundles before the binary file is added to the repository.
+const INTRO_VIDEO = {
+  uri: "https://raw.githubusercontent.com/Phattapanda/ReturnedSpirit/feat/video-intro/frontend/assets/video/intro.mp4",
+};'''
+          new = '''// Bundled portrait cinematic used for new-game intro playback.
+const INTRO_VIDEO = require("../assets/intro.mp4");'''
+          if old not in s:
+              raise SystemExit('Expected temporary INTRO_VIDEO block not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Validate intro
+        working-directory: frontend
+        run: |
+          npx eslint app/intro.tsx
+          npx tsc --noEmit
+      - name: Commit final intro source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/app/intro.tsx
+          git diff --cached --quiet && exit 0
+          git commit -m "Use bundled intro video asset"
+          git push
