@@ -1,0 +1,67 @@
+name: Patch player thought bubble
+
+on:
+  push:
+    branches:
+      - fix/tuesday-trigger-and-tutorial-save-lock
+    paths:
+      - .github/workflows/patch-player-thought-bubble.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/tuesday-trigger-and-tutorial-save-lock
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Apply player thought bubble patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('frontend/app/kitchen.tsx')
+          s = path.read_text()
+
+          old_render = '''      {/* ── Player thought bubble */}\n      {playerBubble && (\n        <View style={[StyleSheet.absoluteFill, { zIndex: 410 }]} pointerEvents="none">\n          <View style={{ position: "absolute", top: headerH + 130, left: 10, right: Math.max(10, W - Math.min(W * 0.75, 420) - 10) }}>\n            <View style={styles.playerBubbleArrow} />\n            <View style={styles.playerBubbleCard}>\n              <Text style={styles.playerBubbleText}>{playerBubble}</Text>\n            </View>\n          </View>\n        </View>\n      )}\n'''
+
+          new_render = '''      {/* ── Player thought bubble */}\n      {playerBubble && (() => {\n        const playerL = layouts.current.player;\n        const topPos = playerL\n          ? playerL.y + playerL.h + 8\n          : (headerH > 0 ? headerH + 128 : insets.top + 190);\n        return (\n          <View style={[StyleSheet.absoluteFill, { zIndex: 410 }]} pointerEvents="none">\n            <View style={{ position: "absolute", top: topPos, left: 10, right: Math.max(10, W - Math.min(W * 0.75, 420) - 10) }}>\n              <View style={styles.playerBubbleArrow} />\n              <View style={styles.playerBubbleCard}>\n                <Text style={styles.playerBubbleText}>{playerBubble}</Text>\n              </View>\n            </View>\n          </View>\n        );\n      })()}\n'''
+
+          if s.count(old_render) != 1:
+              raise SystemExit(f'Expected one player thought bubble render block, found {s.count(old_render)}')
+          s = s.replace(old_render, new_render, 1)
+
+          old_styles = '''  // Player thought bubble\n  playerBubbleArrow: {\n    width: 0, height: 0,\n    borderLeftWidth: 8, borderRightWidth: 8, borderBottomWidth: 10,\n    borderLeftColor: "transparent", borderRightColor: "transparent",\n    borderBottomColor: "rgba(30,18,5,0.9)",\n    marginLeft: 16,\n  },\n  playerBubbleCard: {\n    backgroundColor: "rgba(30,18,5,0.9)",\n    borderRadius: 10,\n    borderWidth: 1,\n    borderColor: "rgba(196,148,58,0.4)",\n    paddingHorizontal: 12,\n    paddingVertical: 8,\n    alignSelf: "flex-start" as const,\n    maxWidth: "100%",\n  },\n  playerBubbleText: {\n    color: "#F0E8D5",\n    fontSize: 13,\n    fontStyle: "italic",\n    lineHeight: 18,\n  },\n'''
+
+          new_styles = '''  // Player thought bubble — match the standard light player-thought style used in Garden.\n  playerBubbleArrow: {\n    width: 0, height: 0,\n    borderLeftWidth: 8, borderRightWidth: 8, borderBottomWidth: 10,\n    borderLeftColor: "transparent", borderRightColor: "transparent",\n    borderBottomColor: "rgba(240,230,200,0.95)",\n    marginLeft: 16,\n  },\n  playerBubbleCard: {\n    backgroundColor: "rgba(240,230,200,0.95)",\n    borderRadius: 12,\n    borderWidth: 1.5,\n    borderColor: "rgba(196,148,58,0.50)",\n    paddingHorizontal: 14,\n    paddingVertical: 10,\n    alignSelf: "flex-start" as const,\n    maxWidth: "100%",\n    shadowColor: "#000",\n    shadowOffset: { width: 0, height: 3 },\n    shadowOpacity: 0.4,\n    shadowRadius: 7,\n    elevation: 14,\n  },\n  playerBubbleText: {\n    color: "#2A1000",\n    fontSize: 13,\n    fontStyle: "italic",\n    lineHeight: 18,\n  },\n'''
+
+          if s.count(old_styles) != 1:
+              raise SystemExit(f'Expected one player thought bubble style block, found {s.count(old_styles)}')
+          s = s.replace(old_styles, new_styles, 1)
+
+          path.write_text(s)
+          PY
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Validate Kitchen
+        working-directory: frontend
+        run: |
+          npx eslint app/kitchen.tsx
+          npx tsc --noEmit
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/app/kitchen.tsx
+          git diff --cached --quiet && exit 0
+          git commit -m "Match Kitchen player thought bubble styling and position"
+          git push
