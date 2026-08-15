@@ -17,12 +17,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// The MP4 will live in frontend/assets/video/intro.mp4.
-// While this feature branch is being tested, use its raw GitHub URL so the
-// screen still bundles before the binary file is added to the repository.
-const INTRO_VIDEO = {
-  uri: "https://raw.githubusercontent.com/Phattapanda/ReturnedSpirit/feat/video-intro/frontend/assets/video/intro.mp4",
-};
+// Bundled portrait cinematic used for new-game intro playback.
+const INTRO_VIDEO = require("../assets/intro.mp4");
 
 const ROOM = require("../assets/images/intro4.jpg");
 
