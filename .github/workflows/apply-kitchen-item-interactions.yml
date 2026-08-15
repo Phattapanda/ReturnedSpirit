@@ -1,0 +1,41 @@
+name: Apply kitchen item interaction consistency patch
+
+on:
+  push:
+    branches:
+      - fix/kitchen-item-interaction-consistency
+    paths:
+      - .github/workflows/apply-kitchen-item-interactions.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/kitchen-item-interaction-consistency
+          fetch-depth: 0
+
+      - name: Apply interaction patch
+        run: python .github/scripts/patch-kitchen-item-interactions.py
+
+      - name: Verify intended code is present
+        run: |
+          grep -F 'return Gesture.Race(itemPan, itemLongPress, itemTap);' frontend/app/kitchen.tsx
+          grep -F 'state === "COOKING_UNPACK_WAIT"' frontend/app/kitchen.tsx
+          grep -F 'state === "COOKING_SHARE_EAT"' frontend/app/kitchen.tsx
+          grep -F 'if (cur === "COOKING_CRAFT_READY") setTimeout(updateCraftResultPreview, 50);' frontend/app/kitchen.tsx
+          grep -F 'if (cur === "COOKING_UNPACK_WAIT") checkCookingProgress(newTable);' frontend/app/kitchen.tsx
+          grep -F 'isKitchenItemInteractionState(ts) ? (' frontend/app/kitchen.tsx
+
+      - name: Commit patched kitchen
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/app/kitchen.tsx
+          git commit -m "Keep kitchen item interactions consistent through cooking tutorial"
+          git push origin HEAD:fix/kitchen-item-interaction-consistency
