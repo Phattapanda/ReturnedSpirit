@@ -1202,7 +1202,14 @@ export default function KitchenScreen() {
     setSoupSlot(sourceSlot);
     soupSlotRef.current = sourceSlot;
     setFlyingItemId("herbsoup");
-    setSoupDragging(true);
+
+    // Same anti-flicker handoff as the generic Cooking drag: leave the source
+    // bowl visible until the Herb Soup overlay image has been committed.
+    requestAnimationFrame(() => {
+      if (soupSlotRef.current !== sourceSlot || tsRef.current !== "COOKING_SHARE_EAT") return;
+      setSoupDragging(true);
+      soupVis.value = 1;
+    });
 
     const slotRef = tableSlotRefs.current[sourceSlot];
     const applyOffset = (cx: number, cy: number) => {
@@ -1283,7 +1290,9 @@ export default function KitchenScreen() {
         cancelAnimation(soupY);
         cancelAnimation(soupVis);
         cancelAnimation(soupScale);
-        soupVis.value = 1;
+        // Do not reveal the shared overlay with the previous item's React source.
+        // onCookingSoupDragBegin switches it to Herb Soup, then reveals next frame.
+        soupVis.value = 0;
         soupScale.value = 1;
         runOnJS(onCookingSoupDragBegin)(sourceSlot, e.absoluteX, e.absoluteY);
       })
@@ -1872,7 +1881,15 @@ export default function KitchenScreen() {
     cookingDragItemIdRef.current = itemId;
     setCookingDragActiveSlot(slotIdx);
     setFlyingItemId(itemId);
-    setSoupDragging(true);
+
+    // Keep the source visible until React has committed the new overlay image.
+    // Showing the Reanimated overlay before setFlyingItemId() renders causes a
+    // one-frame flash of the previously dragged item.
+    requestAnimationFrame(() => {
+      if (cookingDraggedSlotRef.current !== slotIdx || tsRef.current !== "COOKING_CRAFT_READY") return;
+      setSoupDragging(true);
+      soupVis.value = 1;
+    });
 
     const slotRef = slotIdx <= 11
       ? tableSlotRefs.current[slotIdx]
@@ -1926,7 +1943,9 @@ export default function KitchenScreen() {
         cancelAnimation(soupY);
         cancelAnimation(soupVis);
         cancelAnimation(soupScale);
-        soupVis.value = 1;
+        // Keep the shared overlay hidden until JS has switched the React image
+        // to this exact item. onCookingDragStarted reveals it next frame.
+        soupVis.value = 0;
         soupScale.value = 1;
         runOnJS(onCookingDragStarted)(sourceSlot, itemId, e.absoluteX, e.absoluteY);
       })
