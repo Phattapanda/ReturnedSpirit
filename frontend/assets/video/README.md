@@ -1,13 +1,13 @@
-# Intro video asset
+# Intro video
 
-Place the cinematic intro file at:
+The cinematic intro asset is stored at:
 
-`frontend/assets/video/intro.mp4`
+`frontend/assets/intro.mp4`
 
-Expected format for the current intro implementation:
-- MP4 container
-- H.264 video
-- AAC audio
-- portrait aspect ratio (9:16 recommended)
+`frontend/app/intro.tsx` bundles it locally with:
 
-The feature branch currently loads this exact path through the branch's raw GitHub URL while testing. Once the binary asset is committed, the intro can be switched to a local bundled `require("../assets/video/intro.mp4")` source before merge.
+```ts
+const INTRO_VIDEO = require("../assets/intro.mp4");
+```
+
+The video replaces the old illustrated/text intro sequence. After playback or a successful hold-to-skip action, the game fades into the morning room, plays the knock, shows Rupert's "Are you awake?" line, and continues the existing dialogue flow.
