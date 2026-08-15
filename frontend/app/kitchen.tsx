@@ -59,6 +59,7 @@ const SK = {
   COOKING_STEP:   "@kitchen:cooking_tutorial_step",
   CRAFT_INGREDIENTS: "@kitchen:craft_ingredients",
   CRAFT_TOOL_SLOT:   "@kitchen:craft_tool_slot",
+  SAVE_LOCATION:     "@game:save_location",
 } as const;
 
 // ─── Sizes & durations ────────────────────────────────────────────────────────
@@ -454,6 +455,7 @@ export default function KitchenScreen() {
           : s,
       );
       await AsyncStorage.setItem("game_slots", JSON.stringify(updated));
+      await AsyncStorage.setItem(SK.SAVE_LOCATION, "kitchen");
       await createSnapshot(slotNum, "manual");
       showPlayerBubble('"Game saved."');
     } catch {

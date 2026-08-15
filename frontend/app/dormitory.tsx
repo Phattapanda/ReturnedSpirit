@@ -9,7 +9,7 @@ import {
   StyleSheet,
   useWindowDimensions,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -60,6 +60,7 @@ const DSK = {
   STORAGE:               "@room:storage",
   ACTIVE_SLOT:           "@game:active_slot",
   GAME_SLOTS:            "game_slots",
+  SAVE_LOCATION:         "@game:save_location",
 } as const;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -138,6 +139,7 @@ function processPlotDayChange(p: GardenPlotData): GardenPlotData {
 
 export default function DormitoryScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ loadedFromSave?: string }>();
   const insets = useSafeAreaInsets();
   const { width: W } = useWindowDimensions();
 
@@ -525,6 +527,8 @@ export default function DormitoryScreen() {
       setStaminaSpentToday(0);
 
       // ── 7. Save slot (with final new values) + create checkpoint snapshot
+      // A day-transition checkpoint represents waking up in the Dormitory.
+      await AsyncStorage.setItem(DSK.SAVE_LOCATION, "dormitory");
       const slotNum = await updateSaveSlot(newDay, newSta, newLife);
       if (slotNum > 0) {
         await createSnapshot(slotNum, "day_transition");
@@ -652,6 +656,7 @@ export default function DormitoryScreen() {
     try {
       const slotNum = await updateSaveSlot(dayIdx, staminaCurrent, lifeCurrent);
       if (slotNum > 0) {
+        await AsyncStorage.setItem(DSK.SAVE_LOCATION, "dormitory");
         await createSnapshot(slotNum, "manual");
       }
       showPlayerBubble('"Game saved."', 2000);
@@ -680,7 +685,8 @@ export default function DormitoryScreen() {
   // ─────────────────────────────────────────────────────────────────────────
   function afterDownstairsFade() {
     audioManager.stopSoundEffect('walking-on-wood');
-    router.back();
+    if (params.loadedFromSave === "1") router.replace("/kitchen");
+    else router.back();
   }
 
   async function handleGoDownstairs() {

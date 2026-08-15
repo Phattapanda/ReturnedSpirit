@@ -13,7 +13,7 @@ import {
   Image,
   useWindowDimensions,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -79,6 +79,7 @@ const GSK = {
   ACTIVITY_BAR:       "@garden:activity_bar_unlocked",
   HAS_WATER:          "@garden:has_fetched_tutorial_water",
   CRAFTING_READY:     "@garden:crafting_tutorial_ready",
+  SAVE_LOCATION:      "@game:save_location",
 } as const;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -232,6 +233,7 @@ const FLOAT_FADE_OUT = 400;    // ms fade-out
 
 export default function GardenScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ loadedFromSave?: string }>();
   const insets = useSafeAreaInsets();
   const { width: W, height: H } = useWindowDimensions();
 
@@ -1497,6 +1499,7 @@ export default function GardenScreen() {
           : s,
       );
       await AsyncStorage.setItem("game_slots", JSON.stringify(updated));
+      await AsyncStorage.setItem(GSK.SAVE_LOCATION, "garden");
       await createSnapshot(slotNum, "manual");
       setFloatMsg("Game saved.");
       setTimeout(() => setFloatMsg(null), 1800);
@@ -1600,7 +1603,8 @@ export default function GardenScreen() {
 
     // Footstep sound for outdoor → kitchen transition
     audioManager.playSoundEffect('footstep', { maxDurationMs: 4000 });
-    router.back();
+    if (params.loadedFromSave === "1") router.replace("/kitchen");
+    else router.back();
   }
 
   function handleStorageTap() {
