@@ -1,0 +1,40 @@
+name: Apply drag overlay flicker fix
+
+on:
+  push:
+    branches:
+      - fix/drag-overlay-item-flicker
+    paths:
+      - .github/workflows/apply-drag-overlay-flicker.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/drag-overlay-item-flicker
+          fetch-depth: 0
+
+      - name: Apply flicker patch
+        run: python .github/scripts/patch-drag-overlay-flicker.py
+
+      - name: Verify intended code is present
+        run: |
+          grep -F 'requestAnimationFrame(() => {' frontend/app/kitchen.tsx
+          grep -F 'cookingDraggedSlotRef.current !== slotIdx' frontend/app/kitchen.tsx
+          grep -F 'soupSlotRef.current !== sourceSlot' frontend/app/kitchen.tsx
+          grep -F 'onCookingDragStarted reveals it next frame' frontend/app/kitchen.tsx
+          grep -F 'onCookingSoupDragBegin switches it to Herb Soup' frontend/app/kitchen.tsx
+
+      - name: Commit patched kitchen
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/app/kitchen.tsx
+          git commit -m "Prevent stale item flash when drag starts"
+          git push origin HEAD:fix/drag-overlay-item-flicker
