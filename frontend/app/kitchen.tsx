@@ -3400,16 +3400,22 @@ export default function KitchenScreen() {
       />
 
       {/* ── Player thought bubble */}
-      {playerBubble && (
-        <View style={[StyleSheet.absoluteFill, { zIndex: 410 }]} pointerEvents="none">
-          <View style={{ position: "absolute", top: headerH + 130, left: 10, right: Math.max(10, W - Math.min(W * 0.75, 420) - 10) }}>
-            <View style={styles.playerBubbleArrow} />
-            <View style={styles.playerBubbleCard}>
-              <Text style={styles.playerBubbleText}>{playerBubble}</Text>
+      {playerBubble && (() => {
+        const playerL = layouts.current.player;
+        const topPos = playerL
+          ? playerL.y + playerL.h + 8
+          : (headerH > 0 ? headerH + 128 : insets.top + 190);
+        return (
+          <View style={[StyleSheet.absoluteFill, { zIndex: 410 }]} pointerEvents="none">
+            <View style={{ position: "absolute", top: topPos, left: 10, right: Math.max(10, W - Math.min(W * 0.75, 420) - 10) }}>
+              <View style={styles.playerBubbleArrow} />
+              <View style={styles.playerBubbleCard}>
+                <Text style={styles.playerBubbleText}>{playerBubble}</Text>
+              </View>
             </View>
           </View>
-        </View>
-      )}
+        );
+      })()}
     </View>
   );
 }
@@ -3722,26 +3728,31 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     fontStyle: "italic",
   },
-  // Player thought bubble
+  // Player thought bubble — match the standard light player-thought style used in Garden.
   playerBubbleArrow: {
     width: 0, height: 0,
     borderLeftWidth: 8, borderRightWidth: 8, borderBottomWidth: 10,
     borderLeftColor: "transparent", borderRightColor: "transparent",
-    borderBottomColor: "rgba(30,18,5,0.9)",
+    borderBottomColor: "rgba(240,230,200,0.95)",
     marginLeft: 16,
   },
   playerBubbleCard: {
-    backgroundColor: "rgba(30,18,5,0.9)",
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "rgba(196,148,58,0.4)",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    backgroundColor: "rgba(240,230,200,0.95)",
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "rgba(196,148,58,0.50)",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     alignSelf: "flex-start" as const,
     maxWidth: "100%",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.4,
+    shadowRadius: 7,
+    elevation: 14,
   },
   playerBubbleText: {
-    color: "#F0E8D5",
+    color: "#2A1000",
     fontSize: 13,
     fontStyle: "italic",
     lineHeight: 18,
