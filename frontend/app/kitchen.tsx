@@ -443,6 +443,10 @@ export default function KitchenScreen() {
 
   async function handleManualSave() {
     setShowMenu(false);
+    if (tsRef.current !== "IDLE") {
+      showPlayerBubble('"I should finish this first."');
+      return;
+    }
     try {
       const rawSlot  = await AsyncStorage.getItem("@game:active_slot");
       const rawSlots = await AsyncStorage.getItem("game_slots");
@@ -723,8 +727,8 @@ export default function KitchenScreen() {
                   );
                 }, 800);
               } else {
-                setTs("IDLE");
-                tsRef.current = "IDLE";
+                setTutState("IDLE");
+                await maybeStartTuesdayMorningTutorial(800);
               }
             }
           } else {
@@ -755,6 +759,35 @@ export default function KitchenScreen() {
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** Start the Day-2 Kitchen prompt once the Kitchen is in a stable IDLE state. */
+  async function maybeStartTuesdayMorningTutorial(delayMs = 600): Promise<boolean> {
+    if (tsRef.current !== "IDLE") return false;
+
+    const [tuesdayShown, rawDay2, firstSleepDone] = await Promise.all([
+      AsyncStorage.getItem(SK.TUESDAY_MORNING_SHOWN),
+      AsyncStorage.getItem(SK.DAY_INDEX),
+      AsyncStorage.getItem(SK.FIRST_SLEEP_DONE),
+    ]);
+    const currentDay = rawDay2 ? parseInt(rawDay2, 10) : 0;
+    if (firstSleepDone !== "true" || currentDay < 1 || tuesdayShown === "true") return false;
+
+    // Persist before presenting the prompt so a second focus cannot start it twice.
+    await AsyncStorage.setItem(SK.TUESDAY_MORNING_SHOWN, "true");
+    setGardenActive(true);
+    setTutState("TUESDAY_KITCHEN_GARDEN_PROMPT");
+    setTimeout(() => {
+      showBubble(
+        '"Good morning. Let\'s go to the garden. We also need some water."',
+        "Rupert",
+        "GARDEN_PROMPT",
+        null,
+        () => {},
+        "bubble.tuesday.good_morning",
+      );
+    }, delayMs);
+    return true;
+  }
 
   // Return-from-screen: refresh stats and detect post-garden dialog
   useFocusEffect(
@@ -798,26 +831,8 @@ export default function KitchenScreen() {
           const dormUnlocked = await AsyncStorage.getItem(SK.DORMITORY_UNLOCKED);
           if (dormUnlocked === "true") setDormitoryUnlocked(true);
 
-          // Tuesday morning prompt: day=1, first sleep done, not yet shown
-          const tuesdayShown = await AsyncStorage.getItem(SK.TUESDAY_MORNING_SHOWN);
-          const rawDay2 = await AsyncStorage.getItem(SK.DAY_INDEX);
-          const firstSleepDone = await AsyncStorage.getItem(SK.FIRST_SLEEP_DONE);
-          if (firstSleepDone === "true" && (rawDay2 ? parseInt(rawDay2, 10) : 0) >= 1 && tuesdayShown !== "true") {
-            await AsyncStorage.setItem(SK.TUESDAY_MORNING_SHOWN, "true");
-            setGardenActive(true);
-            setTutState("TUESDAY_KITCHEN_GARDEN_PROMPT");
-            setTimeout(() => {
-              showBubble(
-                '"Good morning. Let\'s go to the garden. We also need some water."',
-                "Rupert",
-                "GARDEN_PROMPT",
-                null,
-                () => {},
-                "bubble.tuesday.good_morning",
-              );
-            }, 600);
-            return;
-          }
+          // Tuesday morning prompt also runs on the initial Kitchen mount via the same helper.
+          if (await maybeStartTuesdayMorningTutorial(600)) return;
 
           // Check post-garden dialog needs to show (first return from garden)
           const seenPostGarden = await AsyncStorage.getItem(SK.HAS_SEEN_POST_GARDEN_DLG);
