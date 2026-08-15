@@ -1484,7 +1484,9 @@ export default function KitchenScreen() {
       }
       // Check valid craft slot (0-2 only)
       if (target === -1) {
-        for (let i = 0; i < lcs.length; i++) {
+        // Day-1 Herb Soup may be moved into ingredient slots 0-2 only.
+        // The Tool slot is not a valid destination for this tutorial item.
+        for (let i = 0; i < 3; i++) {
           if (lcs[i] && inRect(itemX, itemY, lcs[i]!)) { target = 12 + i; break; }
         }
       }
@@ -2514,7 +2516,8 @@ export default function KitchenScreen() {
       }
     }
     if (next === null) {
-      for (let i = 0; i < lcs.length; i++) {
+      // Day-1 Herb Soup may use ingredient slots 0-2, but never the Tool slot (index 3).
+      for (let i = 0; i < 3; i++) {
         if (lcs[i] && inRect(itemX, itemY, lcs[i]!)) {
           const t = 12 + i; next = t !== soupSlotRef.current ? t : null; break;
         }
