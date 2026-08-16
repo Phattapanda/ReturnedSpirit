@@ -248,7 +248,6 @@ export default function GardenScreen() {
 
   // ── HUD state
   const [staminaCurrent, setStaminaCurrent] = useState(40);
-  const staminaMax = 100;
   const [staminaDisplay, setStaminaDisplay] = useState(40);
   const [barWidth, setBarWidth] = useState(0);
   const [lifeCurrent, setLifeCurrent] = useState(15);
@@ -375,6 +374,7 @@ export default function GardenScreen() {
   // ── Animated values
   const barWidthSV   = useSharedValue(0);
   const staminaSV    = useSharedValue(40);
+  const staminaMaxSV = useSharedValue(DEFAULT_PLAYER_STATS.maximumStamina);
   const plotOpacity  = useSharedValue(0);
   const staFloatY    = useSharedValue(0);
   const staFloatOp   = useSharedValue(0);
@@ -382,7 +382,7 @@ export default function GardenScreen() {
 
   // ── Animated styles
   const staminaFillStyle = useAnimatedStyle(() => ({
-    width: (staminaSV.value / 100) * barWidthSV.value,
+    width: (staminaSV.value / staminaMaxSV.value) * barWidthSV.value,
   }));
   const plotOpacityStyle = useAnimatedStyle(() => ({ opacity: plotOpacity.value }));
   const staFloatStyle = useAnimatedStyle(() => ({
@@ -394,6 +394,9 @@ export default function GardenScreen() {
   // Sync gtsRef
   // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => { gtsRef.current = gts; }, [gts]);
+  useEffect(() => {
+    staminaMaxSV.value = playerStats.maximumStamina;
+  }, [playerStats.maximumStamina, staminaMaxSV]);
   // Keep bag ref in sync to prevent stale closures in async gift flows
   useEffect(() => { playerBagRef.current = playerBag; }, [playerBag]);
 
@@ -460,9 +463,18 @@ export default function GardenScreen() {
         const lb = await loadLogbook();
         setLogbook(lb);
 
+        // Load player stats before current values so upgraded maxima are respected.
+        let loadedStats = DEFAULT_PLAYER_STATS;
+        const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
+        if (rawStats) {
+          try { loadedStats = { ...DEFAULT_PLAYER_STATS, ...JSON.parse(rawStats) }; } catch { /* default */ }
+        }
+        setPlayerStats(loadedStats);
+        staminaMaxSV.value = loadedStats.maximumStamina;
+
         // Load stamina
         const rawSta = await AsyncStorage.getItem(GSK.STAMINA);
-        const sta = rawSta ? Math.min(Math.max(parseInt(rawSta, 10), 0), 100) : 40;
+        const sta = rawSta ? Math.min(Math.max(parseInt(rawSta, 10), 0), loadedStats.maximumStamina) : 40;
         setStaminaCurrent(sta);
         setStaminaDisplay(sta);
         staminaSV.value = sta;
@@ -473,7 +485,7 @@ export default function GardenScreen() {
 
         // Load life
         const rawLife = await AsyncStorage.getItem(GSK.LIFE);
-        const lf = rawLife ? Math.min(Math.max(parseInt(rawLife, 10), 0), 30) : 15;
+        const lf = rawLife ? Math.min(Math.max(parseInt(rawLife, 10), 0), loadedStats.maximumLife) : 15;
         setLifeCurrent(lf);
 
         // Load shared resources (for Materials display)
@@ -482,11 +494,9 @@ export default function GardenScreen() {
           try { setSharedResources({ ...SHARED_RESOURCE_DEFAULTS, ...JSON.parse(rawRes) }); } catch { /* default */ }
         }
 
-        // Load player bag & stats
+        // Load player bag
         const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
         if (rawBag) { try { setPlayerBag(JSON.parse(rawBag)); } catch { /* default */ } }
-        const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
-        if (rawStats) { try { setPlayerStats(JSON.parse(rawStats)); } catch { /* default */ } }
 
         // Load day
         const rawDay = await AsyncStorage.getItem(GSK.DAY_INDEX);
@@ -1474,6 +1484,7 @@ export default function GardenScreen() {
 
   async function handleStatsUpdated(newStats: PlayerStats, newCurrentLife: number | null) {
     setPlayerStats(newStats);
+    staminaMaxSV.value = newStats.maximumStamina;
     if (newCurrentLife !== null) setLifeCurrent(newCurrentLife);
     await AsyncStorage.setItem(PLAYER_STATS_KEY, JSON.stringify(newStats));
     if (newCurrentLife !== null) {
@@ -1773,15 +1784,15 @@ export default function GardenScreen() {
                   <Text style={styles.staFloatText}>{floatText}</Text>
                 </Animated.View>
               </View>
-              <Text style={styles.statBarText}>{staminaDisplay}/{staminaMax}</Text>
+              <Text style={styles.statBarText}>{staminaDisplay}/{playerStats.maximumStamina}</Text>
             </View>
             {/* Life bar */}
             <View style={styles.statBarOuter}>
               <Ionicons name="heart" size={13} color="#CC2200" />
               <View style={styles.statBarTrack}>
-                <View style={[styles.statBarFill, styles.lifeFill, { width: (lifeCurrent / 30) * (barWidth || 0) }]} />
+                <View style={[styles.statBarFill, styles.lifeFill, { width: (lifeCurrent / playerStats.maximumLife) * (barWidth || 0) }]} />
               </View>
-              <Text style={styles.statBarText}>{lifeCurrent}/30</Text>
+              <Text style={styles.statBarText}>{lifeCurrent}/{playerStats.maximumLife}</Text>
             </View>
           </View>
           <View style={styles.rightHeader}>
