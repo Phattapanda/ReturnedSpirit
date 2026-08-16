@@ -33,6 +33,7 @@ import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import StatusModal from "@/src/components/StatusModal";
 import {
   PLAYER_BAG_KEY, DEFAULT_BAG, KITCHEN_TABLE_KEY, ITEM_CATALOG,
+  canStack, getContainerStackLimit,
   type PlayerBagData, type BagItem,
 } from "@/src/game/item-system";
 import { PLAYER_STATS_KEY, DEFAULT_PLAYER_STATS, type PlayerStats } from "@/src/game/player-stats";
@@ -2154,13 +2155,36 @@ export default function KitchenScreen() {
     const newIng = curIng.slice() as (BagItem | null)[];
     let newTool = curTool;
 
-    if (srcSlot <= 11) newTable[srcSlot] = destItem;
-    else if (srcSlot <= 14) newIng[srcSlot - 12] = destItem;
-    else if (srcSlot === 15) newTool = destItem;
+    const setItemAtSlot = (slot: number, item: BagItem | null) => {
+      if (slot <= 11) newTable[slot] = item;
+      else if (slot <= 14) newIng[slot - 12] = item;
+      else if (slot === 15) newTool = item;
+    };
 
-    if (destSlot <= 11) newTable[destSlot] = srcItem;
-    else if (destSlot <= 14) newIng[destSlot - 12] = srcItem;
-    else if (destSlot === 15) newTool = srcItem;
+    // Kitchen Table stacks merge when the dragged item is dropped onto a
+    // compatible table stack. Recipe Ingredient/Tool slots intentionally keep
+    // their existing swap behavior so crafting semantics do not change here.
+    const canMergeOnTable =
+      srcSlot <= 11 &&
+      destSlot <= 11 &&
+      destItem !== null &&
+      canStack(srcItem, destItem);
+
+    if (canMergeOnTable) {
+      const maxStack = getContainerStackLimit("kitchenTable");
+      const capacity = Math.max(0, maxStack - destItem.quantity);
+      if (capacity <= 0) return;
+
+      const movedQty = Math.min(srcItem.quantity, capacity);
+      const remainingQty = srcItem.quantity - movedQty;
+
+      setItemAtSlot(destSlot, { ...destItem, quantity: destItem.quantity + movedQty });
+      setItemAtSlot(srcSlot, remainingQty > 0 ? { ...srcItem, quantity: remainingQty } : null);
+    } else {
+      // Non-compatible items keep the established drag-and-drop swap behavior.
+      setItemAtSlot(srcSlot, destItem);
+      setItemAtSlot(destSlot, srcItem);
+    }
 
     tableItemsRef.current = newTable;
     craftIngSlotsRef.current = newIng;
