@@ -154,6 +154,7 @@ export default function IntroScreen() {
   const transitionStartedRef = useRef(false);
   const roomSequenceStartedRef = useRef(false);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const skipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const blackOpacity = useRef(new Animated.Value(1)).current;
   const holdProgress = useRef(new Animated.Value(0)).current;
@@ -189,6 +190,10 @@ export default function IntroScreen() {
       mountedRef.current = false;
       for (const timer of timersRef.current) clearTimeout(timer);
       timersRef.current = [];
+      if (skipTimerRef.current) {
+        clearTimeout(skipTimerRef.current);
+        skipTimerRef.current = null;
+      }
       try { videoPlayer.pause(); } catch {}
       try { knockPlayer.pause(); } catch {}
       try { tapPlayer.pause(); } catch {}
@@ -278,6 +283,8 @@ export default function IntroScreen() {
 
   function handleSkipPressIn() {
     if (stage !== "video" || transitionStartedRef.current) return;
+
+    if (skipTimerRef.current) clearTimeout(skipTimerRef.current);
     setHoldActive(true);
     holdProgress.setValue(0);
     Animated.timing(holdProgress, {
@@ -285,9 +292,22 @@ export default function IntroScreen() {
       duration: SKIP_HOLD_MS,
       useNativeDriver: false,
     }).start();
+
+    // Do not rely on React Native's onLongPress firing over a native VideoView.
+    // The hold itself owns an explicit timer and reaches the same finishVideo()
+    // path as normal playback completion.
+    skipTimerRef.current = setTimeout(() => {
+      skipTimerRef.current = null;
+      if (!mountedRef.current || stage !== "video" || transitionStartedRef.current) return;
+      finishVideo();
+    }, SKIP_HOLD_MS);
   }
 
   function handleSkipPressOut() {
+    if (skipTimerRef.current) {
+      clearTimeout(skipTimerRef.current);
+      skipTimerRef.current = null;
+    }
     setHoldActive(false);
     holdProgress.stopAnimation();
     Animated.timing(holdProgress, {
@@ -295,10 +315,6 @@ export default function IntroScreen() {
       duration: 120,
       useNativeDriver: false,
     }).start();
-  }
-
-  function handleSkipLongPress() {
-    finishVideo();
   }
 
   function changePortrait(variant: PortraitVariant) {
@@ -384,31 +400,36 @@ export default function IntroScreen() {
       </View>
 
       {stage === "video" ? (
-        <Pressable
-          style={StyleSheet.absoluteFill}
-          onPressIn={handleSkipPressIn}
-          onPressOut={handleSkipPressOut}
-          onLongPress={handleSkipLongPress}
-          delayLongPress={SKIP_HOLD_MS}
-        >
-          <VideoView
-            style={{ width: screenW, height: screenH }}
-            player={videoPlayer}
-            nativeControls={false}
-            contentFit="cover"
-            onFirstFrameRender={revealVideo}
-          />
-
-          <View
-            pointerEvents="none"
-            style={[styles.skipWrap, { bottom: insets.bottom + 24 }]}
-          >
-            <Text style={styles.skipText}>{holdActive ? "Keep holding..." : "Hold to skip"}</Text>
-            <View style={styles.skipTrack}>
-              <Animated.View style={[styles.skipProgress, { width: holdWidth }]} />
-            </View>
+        <View style={StyleSheet.absoluteFill}>
+          {/* Native video surfaces can capture touch input on-device. Keep the
+              video subtree non-interactive and put the hold target above it. */}
+          <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+            <VideoView
+              style={{ width: screenW, height: screenH }}
+              player={videoPlayer}
+              nativeControls={false}
+              contentFit="cover"
+              onFirstFrameRender={revealVideo}
+            />
           </View>
-        </Pressable>
+
+          <Pressable
+            testID="intro-hold-to-skip"
+            style={StyleSheet.absoluteFill}
+            onPressIn={handleSkipPressIn}
+            onPressOut={handleSkipPressOut}
+          >
+            <View
+              pointerEvents="none"
+              style={[styles.skipWrap, { bottom: insets.bottom + 24 }]}
+            >
+              <Text style={styles.skipText}>{holdActive ? "Keep holding..." : "Hold to skip"}</Text>
+              <View style={styles.skipTrack}>
+                <Animated.View style={[styles.skipProgress, { width: holdWidth }]} />
+              </View>
+            </View>
+          </Pressable>
+        </View>
       ) : (
         <Image
           source={ROOM}
