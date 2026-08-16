@@ -1,0 +1,89 @@
+name: Patch Dormitory status avatar
+
+on:
+  push:
+    branches:
+      - fix/dormitory-status-avatar
+    paths:
+      - .github/workflows/patch-dormitory-status-avatar.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/dormitory-status-avatar
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Patch Dormitory avatar status access
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('frontend/app/dormitory.tsx')
+          text = path.read_text()
+
+          replacements = [
+              (
+                  'import SceneBackground from "@/src/components/SceneBackground";\nimport { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, type PlayerStats } from "@/src/game/player-stats";',
+                  'import SceneBackground from "@/src/components/SceneBackground";\nimport StatusModal from "@/src/components/StatusModal";\nimport { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, type PlayerStats } from "@/src/game/player-stats";'
+              ),
+              (
+                  '  const [lifeCurrent, setLifeCurrent]       = useState(15);\n  const [dayIdx, setDayIdx]                 = useState(0);',
+                  '  const [lifeCurrent, setLifeCurrent]       = useState(15);\n  const [playerStats, setPlayerStats]       = useState<PlayerStats>(DEFAULT_PLAYER_STATS);\n  const [dayIdx, setDayIdx]                 = useState(0);'
+              ),
+              (
+                  '  const [showStorageModal, setShowStorageModal]   = useState(false);\n  const [showMenu, setShowMenu]                   = useState(false);',
+                  '  const [showStorageModal, setShowStorageModal]   = useState(false);\n  const [statusOpen, setStatusOpen]                 = useState(false);\n  const [showMenu, setShowMenu]                   = useState(false);'
+              ),
+              (
+                  '        setLifeCurrent(lf);\n        lifeSV.value = lf;\n\n        // Day',
+                  '        setLifeCurrent(lf);\n        lifeSV.value = lf;\n\n        // Player stats / Growth Points\n        const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);\n        if (rawStats) {\n          try { setPlayerStats(JSON.parse(rawStats)); } catch { /* default */ }\n        }\n\n        // Day'
+              ),
+              (
+                  '        <View style={styles.portraitRow}>\n          <View ref={playerPortraitRef} style={styles.circleWrap}>\n            <Image source={avatarSrc(staminaCurrent)} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />\n          </View>',
+                  '        <View style={styles.portraitRow}>\n          <TouchableOpacity\n            ref={playerPortraitRef}\n            style={styles.circleWrap}\n            onPress={() => setStatusOpen(true)}\n            activeOpacity={0.8}\n          >\n            <Image source={avatarSrc(staminaCurrent)} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />\n          </TouchableOpacity>'
+              ),
+              (
+                  '      {/* ── Transition blocking overlay ── */}',
+                  '      {/* ── Player Status / Growth Points ── */}\n      <StatusModal\n        visible={statusOpen}\n        stats={playerStats}\n        currentStamina={staminaCurrent}\n        currentLife={lifeCurrent}\n        onClose={() => setStatusOpen(false)}\n        onStatsUpdated={(newStats, newLife) => {\n          setPlayerStats(newStats);\n          if (newLife !== null) {\n            setLifeCurrent(newLife);\n            lifeSV.value = newLife;\n            AsyncStorage.setItem(DSK.LIFE, String(newLife)).catch(() => {});\n          }\n          AsyncStorage.setItem(PLAYER_STATS_KEY, JSON.stringify(newStats)).catch(() => {});\n        }}\n      />\n\n      {/* ── Transition blocking overlay ── */}'
+              ),
+          ]
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'Expected exactly one match, found {count}: {old[:100]!r}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text)
+          PY
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Validate Dormitory
+        working-directory: frontend
+        run: |
+          npx eslint app/dormitory.tsx
+          npx tsc --noEmit
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/app/dormitory.tsx
+          git diff --cached --exit-code && exit 0
+          git commit -m "Open player status from Dormitory avatar"
+          git push origin HEAD:fix/dormitory-status-avatar
