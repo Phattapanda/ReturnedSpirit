@@ -1,0 +1,274 @@
+name: Patch HUD float positioning
+
+on:
+  push:
+    branches:
+      - fix/hud-float-positioning
+    paths:
+      - .github/workflows/patch-hud-float-positioning.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/hud-float-positioning
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Align HUD floating numbers to bar ends
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              return text.replace(old, new, 1)
+
+          # ── Kitchen: anchor +20 to the right end of the Stamina track ──
+          path = Path('frontend/app/kitchen.tsx')
+          text = path.read_text()
+          old = '''              <View
+                style={styles.statBarTrack}
+                onLayout={(e) => {
+                  const w = e.nativeEvent.layout.width;
+                  barWidthSV.value = w;
+                  setBarWidth(w);
+                }}
+              >
+                <Animated.View style={[styles.statBarFill, styles.staminaFill, staminaFillStyle]}>
+                  <View style={styles.staminaReflex} />
+                </Animated.View>
+              </View>
+              <Text style={styles.statBarText}>{staminaDisplay}/{playerStats.maximumStamina}</Text>
+              {/* +20 float */}
+              <Animated.View style={[styles.plusFloat, plusFloatStyle]} pointerEvents="none">
+                <Text style={styles.plusFloatText}>+20</Text>
+              </Animated.View>'''
+          new = '''              <View style={styles.statBarTrackWrap}>
+                <View
+                  style={styles.statBarTrack}
+                  onLayout={(e) => {
+                    const w = e.nativeEvent.layout.width;
+                    barWidthSV.value = w;
+                    setBarWidth(w);
+                  }}
+                >
+                  <Animated.View style={[styles.statBarFill, styles.staminaFill, staminaFillStyle]}>
+                    <View style={styles.staminaReflex} />
+                  </Animated.View>
+                </View>
+                {/* Always starts just below the right end of the Stamina bar. */}
+                <Animated.View style={[styles.plusFloat, plusFloatStyle]} pointerEvents="none">
+                  <Text style={styles.plusFloatText}>+20</Text>
+                </Animated.View>
+              </View>
+              <Text style={styles.statBarText}>{staminaDisplay}/{playerStats.maximumStamina}</Text>'''
+          text = replace_once(text, old, new, 'kitchen stamina JSX')
+          old = '''  statBarTrack: {
+    flex: 1, height: 9, borderRadius: 5,
+    backgroundColor: "#2A1800", overflow: "hidden",
+  },'''
+          new = '''  statBarTrackWrap: { flex: 1, height: 9, position: "relative", overflow: "visible" },
+  statBarTrack: {
+    flex: 1, height: 9, borderRadius: 5,
+    backgroundColor: "#2A1800", overflow: "hidden",
+  },'''
+          text = replace_once(text, old, new, 'kitchen track style')
+          old = '''  plusFloat: {
+    position: "absolute", right: -8, top: -20,
+    backgroundColor: "rgba(196,148,58,0.92)", borderRadius: 10,
+    paddingHorizontal: 7, paddingVertical: 2, zIndex: 10,
+  },'''
+          new = '''  plusFloat: {
+    position: "absolute", right: -8, top: 12,
+    backgroundColor: "rgba(196,148,58,0.92)", borderRadius: 10,
+    paddingHorizontal: 7, paddingVertical: 2, zIndex: 10,
+  },'''
+          text = replace_once(text, old, new, 'kitchen float style')
+          path.write_text(text)
+
+          # ── Garden: anchor Stamina-spend float to the same bar-relative point ──
+          path = Path('frontend/app/garden.tsx')
+          text = path.read_text()
+          old = '''              <View
+                style={styles.statBarTrack}
+                onLayout={(e) => {
+                  const w = e.nativeEvent.layout.width;
+                  barWidthSV.value = w;
+                  setBarWidth(w);
+                }}
+              >
+                <Animated.View style={[styles.statBarFill, styles.staminaFill, staminaFillStyle]}>
+                  <View style={styles.staminaReflex} />
+                </Animated.View>
+              </View>
+              <Text style={styles.statBarText}>{staminaDisplay}/{staminaMax}</Text>
+              {/* Stamina float */}
+              <Animated.View style={[styles.staFloat, staFloatStyle]} pointerEvents="none">
+                <Text style={styles.staFloatText}>{floatText}</Text>
+              </Animated.View>'''
+          new = '''              <View style={styles.statBarTrackWrap}>
+                <View
+                  style={styles.statBarTrack}
+                  onLayout={(e) => {
+                    const w = e.nativeEvent.layout.width;
+                    barWidthSV.value = w;
+                    setBarWidth(w);
+                  }}
+                >
+                  <Animated.View style={[styles.statBarFill, styles.staminaFill, staminaFillStyle]}>
+                    <View style={styles.staminaReflex} />
+                  </Animated.View>
+                </View>
+                {/* Always starts just below the right end of the Stamina bar. */}
+                <Animated.View style={[styles.staFloat, staFloatStyle]} pointerEvents="none">
+                  <Text style={styles.staFloatText}>{floatText}</Text>
+                </Animated.View>
+              </View>
+              <Text style={styles.statBarText}>{staminaDisplay}/{staminaMax}</Text>'''
+          text = replace_once(text, old, new, 'garden stamina JSX')
+          old = '''  statBarTrack: {
+    flex: 1, height: 9, borderRadius: 5,
+    backgroundColor: "#2A1800", overflow: "hidden",
+  },'''
+          new = '''  statBarTrackWrap: { flex: 1, height: 9, position: "relative", overflow: "visible" },
+  statBarTrack: {
+    flex: 1, height: 9, borderRadius: 5,
+    backgroundColor: "#2A1800", overflow: "hidden",
+  },'''
+          text = replace_once(text, old, new, 'garden track style')
+          old = '''  staFloat: {
+    position: "absolute", right: -8, top: -20,
+    backgroundColor: "rgba(200,50,20,0.90)", borderRadius: 10,
+    paddingHorizontal: 7, paddingVertical: 2, zIndex: 10,
+  },'''
+          new = '''  staFloat: {
+    position: "absolute", right: -8, top: 12,
+    backgroundColor: "rgba(200,50,20,0.90)", borderRadius: 10,
+    paddingHorizontal: 7, paddingVertical: 2, zIndex: 10,
+  },'''
+          text = replace_once(text, old, new, 'garden float style')
+          path.write_text(text)
+
+          # ── Dormitory: anchor Stamina + Life recovery to their own bar ends ──
+          path = Path('frontend/app/dormitory.tsx')
+          text = path.read_text()
+          old = '''              <View
+                style={styles.statBarTrack}
+                onLayout={(e) => {
+                  const w = e.nativeEvent.layout.width;
+                  barWidthSV.value = w;
+                  setBarWidth(w);
+                }}
+              >
+                <Animated.View style={[styles.statBarFill, styles.staminaFill, staminaFillStyle]}>
+                  <View style={styles.staminaReflex} />
+                </Animated.View>
+              </View>
+              <Text style={styles.statBarText}>{staminaDisplay}/{STA_MAX}</Text>'''
+          new = '''              <View style={styles.statBarTrackWrap}>
+                <View
+                  style={styles.statBarTrack}
+                  onLayout={(e) => {
+                    const w = e.nativeEvent.layout.width;
+                    barWidthSV.value = w;
+                    setBarWidth(w);
+                  }}
+                >
+                  <Animated.View style={[styles.statBarFill, styles.staminaFill, staminaFillStyle]}>
+                    <View style={styles.staminaReflex} />
+                  </Animated.View>
+                </View>
+                {regenStaText && (
+                  <Animated.View style={[styles.regenFloat, regenStaStyle]} pointerEvents="none">
+                    <Text style={styles.regenStaText}>{regenStaText}</Text>
+                  </Animated.View>
+                )}
+              </View>
+              <Text style={styles.statBarText}>{staminaDisplay}/{STA_MAX}</Text>'''
+          text = replace_once(text, old, new, 'dormitory stamina JSX')
+
+          old = '''              <View style={styles.statBarTrack}>
+                <Animated.View style={[styles.statBarFill, styles.lifeFill, lifeFillStyle]} />
+              </View>
+              <Text style={styles.statBarText}>{lifeCurrent}/{LIFE_MAX}</Text>'''
+          new = '''              <View style={styles.statBarTrackWrap}>
+                <View style={styles.statBarTrack}>
+                  <Animated.View style={[styles.statBarFill, styles.lifeFill, lifeFillStyle]} />
+                </View>
+                {regenLifeText && (
+                  <Animated.View style={[styles.regenFloat, regenLifeStyle]} pointerEvents="none">
+                    <Text style={styles.regenLifeText}>{regenLifeText}</Text>
+                  </Animated.View>
+                )}
+              </View>
+              <Text style={styles.statBarText}>{lifeCurrent}/{LIFE_MAX}</Text>'''
+          text = replace_once(text, old, new, 'dormitory life JSX')
+
+          old = '''
+          {/* Regen floating texts (after morning wake-up) */}
+          {regenStaText && (
+            <Animated.View style={[{ position: "absolute", right: W * 0.32, top: insets.top + 26, zIndex: 500 }, regenStaStyle]} pointerEvents="none">
+              <Text style={{ color: "#C4943A", fontFamily: "Oldenburg", fontSize: 13, fontWeight: "700" }}>{regenStaText}</Text>
+            </Animated.View>
+          )}
+          {regenLifeText && (
+            <Animated.View style={[{ position: "absolute", right: W * 0.32, top: insets.top + 44, zIndex: 500 }, regenLifeStyle]} pointerEvents="none">
+              <Text style={{ color: "#CC2200", fontFamily: "Oldenburg", fontSize: 13, fontWeight: "700" }}>{regenLifeText}</Text>
+            </Animated.View>
+          )}'''
+          text = replace_once(text, old, '', 'dormitory old absolute floats')
+
+          old = '''  statBarTrack: { flex: 1, height: 9, borderRadius: 5, backgroundColor: "#2A1800", overflow: "hidden" },'''
+          new = '''  statBarTrackWrap: { flex: 1, height: 9, position: "relative", overflow: "visible" },
+  statBarTrack: { flex: 1, height: 9, borderRadius: 5, backgroundColor: "#2A1800", overflow: "hidden" },'''
+          text = replace_once(text, old, new, 'dormitory track style')
+
+          old = '''  statBarText:  { color: "#F0E8D5", fontSize: 11, fontFamily: "Oldenburg", minWidth: 40, textAlign: "right" },'''
+          new = '''  statBarText:  { color: "#F0E8D5", fontSize: 11, fontFamily: "Oldenburg", minWidth: 40, textAlign: "right" },
+  regenFloat:   { position: "absolute", right: -8, top: 12, zIndex: 500 },
+  regenStaText: { color: "#C4943A", fontFamily: "Oldenburg", fontSize: 13, fontWeight: "700" },
+  regenLifeText:{ color: "#CC2200", fontFamily: "Oldenburg", fontSize: 13, fontWeight: "700" },'''
+          text = replace_once(text, old, new, 'dormitory regen float styles')
+          path.write_text(text)
+          PY
+
+      - name: Assert consistent anchors
+        run: |
+          grep -q 'statBarTrackWrap' frontend/app/kitchen.tsx
+          grep -q 'position: "absolute", right: -8, top: 12' frontend/app/kitchen.tsx
+          grep -q 'statBarTrackWrap' frontend/app/garden.tsx
+          grep -q 'position: "absolute", right: -8, top: 12' frontend/app/garden.tsx
+          grep -q 'regenFloat:   { position: "absolute", right: -8, top: 12' frontend/app/dormitory.tsx
+          ! grep -q 'right: W \* 0.32' frontend/app/dormitory.tsx
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Validate changed screens
+        working-directory: frontend
+        run: |
+          npx eslint app/kitchen.tsx app/garden.tsx app/dormitory.tsx
+          npx tsc --noEmit
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/app/kitchen.tsx frontend/app/garden.tsx frontend/app/dormitory.tsx
+          git diff --cached --exit-code && exit 0
+          git commit -m "Align HUD floating numbers to stat bars"
+          git push origin HEAD:fix/hud-float-positioning
