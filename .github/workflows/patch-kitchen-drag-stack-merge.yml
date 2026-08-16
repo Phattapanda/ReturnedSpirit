@@ -1,0 +1,121 @@
+name: Patch Kitchen drag stack merge
+
+on:
+  push:
+    branches:
+      - fix/kitchen-drag-stack-merge
+    paths:
+      - .github/workflows/patch-kitchen-drag-stack-merge.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/kitchen-drag-stack-merge
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Patch Kitchen table drag stacking
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('frontend/app/kitchen.tsx')
+          text = path.read_text()
+
+          old_import = '''import {
+  PLAYER_BAG_KEY, DEFAULT_BAG, KITCHEN_TABLE_KEY, ITEM_CATALOG,
+  type PlayerBagData, type BagItem,
+} from "@/src/game/item-system";'''
+          new_import = '''import {
+  PLAYER_BAG_KEY, DEFAULT_BAG, KITCHEN_TABLE_KEY, ITEM_CATALOG,
+  canStack, getContainerStackLimit,
+  type PlayerBagData, type BagItem,
+} from "@/src/game/item-system";'''
+
+          if text.count(old_import) != 1:
+              raise SystemExit(f'Expected one item-system import block, found {text.count(old_import)}')
+          text = text.replace(old_import, new_import, 1)
+
+          old_block = '''    if (srcSlot <= 11) newTable[srcSlot] = destItem;
+    else if (srcSlot <= 14) newIng[srcSlot - 12] = destItem;
+    else if (srcSlot === 15) newTool = destItem;
+
+    if (destSlot <= 11) newTable[destSlot] = srcItem;
+    else if (destSlot <= 14) newIng[destSlot - 12] = srcItem;
+    else if (destSlot === 15) newTool = srcItem;
+'''
+
+          new_block = '''    const setItemAtSlot = (slot: number, item: BagItem | null) => {
+      if (slot <= 11) newTable[slot] = item;
+      else if (slot <= 14) newIng[slot - 12] = item;
+      else if (slot === 15) newTool = item;
+    };
+
+    // Kitchen Table stacks merge when the dragged item is dropped onto a
+    // compatible table stack. Recipe Ingredient/Tool slots intentionally keep
+    // their existing swap behavior so crafting semantics do not change here.
+    const canMergeOnTable =
+      srcSlot <= 11 &&
+      destSlot <= 11 &&
+      destItem !== null &&
+      canStack(srcItem, destItem);
+
+    if (canMergeOnTable) {
+      const maxStack = getContainerStackLimit("kitchenTable");
+      const capacity = Math.max(0, maxStack - destItem.quantity);
+      if (capacity <= 0) return;
+
+      const movedQty = Math.min(srcItem.quantity, capacity);
+      const remainingQty = srcItem.quantity - movedQty;
+
+      setItemAtSlot(destSlot, { ...destItem, quantity: destItem.quantity + movedQty });
+      setItemAtSlot(srcSlot, remainingQty > 0 ? { ...srcItem, quantity: remainingQty } : null);
+    } else {
+      // Non-compatible items keep the established drag-and-drop swap behavior.
+      setItemAtSlot(srcSlot, destItem);
+      setItemAtSlot(destSlot, srcItem);
+    }
+'''
+
+          if text.count(old_block) != 1:
+              raise SystemExit(f'Expected one Kitchen swap block, found {text.count(old_block)}')
+          text = text.replace(old_block, new_block, 1)
+
+          path.write_text(text)
+          PY
+
+      - name: Assert scoped stack behavior
+        run: |
+          grep -q 'canStack, getContainerStackLimit' frontend/app/kitchen.tsx
+          grep -q 'getContainerStackLimit("kitchenTable")' frontend/app/kitchen.tsx
+          grep -q 'const canMergeOnTable' frontend/app/kitchen.tsx
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Validate Kitchen
+        working-directory: frontend
+        run: |
+          npx eslint app/kitchen.tsx
+          npx tsc --noEmit
+
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/app/kitchen.tsx
+          git diff --cached --exit-code && exit 0
+          git commit -m "Merge compatible Kitchen table stacks on drag"
+          git push origin HEAD:fix/kitchen-drag-stack-merge
