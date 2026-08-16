@@ -1755,23 +1755,25 @@ export default function GardenScreen() {
             {/* Stamina bar */}
             <View style={styles.statBarOuter}>
               <Ionicons name="flash" size={15} color="#C4943A" />
-              <View
-                style={styles.statBarTrack}
-                onLayout={(e) => {
-                  const w = e.nativeEvent.layout.width;
-                  barWidthSV.value = w;
-                  setBarWidth(w);
-                }}
-              >
-                <Animated.View style={[styles.statBarFill, styles.staminaFill, staminaFillStyle]}>
-                  <View style={styles.staminaReflex} />
+              <View style={styles.statBarTrackWrap}>
+                <View
+                  style={styles.statBarTrack}
+                  onLayout={(e) => {
+                    const w = e.nativeEvent.layout.width;
+                    barWidthSV.value = w;
+                    setBarWidth(w);
+                  }}
+                >
+                  <Animated.View style={[styles.statBarFill, styles.staminaFill, staminaFillStyle]}>
+                    <View style={styles.staminaReflex} />
+                  </Animated.View>
+                </View>
+                {/* Always starts just below the right end of the Stamina bar. */}
+                <Animated.View style={[styles.staFloat, staFloatStyle]} pointerEvents="none">
+                  <Text style={styles.staFloatText}>{floatText}</Text>
                 </Animated.View>
               </View>
               <Text style={styles.statBarText}>{staminaDisplay}/{staminaMax}</Text>
-              {/* Stamina float */}
-              <Animated.View style={[styles.staFloat, staFloatStyle]} pointerEvents="none">
-                <Text style={styles.staFloatText}>{floatText}</Text>
-              </Animated.View>
             </View>
             {/* Life bar */}
             <View style={styles.statBarOuter}>
@@ -2266,6 +2268,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10, paddingVertical: 5, gap: 7,
     overflow: "visible",
   },
+  statBarTrackWrap: { flex: 1, height: 9, position: "relative", overflow: "visible" },
   statBarTrack: {
     flex: 1, height: 9, borderRadius: 5,
     backgroundColor: "#2A1800", overflow: "hidden",
@@ -2279,7 +2282,7 @@ const styles = StyleSheet.create({
   lifeFill: { backgroundColor: "#CC2200" },
   statBarText: { color: "#F0E8D5", fontSize: 11, fontFamily: "Oldenburg", minWidth: 40, textAlign: "right" },
   staFloat: {
-    position: "absolute", right: -8, top: -20,
+    position: "absolute", right: -8, top: 12,
     backgroundColor: "rgba(200,50,20,0.90)", borderRadius: 10,
     paddingHorizontal: 7, paddingVertical: 2, zIndex: 10,
   },

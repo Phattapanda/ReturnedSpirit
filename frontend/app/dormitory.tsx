@@ -821,41 +821,44 @@ export default function DormitoryScreen() {
             {/* Stamina bar */}
             <View style={styles.statBarOuter}>
               <Ionicons name="flash" size={15} color="#C4943A" />
-              <View
-                style={styles.statBarTrack}
-                onLayout={(e) => {
-                  const w = e.nativeEvent.layout.width;
-                  barWidthSV.value = w;
-                  setBarWidth(w);
-                }}
-              >
-                <Animated.View style={[styles.statBarFill, styles.staminaFill, staminaFillStyle]}>
-                  <View style={styles.staminaReflex} />
-                </Animated.View>
+              <View style={styles.statBarTrackWrap}>
+                <View
+                  style={styles.statBarTrack}
+                  onLayout={(e) => {
+                    const w = e.nativeEvent.layout.width;
+                    barWidthSV.value = w;
+                    setBarWidth(w);
+                  }}
+                >
+                  <Animated.View style={[styles.statBarFill, styles.staminaFill, staminaFillStyle]}>
+                    <View style={styles.staminaReflex} />
+                  </Animated.View>
+                </View>
+                {regenStaText && (
+                  <Animated.View style={[styles.regenFloat, regenStaStyle]} pointerEvents="none">
+                    <Text style={styles.regenStaText}>{regenStaText}</Text>
+                  </Animated.View>
+                )}
               </View>
               <Text style={styles.statBarText}>{staminaDisplay}/{STA_MAX}</Text>
             </View>
             {/* Life bar */}
             <View style={styles.statBarOuter}>
               <Ionicons name="heart" size={13} color="#CC2200" />
-              <View style={styles.statBarTrack}>
-                <Animated.View style={[styles.statBarFill, styles.lifeFill, lifeFillStyle]} />
+              <View style={styles.statBarTrackWrap}>
+                <View style={styles.statBarTrack}>
+                  <Animated.View style={[styles.statBarFill, styles.lifeFill, lifeFillStyle]} />
+                </View>
+                {regenLifeText && (
+                  <Animated.View style={[styles.regenFloat, regenLifeStyle]} pointerEvents="none">
+                    <Text style={styles.regenLifeText}>{regenLifeText}</Text>
+                  </Animated.View>
+                )}
               </View>
               <Text style={styles.statBarText}>{lifeCurrent}/{LIFE_MAX}</Text>
             </View>
           </View>
 
-          {/* Regen floating texts (after morning wake-up) */}
-          {regenStaText && (
-            <Animated.View style={[{ position: "absolute", right: W * 0.32, top: insets.top + 26, zIndex: 500 }, regenStaStyle]} pointerEvents="none">
-              <Text style={{ color: "#C4943A", fontFamily: "Oldenburg", fontSize: 13, fontWeight: "700" }}>{regenStaText}</Text>
-            </Animated.View>
-          )}
-          {regenLifeText && (
-            <Animated.View style={[{ position: "absolute", right: W * 0.32, top: insets.top + 44, zIndex: 500 }, regenLifeStyle]} pointerEvents="none">
-              <Text style={{ color: "#CC2200", fontFamily: "Oldenburg", fontSize: 13, fontWeight: "700" }}>{regenLifeText}</Text>
-            </Animated.View>
-          )}
           <View style={styles.rightHeader}>
             <View style={styles.dayBadge}>
               <Text style={styles.dayText}>{DAYS[dayIdx]}</Text>
@@ -1170,6 +1173,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5, borderColor: "rgba(130,90,20,0.50)",
     paddingHorizontal: 10, paddingVertical: 5, gap: 7,
   },
+  statBarTrackWrap: { flex: 1, height: 9, position: "relative", overflow: "visible" },
   statBarTrack: { flex: 1, height: 9, borderRadius: 5, backgroundColor: "#2A1800", overflow: "hidden" },
   statBarFill:  { height: "100%", borderRadius: 5 },
   staminaFill:  { backgroundColor: "#C4943A" },
@@ -1179,6 +1183,9 @@ const styles = StyleSheet.create({
   },
   lifeFill:     { backgroundColor: "#CC2200" },
   statBarText:  { color: "#F0E8D5", fontSize: 11, fontFamily: "Oldenburg", minWidth: 40, textAlign: "right" },
+  regenFloat:   { position: "absolute", right: -8, top: 12, zIndex: 500 },
+  regenStaText: { color: "#C4943A", fontFamily: "Oldenburg", fontSize: 13, fontWeight: "700" },
+  regenLifeText:{ color: "#CC2200", fontFamily: "Oldenburg", fontSize: 13, fontWeight: "700" },
   locationName: { color: "#F0E8D5", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 1, textAlign: "center", marginTop: 4 },
   rightHeader:  { flexDirection: "row", alignItems: "center", gap: 8, marginLeft: 10 },
   dayBadge: {
