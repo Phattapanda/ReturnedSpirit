@@ -93,8 +93,6 @@ const IMG = {
 };
 
 const DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
-const LIFE_MAX  = 30;
-const STA_MAX   = 100;
 
 function avatarSrc(st: number) {
   if (st >= 90) return IMG.avLaugh;
@@ -194,6 +192,8 @@ export default function DormitoryScreen() {
   // ── Animations
   const staminaSV    = useSharedValue(40);
   const lifeSV       = useSharedValue(15);   // for animated life bar
+  const staminaMaxSV = useSharedValue(DEFAULT_PLAYER_STATS.maximumStamina);
+  const lifeMaxSV    = useSharedValue(DEFAULT_PLAYER_STATS.maximumLife);
   const barWidthSV   = useSharedValue(0);
   const fadeOpacity  = useSharedValue(0);
 
@@ -210,10 +210,10 @@ export default function DormitoryScreen() {
   const regenLifeStyle = useAnimatedStyle(() => ({ transform: [{ translateY: regenLifeY.value }], opacity: regenLifeOp.value }));
 
   const staminaFillStyle = useAnimatedStyle(() => ({
-    width: (staminaSV.value / STA_MAX) * barWidthSV.value,
+    width: (staminaSV.value / staminaMaxSV.value) * barWidthSV.value,
   }));
   const lifeFillStyle = useAnimatedStyle(() => ({
-    width: (lifeSV.value / LIFE_MAX) * barWidthSV.value,
+    width: (lifeSV.value / lifeMaxSV.value) * barWidthSV.value,
   }));
   const fadeStyle = useAnimatedStyle(() => ({ opacity: fadeOpacity.value }));
 
@@ -226,6 +226,11 @@ export default function DormitoryScreen() {
   // Sync roomStateRef
   // ─────────────────────────────────────────────────────────────────────────
   function setRS(s: RoomState) { roomStateRef.current = s; setRoomState(s); }
+
+  useEffect(() => {
+    staminaMaxSV.value = playerStats.maximumStamina;
+    lifeMaxSV.value = playerStats.maximumLife;
+  }, [playerStats.maximumStamina, playerStats.maximumLife, staminaMaxSV, lifeMaxSV]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Morning birds: play once per wake cycle with music ducking
@@ -293,22 +298,26 @@ export default function DormitoryScreen() {
   useEffect(() => {
     (async () => {
       try {
+        // Player stats / Growth Points must load first so current values use upgraded caps.
+        let loadedStats = DEFAULT_PLAYER_STATS;
+        const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
+        if (rawStats) {
+          try { loadedStats = { ...DEFAULT_PLAYER_STATS, ...JSON.parse(rawStats) }; } catch { /* default */ }
+        }
+        setPlayerStats(loadedStats);
+        staminaMaxSV.value = loadedStats.maximumStamina;
+        lifeMaxSV.value = loadedStats.maximumLife;
+
         // Stamina
         const rawSta = await AsyncStorage.getItem(DSK.STAMINA);
-        const sta = rawSta ? Math.min(Math.max(parseInt(rawSta, 10), 0), STA_MAX) : 40;
+        const sta = rawSta ? Math.min(Math.max(parseInt(rawSta, 10), 0), loadedStats.maximumStamina) : 40;
         setStaminaCurrent(sta); setStaminaDisplay(sta); staminaSV.value = sta;
 
         // Life
         const rawLife = await AsyncStorage.getItem(DSK.LIFE);
-        const lf = rawLife ? Math.min(Math.max(parseInt(rawLife, 10), 0), LIFE_MAX) : 15;
+        const lf = rawLife ? Math.min(Math.max(parseInt(rawLife, 10), 0), loadedStats.maximumLife) : 15;
         setLifeCurrent(lf);
         lifeSV.value = lf;
-
-        // Player stats / Growth Points
-        const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
-        if (rawStats) {
-          try { setPlayerStats(JSON.parse(rawStats)); } catch { /* default */ }
-        }
 
         // Day
         const rawDay = await AsyncStorage.getItem(DSK.DAY_INDEX);
@@ -505,7 +514,7 @@ export default function DormitoryScreen() {
       const recovery = calcSleepRecovery(roomUpgrades);
       const rawSta   = await AsyncStorage.getItem(DSK.STAMINA);
       const oldSta   = rawSta ? parseInt(rawSta, 10) : 40;
-      const newSta   = Math.min(oldSta + recovery.stamina, STA_MAX);
+      const newSta   = Math.min(oldSta + recovery.stamina, playerStats.maximumStamina);
       await AsyncStorage.setItem(DSK.STAMINA, String(newSta));
       // Update underlying state now (for correct re-mounts after reload)
       setStaminaCurrent(newSta);
@@ -513,7 +522,7 @@ export default function DormitoryScreen() {
       // ── 4. Life recovery (same pattern)
       const rawLife = await AsyncStorage.getItem(DSK.LIFE);
       const oldLife = rawLife ? parseInt(rawLife, 10) : 15;
-      const newLife = Math.min(oldLife + recovery.life, LIFE_MAX);
+      const newLife = Math.min(oldLife + recovery.life, playerStats.maximumLife);
       await AsyncStorage.setItem(DSK.LIFE, String(newLife));
       setLifeCurrent(newLife);
 
@@ -840,7 +849,7 @@ export default function DormitoryScreen() {
                   </Animated.View>
                 )}
               </View>
-              <Text style={styles.statBarText}>{staminaDisplay}/{STA_MAX}</Text>
+              <Text style={styles.statBarText}>{staminaDisplay}/{playerStats.maximumStamina}</Text>
             </View>
             {/* Life bar */}
             <View style={styles.statBarOuter}>
@@ -855,7 +864,7 @@ export default function DormitoryScreen() {
                   </Animated.View>
                 )}
               </View>
-              <Text style={styles.statBarText}>{lifeCurrent}/{LIFE_MAX}</Text>
+              <Text style={styles.statBarText}>{lifeCurrent}/{playerStats.maximumLife}</Text>
             </View>
           </View>
 
@@ -1050,6 +1059,8 @@ export default function DormitoryScreen() {
         onClose={() => setStatusOpen(false)}
         onStatsUpdated={(newStats, newLife) => {
           setPlayerStats(newStats);
+          staminaMaxSV.value = newStats.maximumStamina;
+          lifeMaxSV.value = newStats.maximumLife;
           if (newLife !== null) {
             setLifeCurrent(newLife);
             lifeSV.value = newLife;
