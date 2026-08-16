@@ -38,6 +38,7 @@ import {
 } from "@/src/game/shared-resources";
 
 import SceneBackground from "@/src/components/SceneBackground";
+import StatusModal from "@/src/components/StatusModal";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, type PlayerStats } from "@/src/game/player-stats";
 import { PLAYER_BAG_KEY, DEFAULT_BAG } from "@/src/game/item-system";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
@@ -147,6 +148,7 @@ export default function DormitoryScreen() {
   const [staminaCurrent, setStaminaCurrent] = useState(40);
   const [staminaDisplay, setStaminaDisplay] = useState(40);
   const [lifeCurrent, setLifeCurrent]       = useState(15);
+  const [playerStats, setPlayerStats]       = useState<PlayerStats>(DEFAULT_PLAYER_STATS);
   const [dayIdx, setDayIdx]                 = useState(0);
   const [barWidth, setBarWidth]             = useState(0);
 
@@ -179,6 +181,7 @@ export default function DormitoryScreen() {
   const [sleepConfirmOpen, setSleepConfirmOpen] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal]   = useState(false);
   const [showStorageModal, setShowStorageModal]   = useState(false);
+  const [statusOpen, setStatusOpen]                 = useState(false);
   const [showMenu, setShowMenu]                   = useState(false);
   const [upgradeMsg, setUpgradeMsg]               = useState<string | null>(null);
   const upgradeMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -300,6 +303,12 @@ export default function DormitoryScreen() {
         const lf = rawLife ? Math.min(Math.max(parseInt(rawLife, 10), 0), LIFE_MAX) : 15;
         setLifeCurrent(lf);
         lifeSV.value = lf;
+
+        // Player stats / Growth Points
+        const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
+        if (rawStats) {
+          try { setPlayerStats(JSON.parse(rawStats)); } catch { /* default */ }
+        }
 
         // Day
         const rawDay = await AsyncStorage.getItem(DSK.DAY_INDEX);
@@ -869,9 +878,14 @@ export default function DormitoryScreen() {
       >
         {/* Portrait row: player + locked bag (NO Rupert) */}
         <View style={styles.portraitRow}>
-          <View ref={playerPortraitRef} style={styles.circleWrap}>
+          <TouchableOpacity
+            ref={playerPortraitRef}
+            style={styles.circleWrap}
+            onPress={() => setStatusOpen(true)}
+            activeOpacity={0.8}
+          >
             <Image source={avatarSrc(staminaCurrent)} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />
-          </View>
+          </TouchableOpacity>
           <View style={[styles.circleWrap, styles.bagCircle]}>
             <Ionicons name="lock-closed" size={28} color="rgba(150,130,100,0.55)" />
           </View>
@@ -1023,6 +1037,24 @@ export default function DormitoryScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* ── Player Status / Growth Points ── */}
+      <StatusModal
+        visible={statusOpen}
+        stats={playerStats}
+        currentStamina={staminaCurrent}
+        currentLife={lifeCurrent}
+        onClose={() => setStatusOpen(false)}
+        onStatsUpdated={(newStats, newLife) => {
+          setPlayerStats(newStats);
+          if (newLife !== null) {
+            setLifeCurrent(newLife);
+            lifeSV.value = newLife;
+            AsyncStorage.setItem(DSK.LIFE, String(newLife)).catch(() => {});
+          }
+          AsyncStorage.setItem(PLAYER_STATS_KEY, JSON.stringify(newStats)).catch(() => {});
+        }}
+      />
 
       {/* ── Transition blocking overlay ── */}
       {(sleepTransitioning || isDayTransitionRef.current) && (
