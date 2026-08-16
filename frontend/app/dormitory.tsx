@@ -9,7 +9,7 @@ import {
   StyleSheet,
   useWindowDimensions,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -38,6 +38,7 @@ import {
 } from "@/src/game/shared-resources";
 
 import SceneBackground from "@/src/components/SceneBackground";
+import StatusModal from "@/src/components/StatusModal";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, type PlayerStats } from "@/src/game/player-stats";
 import { PLAYER_BAG_KEY, DEFAULT_BAG } from "@/src/game/item-system";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
@@ -60,6 +61,7 @@ const DSK = {
   STORAGE:               "@room:storage",
   ACTIVE_SLOT:           "@game:active_slot",
   GAME_SLOTS:            "game_slots",
+  SAVE_LOCATION:         "@game:save_location",
 } as const;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -138,6 +140,7 @@ function processPlotDayChange(p: GardenPlotData): GardenPlotData {
 
 export default function DormitoryScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ loadedFromSave?: string }>();
   const insets = useSafeAreaInsets();
   const { width: W } = useWindowDimensions();
 
@@ -145,6 +148,7 @@ export default function DormitoryScreen() {
   const [staminaCurrent, setStaminaCurrent] = useState(40);
   const [staminaDisplay, setStaminaDisplay] = useState(40);
   const [lifeCurrent, setLifeCurrent]       = useState(15);
+  const [playerStats, setPlayerStats]       = useState<PlayerStats>(DEFAULT_PLAYER_STATS);
   const [dayIdx, setDayIdx]                 = useState(0);
   const [barWidth, setBarWidth]             = useState(0);
 
@@ -177,6 +181,7 @@ export default function DormitoryScreen() {
   const [sleepConfirmOpen, setSleepConfirmOpen] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal]   = useState(false);
   const [showStorageModal, setShowStorageModal]   = useState(false);
+  const [statusOpen, setStatusOpen]                 = useState(false);
   const [showMenu, setShowMenu]                   = useState(false);
   const [upgradeMsg, setUpgradeMsg]               = useState<string | null>(null);
   const upgradeMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -298,6 +303,12 @@ export default function DormitoryScreen() {
         const lf = rawLife ? Math.min(Math.max(parseInt(rawLife, 10), 0), LIFE_MAX) : 15;
         setLifeCurrent(lf);
         lifeSV.value = lf;
+
+        // Player stats / Growth Points
+        const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
+        if (rawStats) {
+          try { setPlayerStats(JSON.parse(rawStats)); } catch { /* default */ }
+        }
 
         // Day
         const rawDay = await AsyncStorage.getItem(DSK.DAY_INDEX);
@@ -525,6 +536,8 @@ export default function DormitoryScreen() {
       setStaminaSpentToday(0);
 
       // ── 7. Save slot (with final new values) + create checkpoint snapshot
+      // A day-transition checkpoint represents waking up in the Dormitory.
+      await AsyncStorage.setItem(DSK.SAVE_LOCATION, "dormitory");
       const slotNum = await updateSaveSlot(newDay, newSta, newLife);
       if (slotNum > 0) {
         await createSnapshot(slotNum, "day_transition");
@@ -652,6 +665,7 @@ export default function DormitoryScreen() {
     try {
       const slotNum = await updateSaveSlot(dayIdx, staminaCurrent, lifeCurrent);
       if (slotNum > 0) {
+        await AsyncStorage.setItem(DSK.SAVE_LOCATION, "dormitory");
         await createSnapshot(slotNum, "manual");
       }
       showPlayerBubble('"Game saved."', 2000);
@@ -680,7 +694,8 @@ export default function DormitoryScreen() {
   // ─────────────────────────────────────────────────────────────────────────
   function afterDownstairsFade() {
     audioManager.stopSoundEffect('walking-on-wood');
-    router.back();
+    if (params.loadedFromSave === "1") router.replace("/kitchen");
+    else router.back();
   }
 
   async function handleGoDownstairs() {
@@ -806,41 +821,44 @@ export default function DormitoryScreen() {
             {/* Stamina bar */}
             <View style={styles.statBarOuter}>
               <Ionicons name="flash" size={15} color="#C4943A" />
-              <View
-                style={styles.statBarTrack}
-                onLayout={(e) => {
-                  const w = e.nativeEvent.layout.width;
-                  barWidthSV.value = w;
-                  setBarWidth(w);
-                }}
-              >
-                <Animated.View style={[styles.statBarFill, styles.staminaFill, staminaFillStyle]}>
-                  <View style={styles.staminaReflex} />
-                </Animated.View>
+              <View style={styles.statBarTrackWrap}>
+                <View
+                  style={styles.statBarTrack}
+                  onLayout={(e) => {
+                    const w = e.nativeEvent.layout.width;
+                    barWidthSV.value = w;
+                    setBarWidth(w);
+                  }}
+                >
+                  <Animated.View style={[styles.statBarFill, styles.staminaFill, staminaFillStyle]}>
+                    <View style={styles.staminaReflex} />
+                  </Animated.View>
+                </View>
+                {regenStaText && (
+                  <Animated.View style={[styles.regenFloat, regenStaStyle]} pointerEvents="none">
+                    <Text style={styles.regenStaText}>{regenStaText}</Text>
+                  </Animated.View>
+                )}
               </View>
               <Text style={styles.statBarText}>{staminaDisplay}/{STA_MAX}</Text>
             </View>
             {/* Life bar */}
             <View style={styles.statBarOuter}>
               <Ionicons name="heart" size={13} color="#CC2200" />
-              <View style={styles.statBarTrack}>
-                <Animated.View style={[styles.statBarFill, styles.lifeFill, lifeFillStyle]} />
+              <View style={styles.statBarTrackWrap}>
+                <View style={styles.statBarTrack}>
+                  <Animated.View style={[styles.statBarFill, styles.lifeFill, lifeFillStyle]} />
+                </View>
+                {regenLifeText && (
+                  <Animated.View style={[styles.regenFloat, regenLifeStyle]} pointerEvents="none">
+                    <Text style={styles.regenLifeText}>{regenLifeText}</Text>
+                  </Animated.View>
+                )}
               </View>
               <Text style={styles.statBarText}>{lifeCurrent}/{LIFE_MAX}</Text>
             </View>
           </View>
 
-          {/* Regen floating texts (after morning wake-up) */}
-          {regenStaText && (
-            <Animated.View style={[{ position: "absolute", right: W * 0.32, top: insets.top + 26, zIndex: 500 }, regenStaStyle]} pointerEvents="none">
-              <Text style={{ color: "#C4943A", fontFamily: "Oldenburg", fontSize: 13, fontWeight: "700" }}>{regenStaText}</Text>
-            </Animated.View>
-          )}
-          {regenLifeText && (
-            <Animated.View style={[{ position: "absolute", right: W * 0.32, top: insets.top + 44, zIndex: 500 }, regenLifeStyle]} pointerEvents="none">
-              <Text style={{ color: "#CC2200", fontFamily: "Oldenburg", fontSize: 13, fontWeight: "700" }}>{regenLifeText}</Text>
-            </Animated.View>
-          )}
           <View style={styles.rightHeader}>
             <View style={styles.dayBadge}>
               <Text style={styles.dayText}>{DAYS[dayIdx]}</Text>
@@ -863,9 +881,14 @@ export default function DormitoryScreen() {
       >
         {/* Portrait row: player + locked bag (NO Rupert) */}
         <View style={styles.portraitRow}>
-          <View ref={playerPortraitRef} style={styles.circleWrap}>
+          <TouchableOpacity
+            ref={playerPortraitRef}
+            style={styles.circleWrap}
+            onPress={() => setStatusOpen(true)}
+            activeOpacity={0.8}
+          >
             <Image source={avatarSrc(staminaCurrent)} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />
-          </View>
+          </TouchableOpacity>
           <View style={[styles.circleWrap, styles.bagCircle]}>
             <Ionicons name="lock-closed" size={28} color="rgba(150,130,100,0.55)" />
           </View>
@@ -1018,6 +1041,24 @@ export default function DormitoryScreen() {
         </View>
       </Modal>
 
+      {/* ── Player Status / Growth Points ── */}
+      <StatusModal
+        visible={statusOpen}
+        stats={playerStats}
+        currentStamina={staminaCurrent}
+        currentLife={lifeCurrent}
+        onClose={() => setStatusOpen(false)}
+        onStatsUpdated={(newStats, newLife) => {
+          setPlayerStats(newStats);
+          if (newLife !== null) {
+            setLifeCurrent(newLife);
+            lifeSV.value = newLife;
+            AsyncStorage.setItem(DSK.LIFE, String(newLife)).catch(() => {});
+          }
+          AsyncStorage.setItem(PLAYER_STATS_KEY, JSON.stringify(newStats)).catch(() => {});
+        }}
+      />
+
       {/* ── Transition blocking overlay ── */}
       {(sleepTransitioning || isDayTransitionRef.current) && (
         <View style={[StyleSheet.absoluteFill, { zIndex: 900 }]} pointerEvents="box-only" />
@@ -1132,6 +1173,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5, borderColor: "rgba(130,90,20,0.50)",
     paddingHorizontal: 10, paddingVertical: 5, gap: 7,
   },
+  statBarTrackWrap: { flex: 1, height: 9, position: "relative", overflow: "visible" },
   statBarTrack: { flex: 1, height: 9, borderRadius: 5, backgroundColor: "#2A1800", overflow: "hidden" },
   statBarFill:  { height: "100%", borderRadius: 5 },
   staminaFill:  { backgroundColor: "#C4943A" },
@@ -1141,6 +1183,9 @@ const styles = StyleSheet.create({
   },
   lifeFill:     { backgroundColor: "#CC2200" },
   statBarText:  { color: "#F0E8D5", fontSize: 11, fontFamily: "Oldenburg", minWidth: 40, textAlign: "right" },
+  regenFloat:   { position: "absolute", right: -8, top: 12, zIndex: 500 },
+  regenStaText: { color: "#C4943A", fontFamily: "Oldenburg", fontSize: 13, fontWeight: "700" },
+  regenLifeText:{ color: "#CC2200", fontFamily: "Oldenburg", fontSize: 13, fontWeight: "700" },
   locationName: { color: "#F0E8D5", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 1, textAlign: "center", marginTop: 4 },
   rightHeader:  { flexDirection: "row", alignItems: "center", gap: 8, marginLeft: 10 },
   dayBadge: {

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -33,6 +33,7 @@ import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import StatusModal from "@/src/components/StatusModal";
 import {
   PLAYER_BAG_KEY, DEFAULT_BAG, KITCHEN_TABLE_KEY, ITEM_CATALOG,
+  canStack, getContainerStackLimit,
   type PlayerBagData, type BagItem,
 } from "@/src/game/item-system";
 import { PLAYER_STATS_KEY, DEFAULT_PLAYER_STATS, type PlayerStats } from "@/src/game/player-stats";
@@ -59,6 +60,7 @@ const SK = {
   COOKING_STEP:   "@kitchen:cooking_tutorial_step",
   CRAFT_INGREDIENTS: "@kitchen:craft_ingredients",
   CRAFT_TOOL_SLOT:   "@kitchen:craft_tool_slot",
+  SAVE_LOCATION:     "@game:save_location",
 } as const;
 
 // ─── Sizes & durations ────────────────────────────────────────────────────────
@@ -228,8 +230,7 @@ const D_OLDPOT_DELIVER: DLine[] = [
 ];
 
 const D_CRAFT_SUCCESS: DLine[] = [
-  { id: "d_craft.0", speaker: "Rupert", portrait: "laugh",  text: '"Well done! The herb soup is ready."' },
-  { id: "d_craft.1", speaker: "Rupert", portrait: "normal", text: '"Take one bowl to me, and keep the other for yourself."' },
+  { id: "d_craft.0", speaker: "Rupert", portrait: "laugh", text: '"Well done! The herb soup is ready."' },
 ];
 
 // ─── Cooking Recipe ───────────────────────────────────────────────────────────
@@ -308,24 +309,12 @@ export default function KitchenScreen() {
   // Refs to pass table state safely into Reanimated worklet callbacks
   const cookingFlyTargetSlot = useRef<number>(-1);
   const cookingPendingTable  = useRef<(BagItem | null)[]>([]);
-  // Cooking drag-and-drop (like Day 1 soupGesture)
+  // Cooking drag-and-drop: each occupied input slot owns its GestureDetector,
+  // mirroring the reliable Day-1 soup pattern. The source slot is therefore known
+  // before the gesture starts; no global hit-test/source discovery is needed.
   const cookingDraggedSlotRef = useRef<number>(-1);
-  // Synchronous JS-thread drag-lifecycle flag (gesture runs .runOnJS(true), so a plain
-  // ref is the reliable control state — SharedValue is only used for visual animation).
-  const cookingIsDraggingRef = useRef(false);
-  // Tracks source slot for UI hiding during drag (triggers re-render)
   const [cookingDragActiveSlot, setCookingDragActiveSlot] = useState<number>(-1);
-  // Tracks dragged item id for valid-target highlighting (ref = always latest, no stale closure)
   const cookingDragItemIdRef = useRef<string>("");
-  // Touch-start position used by the stable table-pan gesture to find the source slot
-  const cookingDragStartPos = useRef({ x: 0, y: 0 });
-  // Callback ref: set on every render so the stable gesture always has fresh closures
-  const cookingGestureCBs = useRef({
-    onStart : (_si: number, _id: string) => {},
-    onHover : (_x: number, _y: number) => {},
-    onDrop  : (_x: number, _y: number) => {},
-    onCancel: () => {},
-  });
 
   // ── Tutorial state
   const [ts, setTs] = useState<TState>("LOADING");
@@ -455,6 +444,10 @@ export default function KitchenScreen() {
 
   async function handleManualSave() {
     setShowMenu(false);
+    if (tsRef.current !== "IDLE") {
+      showPlayerBubble('"I should finish this first."');
+      return;
+    }
     try {
       const rawSlot  = await AsyncStorage.getItem("@game:active_slot");
       const rawSlots = await AsyncStorage.getItem("game_slots");
@@ -467,6 +460,7 @@ export default function KitchenScreen() {
           : s,
       );
       await AsyncStorage.setItem("game_slots", JSON.stringify(updated));
+      await AsyncStorage.setItem(SK.SAVE_LOCATION, "kitchen");
       await createSnapshot(slotNum, "manual");
       showPlayerBubble('"Game saved."');
     } catch {
@@ -544,86 +538,8 @@ export default function KitchenScreen() {
     tableSlots: (LRect | null)[]; craftSlots: (LRect | null)[];
   }>({ player: null, rupert: null, tableSlots: Array(12).fill(null), craftSlots: Array(4).fill(null) });
 
-  // ── Stable component-level cooking drag gesture (mirrors Day 1 panGesture architecture) ──
-  // Created ONCE with useMemo – never recreated on re-renders, so RNGH never loses the active
-  // gesture when React re-renders from state updates (hoveredSlot, cookingDragActiveSlot, etc.)
-  // All state access goes through the `cookingGestureCBs` callback-ref, which is refreshed each render.
-  const cookingTablePanGesture = useMemo(
-    () => Gesture.Pan()
-      .runOnJS(true)
-      .minDistance(8)
-      .onStart((e) => {
-        // Store start position so onUpdate can find the source slot
-        cookingDragStartPos.current = { x: e.absoluteX, y: e.absoluteY };
-        cookingIsDraggingRef.current = false;
-      })
-      .onUpdate((e) => {
-        if (!cookingIsDraggingRef.current) {
-          // Identify draggable item at touch-start position
-          if (tsRef.current !== "COOKING_CRAFT_READY") return;
-          const { x: sx, y: sy } = cookingDragStartPos.current;
-          const lts = layouts.current.tableSlots;
-          const lcs = layouts.current.craftSlots;
-          let foundSlot = -1;
-          let foundSlotL: LRect | null | undefined = null;
-          // 1) Table slots (0-11)
-          for (let i = 0; i < lts.length; i++) {
-            if (lts[i] && inRect(sx, sy, lts[i]!)) { foundSlot = i; foundSlotL = lts[i]; break; }
-          }
-          // 2) Craft ingredient slots (12-14)
-          if (foundSlot < 0) {
-            for (let i = 0; i < 3; i++) {
-              if (lcs[i] && inRect(sx, sy, lcs[i]!)) { foundSlot = 12 + i; foundSlotL = lcs[i]; break; }
-            }
-          }
-          // 3) Tool slot (15)
-          if (foundSlot < 0 && lcs[3] && inRect(sx, sy, lcs[3]!)) { foundSlot = 15; foundSlotL = lcs[3]; }
-          if (foundSlot < 0) return;
-          // Read item from the matching slot source
-          let item: BagItem | null | undefined;
-          if (foundSlot <= 11)       item = tableItemsRef.current[foundSlot];
-          else if (foundSlot <= 14)  item = craftIngSlotsRef.current[foundSlot - 12];
-          else if (foundSlot === 15) item = craftToolRef.current;
-          if (!item) return;
-          // Compute slot center so drag feels anchored (no jump on pickup)
-          const slotL = foundSlotL;
-          const cx = slotL ? (slotL.cx ?? slotL.x + slotL.w / 2) : sx;
-          const cy = slotL ? (slotL.cy ?? slotL.y + slotL.h / 2) : sy;
-          dragOffsetX.value = cx - sx;
-          dragOffsetY.value = cy - sy;
-          soupX.value = cx;
-          soupY.value = cy;
-          soupVis.value = withTiming(1, { duration: 80 });
-          soupScale.value = 1;
-          cookingIsDraggingRef.current = true;
-          cookingGestureCBs.current.onStart(foundSlot, item.id);
-        }
-        if (cookingIsDraggingRef.current) {
-          const ix = e.absoluteX + dragOffsetX.value;
-          const iy = e.absoluteY + dragOffsetY.value;
-          soupX.value = ix;
-          soupY.value = iy;
-          cookingGestureCBs.current.onHover(ix, iy);
-        }
-      })
-      .onEnd((e) => {
-        if (cookingIsDraggingRef.current) {
-          cookingGestureCBs.current.onDrop(
-            e.absoluteX + dragOffsetX.value,
-            e.absoluteY + dragOffsetY.value,
-          );
-        }
-        cookingIsDraggingRef.current = false;
-      })
-      .onFinalize(() => {
-        if (cookingIsDraggingRef.current) {
-          cookingIsDraggingRef.current = false;
-          soupVis.value = withTiming(0, { duration: 150 });
-          cookingGestureCBs.current.onCancel();
-        }
-      }),
-    [], // eslint-disable-line react-hooks/exhaustive-deps
-  );
+  // Cooking item gestures are created per occupied slot further below, next to
+  // the existing Day-1 soup gesture helpers.
 
   // ── Animated styles
   const staminaFillStyle = useAnimatedStyle(() => ({
@@ -646,8 +562,6 @@ export default function KitchenScreen() {
   const gardenPulseStyle = useAnimatedStyle(() => ({
     transform: [{ scale: gardenPulse.value }],
   }));
-
-  // (layout measurement refs moved before cookingTablePanGesture useMemo to avoid TDZ)
 
   // ─────────────────────────────────────────────────────────────────────────
   // Sync tsRef with state
@@ -814,8 +728,8 @@ export default function KitchenScreen() {
                   );
                 }, 800);
               } else {
-                setTs("IDLE");
-                tsRef.current = "IDLE";
+                setTutState("IDLE");
+                await maybeStartTuesdayMorningTutorial(800);
               }
             }
           } else {
@@ -846,6 +760,35 @@ export default function KitchenScreen() {
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** Start the Day-2 Kitchen prompt once the Kitchen is in a stable IDLE state. */
+  async function maybeStartTuesdayMorningTutorial(delayMs = 600): Promise<boolean> {
+    if (tsRef.current !== "IDLE") return false;
+
+    const [tuesdayShown, rawDay2, firstSleepDone] = await Promise.all([
+      AsyncStorage.getItem(SK.TUESDAY_MORNING_SHOWN),
+      AsyncStorage.getItem(SK.DAY_INDEX),
+      AsyncStorage.getItem(SK.FIRST_SLEEP_DONE),
+    ]);
+    const currentDay = rawDay2 ? parseInt(rawDay2, 10) : 0;
+    if (firstSleepDone !== "true" || currentDay < 1 || tuesdayShown === "true") return false;
+
+    // Persist before presenting the prompt so a second focus cannot start it twice.
+    await AsyncStorage.setItem(SK.TUESDAY_MORNING_SHOWN, "true");
+    setGardenActive(true);
+    setTutState("TUESDAY_KITCHEN_GARDEN_PROMPT");
+    setTimeout(() => {
+      showBubble(
+        '"Good morning. Let\'s go to the garden. We also need some water."',
+        "Rupert",
+        "GARDEN_PROMPT",
+        null,
+        () => {},
+        "bubble.tuesday.good_morning",
+      );
+    }, delayMs);
+    return true;
+  }
 
   // Return-from-screen: refresh stats and detect post-garden dialog
   useFocusEffect(
@@ -889,26 +832,8 @@ export default function KitchenScreen() {
           const dormUnlocked = await AsyncStorage.getItem(SK.DORMITORY_UNLOCKED);
           if (dormUnlocked === "true") setDormitoryUnlocked(true);
 
-          // Tuesday morning prompt: day=1, first sleep done, not yet shown
-          const tuesdayShown = await AsyncStorage.getItem(SK.TUESDAY_MORNING_SHOWN);
-          const rawDay2 = await AsyncStorage.getItem(SK.DAY_INDEX);
-          const firstSleepDone = await AsyncStorage.getItem(SK.FIRST_SLEEP_DONE);
-          if (firstSleepDone === "true" && (rawDay2 ? parseInt(rawDay2, 10) : 0) >= 1 && tuesdayShown !== "true") {
-            await AsyncStorage.setItem(SK.TUESDAY_MORNING_SHOWN, "true");
-            setGardenActive(true);
-            setTutState("TUESDAY_KITCHEN_GARDEN_PROMPT");
-            setTimeout(() => {
-              showBubble(
-                '"Good morning. Let\'s go to the garden. We also need some water."',
-                "Rupert",
-                "GARDEN_PROMPT",
-                null,
-                () => {},
-                "bubble.tuesday.good_morning",
-              );
-            }, 600);
-            return;
-          }
+          // Tuesday morning prompt also runs on the initial Kitchen mount via the same helper.
+          if (await maybeStartTuesdayMorningTutorial(600)) return;
 
           // Check post-garden dialog needs to show (first return from garden)
           const seenPostGarden = await AsyncStorage.getItem(SK.HAS_SEEN_POST_GARDEN_DLG);
@@ -1283,6 +1208,135 @@ export default function KitchenScreen() {
     });
   }
 
+  /**
+   * Post-craft tutorial soup interaction. This is intentionally separate from the
+   * Day-1 soup gesture so the proven Day-1 behavior remains untouched.
+   */
+  function onCookingSoupDragBegin(sourceSlot: number, absX: number, absY: number) {
+    if (tsRef.current !== "COOKING_SHARE_EAT") return;
+    const item = tableItemsRef.current[sourceSlot];
+    if (!item || item.id !== "herbsoup") return;
+
+    setSoupSlot(sourceSlot);
+    soupSlotRef.current = sourceSlot;
+    setFlyingItemId("herbsoup");
+
+    // Same anti-flicker handoff as the generic Cooking drag: leave the source
+    // bowl visible until the Herb Soup overlay image has been committed.
+    requestAnimationFrame(() => {
+      if (soupSlotRef.current !== sourceSlot || tsRef.current !== "COOKING_SHARE_EAT") return;
+      setSoupDragging(true);
+      soupVis.value = 1;
+    });
+
+    const slotRef = tableSlotRefs.current[sourceSlot];
+    const applyOffset = (cx: number, cy: number) => {
+      dragOffsetX.value = cx - absX;
+      dragOffsetY.value = cy - absY;
+      soupX.value = cx;
+      soupY.value = cy;
+    };
+
+    if (slotRef) {
+      slotRef.measureInWindow((x, y, w, h) => {
+        if (w > 0) soupFlySize.value = w * 0.80;
+        layouts.current.tableSlots[sourceSlot] = {
+          x, y, w, h, cx: x + w / 2, cy: y + h / 2,
+        };
+        applyOffset(x + w / 2, y + h / 2);
+      });
+      return;
+    }
+
+    const cached = layouts.current.tableSlots[sourceSlot];
+    applyOffset(
+      cached ? (cached.cx ?? cached.x + cached.w / 2) : absX,
+      cached ? (cached.cy ?? cached.y + cached.h / 2) : absY,
+    );
+  }
+
+  function splitCookingSoupStack(sourceSlot: number) {
+    if (tsRef.current !== "COOKING_SHARE_EAT") return;
+    const currentTable = tableItemsRef.current;
+    const stack = currentTable[sourceSlot];
+    if (!stack || stack.id !== "herbsoup" || stack.quantity <= 1) return;
+
+    const freeSlot = currentTable.findIndex((item, idx) => idx !== sourceSlot && item === null);
+    if (freeSlot < 0) {
+      showPlayerBubble('\"I need some room on the table.\"');
+      return;
+    }
+
+    const newTable = currentTable.slice();
+    newTable[sourceSlot] = { ...stack, quantity: stack.quantity - 1 };
+    newTable[freeSlot] = { ...stack, quantity: 1 };
+    tableItemsRef.current = newTable;
+    setTableItems(newTable);
+    setSoupSlot(sourceSlot);
+    soupSlotRef.current = sourceSlot;
+    AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(newTable)).catch(() => {});
+    audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
+    setTooltipVisible(false);
+
+    showBubble(
+      '\"That smells delicious. Please pass me a bowl and dig in, too.\"',
+      "Rupert", "ALLOW_ITEM", null, () => {}, "bubble.cooking.share_after_split",
+    );
+  }
+
+  function createCookingSoupGesture(sourceSlot: number, quantity: number) {
+    const cookingSoupTap = Gesture.Tap()
+      .maxDeltaX(8).maxDeltaY(8)
+      .onEnd(() => { runOnJS(splitCookingSoupStack)(sourceSlot); });
+
+    const cookingSoupLongPress = Gesture.LongPress()
+      .minDuration(500)
+      .onStart(() => {
+        runOnJS(setKitchenDetailItem)({
+          id: "herbsoup",
+          itemType: "herbsoup",
+          name: "Herb Soup",
+          quantity,
+          attributes: ["edible"],
+        });
+      });
+
+    const cookingSoupPan = Gesture.Pan()
+      .minDistance(10)
+      .onStart((e) => {
+        cancelAnimation(soupX);
+        cancelAnimation(soupY);
+        cancelAnimation(soupVis);
+        cancelAnimation(soupScale);
+        // Do not reveal the shared overlay with the previous item's React source.
+        // onCookingSoupDragBegin switches it to Herb Soup, then reveals next frame.
+        soupVis.value = 0;
+        soupScale.value = 1;
+        runOnJS(onCookingSoupDragBegin)(sourceSlot, e.absoluteX, e.absoluteY);
+      })
+      .onUpdate((e) => {
+        const itemX = e.absoluteX + dragOffsetX.value;
+        const itemY = e.absoluteY + dragOffsetY.value;
+        soupX.value = itemX;
+        soupY.value = itemY;
+        runOnJS(updateHoveredSlot)(itemX, itemY);
+      })
+      .onEnd((e) => {
+        runOnJS(handleDrop)(
+          e.absoluteX + dragOffsetX.value,
+          e.absoluteY + dragOffsetY.value,
+        );
+      })
+      .onFinalize((_, success) => {
+        if (!success) {
+          soupVis.value = withTiming(0, { duration: 100 });
+          runOnJS(onGestureCancelled)();
+        }
+      });
+
+    return Gesture.Race(cookingSoupPan, cookingSoupLongPress, cookingSoupTap);
+  }
+
   // ── Soup tap (tooltip)
   function handleSoupTap() {
     const cur = tsRef.current;
@@ -1406,8 +1460,24 @@ export default function KitchenScreen() {
 
     // Cooking tutorial share/eat path
     if (tsRef.current === "COOKING_SHARE_EAT") {
-      if (lr && inRect(itemX, itemY, lr)) { onCookingShareWithRupert(); return; }
-      if (lp && inRect(itemX, itemY, lp)) { onCookingEatSoup(itemX, itemY); return; }
+      const curSlot = soupSlotRef.current;
+      const currentSoup = curSlot !== null && curSlot < 12
+        ? tableItemsRef.current[curSlot]
+        : null;
+      const stackedSoup = currentSoup?.id === "herbsoup" && currentSoup.quantity > 1;
+      const droppedOnRupert = !!lr && inRect(itemX, itemY, lr);
+      const droppedOnPlayer = !!lp && inRect(itemX, itemY, lp);
+
+      if (stackedSoup && (droppedOnRupert || droppedOnPlayer)) {
+        returnDragToSlot(itemX, itemY);
+        showBubble(
+          '"We wanted to share."',
+          "Rupert", "ALLOW_ITEM", null, () => {}, "bubble.cooking.share_stack_reject",
+        );
+        return;
+      }
+      if (droppedOnRupert) { onCookingShareWithRupert(); return; }
+      if (droppedOnPlayer) { onCookingEatSoup(itemX, itemY); return; }
       endDragClean(); return;
     }
 
@@ -1432,7 +1502,9 @@ export default function KitchenScreen() {
       }
       // Check valid craft slot (0-2 only)
       if (target === -1) {
-        for (let i = 0; i < lcs.length; i++) {
+        // Day-1 Herb Soup may be moved into ingredient slots 0-2 only.
+        // The Tool slot is not a valid destination for this tutorial item.
+        for (let i = 0; i < 3; i++) {
           if (lcs[i] && inRect(itemX, itemY, lcs[i]!)) { target = 12 + i; break; }
         }
       }
@@ -1796,24 +1868,120 @@ export default function KitchenScreen() {
     });
   }
 
-  /** Update hovered slot during cooking drag with item-type validation. */
+  function isKitchenItemInteractionState(state: TState) {
+    return state === "IDLE" ||
+      state === "COOKING_UNPACK_WAIT" ||
+      state === "COOKING_CRAFT_READY" ||
+      state === "COOKING_SHARE_EAT" ||
+      state === "COOKING_DONE";
+  }
+
+  function getCookingItemAtSlot(slot: number): BagItem | null {
+    if (slot <= 11) return tableItemsRef.current[slot] ?? null;
+    if (slot <= 14) return craftIngSlotsRef.current[slot - 12] ?? null;
+    if (slot === 15) return craftToolRef.current;
+    return null;
+  }
+
+  function showCookingItemDetails(slot: number) {
+    const item = getCookingItemAtSlot(slot);
+    if (item) setKitchenDetailItem({ ...item });
+  }
+
+  function handleCookingItemTap(slot: number) {
+    const item = getCookingItemAtSlot(slot);
+    if (!item) return;
+    const cur = tsRef.current;
+    const onTable = slot <= 11;
+
+    // Herb Bag keeps its tutorial unpack behavior while ingredients are being prepared.
+    // After crafting it behaves like a normal inspectable item instead of changing the tutorial.
+    if (onTable && item.id === "herbbag" &&
+        (cur === "COOKING_UNPACK_WAIT" || cur === "COOKING_CRAFT_READY")) {
+      const remaining = item.containedQuantity ?? 0;
+      if (selectedHerbbagSlot === null || selectedHerbbagSlot !== slot) {
+        setSelectedHerbbagSlot(slot);
+        setSelectedHerbsSlot(null);
+        showCookingTooltip("Herb Bag", "Contains: " + remaining + (remaining === 1 ? " herb" : " herbs"));
+      } else {
+        unpackOneHerb(slot, item);
+        const afterQty = remaining - 1;
+        if (afterQty > 0) {
+          showCookingTooltip("Herb Bag", "Contains: " + afterQty + (afterQty === 1 ? " herb" : " herbs"));
+        } else {
+          setTooltipVisible(false);
+        }
+      }
+      return;
+    }
+
+    // Herbs use the same select-then-split interaction whenever they are on the Table.
+    if (onTable && item.id === "herbs" && isKitchenItemInteractionState(cur)) {
+      if (selectedHerbsSlot === null || selectedHerbsSlot !== slot) {
+        setSelectedHerbsSlot(slot);
+        setSelectedHerbbagSlot(null);
+        showCookingTooltip(ITEM_CATALOG["herbs"].name, ITEM_CATALOG["herbs"].description);
+      } else {
+        if (item.quantity <= 1) {
+          setSelectedHerbsSlot(null);
+          setTooltipVisible(false);
+          return;
+        }
+        const splitTable = tableItemsRef.current.slice();
+        splitTable[slot] = { ...item, quantity: item.quantity - 1 };
+        let splitPlaced = false;
+        for (let si = 0; si < 12; si++) {
+          if (si === slot) continue;
+          if (!splitTable[si]) {
+            splitTable[si] = { id: "herbs", itemType: "herbs", name: "Herbs", quantity: 1, attributes: ["ingredient"] };
+            splitPlaced = true;
+            break;
+          }
+        }
+        if (!splitPlaced) { showPlayerBubble('"No free space available."'); return; }
+        tableItemsRef.current = splitTable;
+        setTableItems(splitTable);
+        AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(splitTable)).catch(() => {});
+        audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
+        setSelectedHerbsSlot(null);
+        setTooltipVisible(false);
+        if (cur === "COOKING_UNPACK_WAIT") checkCookingProgress(splitTable);
+      }
+      return;
+    }
+
+    const catalogEntry = ITEM_CATALOG[item.id];
+    if (item.id === "herbbag") {
+      const remaining = item.containedQuantity ?? 0;
+      showCookingTooltip("Herb Bag", "Contains: " + remaining + (remaining === 1 ? " herb" : " herbs"));
+    } else if (catalogEntry) {
+      showCookingTooltip(catalogEntry.name, catalogEntry.description);
+    } else {
+      showCookingTooltip(item.name, "");
+    }
+  }
+
+  /** Update hovered slot during a generic kitchen item drag. */
   function updateCookingHoveredSlot(itemX: number, itemY: number) {
     const srcSlot = cookingDraggedSlotRef.current;
+    const cur = tsRef.current;
     const lts = layouts.current.tableSlots;
     const lcs = layouts.current.craftSlots;
     let next: number | null = null;
 
-    // Check craft ingredient slots (skip source slot)
-    for (let i = 0; i < 3; i++) {
-      if (12 + i === srcSlot) continue;
-      if (!lcs[i] || !inRect(itemX, itemY, lcs[i]!)) continue;
-      next = 12 + i; break;
+    // Ingredient and Tool targets are only fully open while the recipe tutorial is active.
+    if (cur === "COOKING_CRAFT_READY") {
+      for (let i = 0; i < 3; i++) {
+        if (12 + i === srcSlot) continue;
+        if (lcs[i] && inRect(itemX, itemY, lcs[i]!)) { next = 12 + i; break; }
+      }
     }
-    // Check craft tool slot (skip if source)
-    if (next === null && srcSlot !== 15 && lcs[3] && inRect(itemX, itemY, lcs[3]!)) {
+    // Once crafting is finished (and in normal Kitchen IDLE), the Tool slot remains a
+    // normal movable slot, but ingredient slots do not silently re-enable crafting.
+    if (next === null && cur !== "COOKING_UNPACK_WAIT" && srcSlot !== 15 &&
+        lcs[3] && inRect(itemX, itemY, lcs[3]!)) {
       next = 15;
     }
-    // Check table slots (valid for any item, but not the source slot)
     if (next === null) {
       for (let i = 0; i < lts.length; i++) {
         if (i === srcSlot) continue;
@@ -1826,84 +1994,212 @@ export default function KitchenScreen() {
     }
   }
 
-  /** Called from worklet when user starts dragging a cooking item. */
-  function onCookingDragStarted(slotIdx: number, itemId: string) {
-    if (tsRef.current !== "COOKING_CRAFT_READY") return;
+  /** Begin a generic kitchen drag whose source slot is already known. */
+  function onCookingDragStarted(slotIdx: number, itemId: string, absX: number, absY: number) {
+    const cur = tsRef.current;
+    if (!isKitchenItemInteractionState(cur)) return;
+    if (cur === "COOKING_UNPACK_WAIT" && slotIdx > 11) return;
+
     cookingDraggedSlotRef.current = slotIdx;
     cookingDragItemIdRef.current = itemId;
     setCookingDragActiveSlot(slotIdx);
     setFlyingItemId(itemId);
-    setSoupDragging(true);
-    // Get layout from correct slot group (table, craft ingredient, or tool)
-    let slotL: LRect | null | undefined;
-    if (slotIdx <= 11)       slotL = layouts.current.tableSlots[slotIdx];
-    else if (slotIdx <= 14)  slotL = layouts.current.craftSlots[slotIdx - 12];
-    else if (slotIdx === 15) slotL = layouts.current.craftSlots[3];
-    if (slotL) { soupX.value = slotL.cx ?? slotL.x + slotL.w / 2; soupY.value = slotL.cy ?? slotL.y + slotL.h / 2; }
+
+    // Keep the source visible until React has committed the new overlay image.
+    requestAnimationFrame(() => {
+      if (cookingDraggedSlotRef.current !== slotIdx || !isKitchenItemInteractionState(tsRef.current)) return;
+      setSoupDragging(true);
+      soupVis.value = 1;
+    });
+
+    const slotRef = slotIdx <= 11
+      ? tableSlotRefs.current[slotIdx]
+      : craftSlotRefs.current[slotIdx === 15 ? 3 : slotIdx - 12];
+
+    const applyOffset = (cx: number, cy: number) => {
+      dragOffsetX.value = cx - absX;
+      dragOffsetY.value = cy - absY;
+      soupX.value = cx;
+      soupY.value = cy;
+    };
+
+    if (slotRef) {
+      slotRef.measureInWindow((x, y, w, h) => {
+        if (w > 0) soupFlySize.value = w * 0.80;
+        const rect = { x, y, w, h, cx: x + w / 2, cy: y + h / 2 };
+        if (slotIdx <= 11) layouts.current.tableSlots[slotIdx] = rect;
+        else layouts.current.craftSlots[slotIdx === 15 ? 3 : slotIdx - 12] = rect;
+        applyOffset(rect.cx!, rect.cy!);
+      });
+      return;
+    }
+
+    const cached = slotIdx <= 11
+      ? layouts.current.tableSlots[slotIdx]
+      : layouts.current.craftSlots[slotIdx === 15 ? 3 : slotIdx - 12];
+    applyOffset(
+      cached ? (cached.cx ?? cached.x + cached.w / 2) : absX,
+      cached ? (cached.cy ?? cached.y + cached.h / 2) : absY,
+    );
   }
 
-  /** Called from worklet when user releases a cooking item drag. */
-  function handleCookingItemDrop(absX: number, absY: number) {
+  function onCookingDragCancelled() {
+    cookingDraggedSlotRef.current = -1;
+    cookingDragItemIdRef.current = "";
+    setSoupDragging(false);
+    setCookingDragActiveSlot(-1);
+    hoveredSlotRef.current = null;
+    setHoveredSlot(null);
+  }
+
+  /**
+   * Every generic Kitchen item uses the same interaction contract:
+   * drag, long-press details, and short-tap item action/info.
+   */
+  function createCookingItemGesture(sourceSlot: number, itemId: string) {
+    const itemTap = Gesture.Tap()
+      .maxDeltaX(8).maxDeltaY(8)
+      .onEnd(() => { runOnJS(handleCookingItemTap)(sourceSlot); });
+
+    const itemLongPress = Gesture.LongPress()
+      .minDuration(500)
+      .onStart(() => { runOnJS(showCookingItemDetails)(sourceSlot); });
+
+    const itemPan = Gesture.Pan()
+      .minDistance(10)
+      .onStart((e) => {
+        cancelAnimation(soupX);
+        cancelAnimation(soupY);
+        cancelAnimation(soupVis);
+        cancelAnimation(soupScale);
+        // Keep the shared overlay hidden until JS has switched to this exact item.
+        soupVis.value = 0;
+        soupScale.value = 1;
+        runOnJS(onCookingDragStarted)(sourceSlot, itemId, e.absoluteX, e.absoluteY);
+      })
+      .onUpdate((e) => {
+        const itemX = e.absoluteX + dragOffsetX.value;
+        const itemY = e.absoluteY + dragOffsetY.value;
+        soupX.value = itemX;
+        soupY.value = itemY;
+        runOnJS(updateCookingHoveredSlot)(itemX, itemY);
+      })
+      .onEnd((e) => {
+        runOnJS(handleCookingItemDrop)(
+          sourceSlot,
+          e.absoluteX + dragOffsetX.value,
+          e.absoluteY + dragOffsetY.value,
+        );
+      })
+      .onFinalize((_, success) => {
+        if (!success) {
+          soupVis.value = withTiming(0, { duration: 100 });
+          runOnJS(onCookingDragCancelled)();
+        }
+      });
+
+    return Gesture.Race(itemPan, itemLongPress, itemTap);
+  }
+
+  /** Drop a generic Kitchen item. Source is supplied by the item's own GestureDetector. */
+  function handleCookingItemDrop(srcSlot: number, absX: number, absY: number) {
+    cookingDraggedSlotRef.current = -1;
+    cookingDragItemIdRef.current = "";
     setSoupDragging(false);
     setCookingDragActiveSlot(-1);
     setHoveredSlot(null);
     hoveredSlotRef.current = null;
-    soupVis.value = withTiming(0, { duration: 150 });
-    if (tsRef.current !== "COOKING_CRAFT_READY") return;
-    const srcSlot = cookingDraggedSlotRef.current;
-    cookingDraggedSlotRef.current = -1;
-    if (srcSlot < 0) return;
+    soupVis.value = withTiming(0, { duration: 100 });
+
+    const cur = tsRef.current;
+    if (!isKitchenItemInteractionState(cur)) return;
+    if (cur === "COOKING_UNPACK_WAIT" && srcSlot > 11) return;
 
     const lcs = layouts.current.craftSlots;
     const lts = layouts.current.tableSlots;
-
-    // Determine destination slot from drop position
     let destSlot = -1;
-    for (let i = 0; i < 3; i++) {                              // craft ing 12-14
-      if (lcs[i] && inRect(absX, absY, lcs[i]!)) { destSlot = 12 + i; break; }
+
+    // Only the active recipe phase opens Ingredient slots as destinations.
+    if (cur === "COOKING_CRAFT_READY") {
+      for (let i = 0; i < 3; i++) {
+        if (lcs[i] && inRect(absX, absY, lcs[i]!)) { destSlot = 12 + i; break; }
+      }
     }
-    if (destSlot < 0 && lcs[3] && inRect(absX, absY, lcs[3]!)) destSlot = 15; // tool
+    // Tool is available after Rupert introduces it, including after crafting / normal IDLE.
+    if (destSlot < 0 && cur !== "COOKING_UNPACK_WAIT" && lcs[3] && inRect(absX, absY, lcs[3]!)) {
+      destSlot = 15;
+    }
     if (destSlot < 0) {
-      for (let i = 0; i < lts.length; i++) {                   // table 0-11
+      for (let i = 0; i < lts.length; i++) {
         if (lts[i] && inRect(absX, absY, lts[i]!)) { destSlot = i; break; }
       }
     }
-    if (destSlot < 0 || destSlot === srcSlot) return; // nowhere valid / same slot
 
-    // Read current items – helper
+    if (destSlot < 0 || destSlot === srcSlot) return;
+
+    const curTable = tableItemsRef.current;
+    const curIng = craftIngSlotsRef.current;
+    const curTool = craftToolRef.current;
     const getItem = (slot: number): BagItem | null => {
-      if (slot <= 11)      return tableItems[slot];
-      if (slot <= 14)      return craftIngSlots[slot - 12];
-      if (slot === 15)     return craftTool;
+      if (slot <= 11) return curTable[slot];
+      if (slot <= 14) return curIng[slot - 12];
+      if (slot === 15) return curTool;
       return null;
     };
+
     const srcItem = getItem(srcSlot);
     if (!srcItem) return;
-    const destItem = getItem(destSlot); // null = empty slot
+    const destItem = getItem(destSlot);
 
-    // Perform atomic swap: srcSlot ← destItem, destSlot ← srcItem
-    const newTable = tableItems.slice();
-    const newIng   = craftIngSlots.slice() as (BagItem | null)[];
-    let   newTool  = craftTool;
+    const newTable = curTable.slice();
+    const newIng = curIng.slice() as (BagItem | null)[];
+    let newTool = curTool;
 
-    if (srcSlot <= 11)       newTable[srcSlot]       = destItem;
-    else if (srcSlot <= 14)  newIng[srcSlot - 12]    = destItem;
-    else if (srcSlot === 15) newTool                 = destItem;
+    const setItemAtSlot = (slot: number, item: BagItem | null) => {
+      if (slot <= 11) newTable[slot] = item;
+      else if (slot <= 14) newIng[slot - 12] = item;
+      else if (slot === 15) newTool = item;
+    };
 
-    if (destSlot <= 11)       newTable[destSlot]      = srcItem;
-    else if (destSlot <= 14)  newIng[destSlot - 12]   = srcItem;
-    else if (destSlot === 15) newTool                 = srcItem;
+    // Kitchen Table stacks merge when the dragged item is dropped onto a
+    // compatible table stack. Recipe Ingredient/Tool slots intentionally keep
+    // their existing swap behavior so crafting semantics do not change here.
+    const canMergeOnTable =
+      srcSlot <= 11 &&
+      destSlot <= 11 &&
+      destItem !== null &&
+      canStack(srcItem, destItem);
 
-    // Commit state + storage
+    if (canMergeOnTable) {
+      const maxStack = getContainerStackLimit("kitchenTable");
+      const capacity = Math.max(0, maxStack - destItem.quantity);
+      if (capacity <= 0) return;
+
+      const movedQty = Math.min(srcItem.quantity, capacity);
+      const remainingQty = srcItem.quantity - movedQty;
+
+      setItemAtSlot(destSlot, { ...destItem, quantity: destItem.quantity + movedQty });
+      setItemAtSlot(srcSlot, remainingQty > 0 ? { ...srcItem, quantity: remainingQty } : null);
+    } else {
+      // Non-compatible items keep the established drag-and-drop swap behavior.
+      setItemAtSlot(srcSlot, destItem);
+      setItemAtSlot(destSlot, srcItem);
+    }
+
+    tableItemsRef.current = newTable;
+    craftIngSlotsRef.current = newIng;
+    craftToolRef.current = newTool;
+
     setTableItems(newTable);
-    AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(newTable)).catch(() => {});
     setCraftIngSlots(newIng);
-    AsyncStorage.setItem(SK.CRAFT_INGREDIENTS, JSON.stringify(newIng)).catch(() => {});
     setCraftTool(newTool);
+    AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(newTable)).catch(() => {});
+    AsyncStorage.setItem(SK.CRAFT_INGREDIENTS, JSON.stringify(newIng)).catch(() => {});
     AsyncStorage.setItem(SK.CRAFT_TOOL_SLOT, JSON.stringify(newTool)).catch(() => {});
 
     audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
-    setTimeout(updateCraftResultPreview, 50);
+    if (cur === "COOKING_CRAFT_READY") setTimeout(updateCraftResultPreview, 50);
+    if (cur === "COOKING_UNPACK_WAIT") checkCookingProgress(newTable);
   }
 
   /** Called from worklet on oldpot landing. */
@@ -2013,20 +2309,22 @@ export default function KitchenScreen() {
     // Need current refs - use immediate state via functional setter
     setCraftIngSlots(prevIng => {
       setCraftTool(prevTool => {
-        // Count herbs and bucketwater quantities across all ingredient slots
+        // Herb Soup is an exact recipe: 2 herbs + 1 bucket of water + 1 old pot.
+        // Any additional ingredient item makes the recipe invalid.
         let herbsQty = 0;
         let bucketwaterQty = 0;
+        let hasUnexpectedIngredient = false;
         for (const slot of prevIng) {
           if (!slot) continue;
           if (slot.id === "herbs") herbsQty += slot.quantity;
-          if (slot.id === "bucketwater") bucketwaterQty += slot.quantity;
+          else if (slot.id === "bucketwater") bucketwaterQty += slot.quantity;
+          else hasUnexpectedIngredient = true;
         }
-        // Valid only if exact 2:1 ratio: herbs === bucketwater * 2 (e.g. 2:1, 4:2)
-        const toolMet = prevTool?.id === HERB_SOUP_RECIPE.tool;
-        const ratioValid = bucketwaterQty >= 1 && herbsQty === bucketwaterQty * 2;
+        const toolMet = prevTool?.id === HERB_SOUP_RECIPE.tool && prevTool.quantity === 1;
+        const ingredientsMet = !hasUnexpectedIngredient && herbsQty === 2 && bucketwaterQty === 1;
         setCraftResult(
-          (toolMet && ratioValid)
-            ? { id: "herbsoup", itemType: "herbsoup", name: "Herb Soup", quantity: herbsQty, attributes: ["edible"] }
+          (toolMet && ingredientsMet)
+            ? { id: "herbsoup", itemType: "herbsoup", name: "Herb Soup", quantity: 2, attributes: ["edible"] }
             : null,
         );
         return prevTool;
@@ -2039,20 +2337,37 @@ export default function KitchenScreen() {
     if (craftingLocked.current) return;
     if (!craftResult) return;
     craftingLocked.current = true;
+
+    // Defensive execution-time validation so a stale preview can never consume
+    // unrelated items or craft a recipe that is no longer exact.
+    let herbsQty = 0;
+    let bucketwaterCount = 0;
+    let hasUnexpectedIngredient = false;
+    for (const slot of craftIngSlots) {
+      if (!slot) continue;
+      if (slot.id === "herbs") herbsQty += slot.quantity;
+      else if (slot.id === "bucketwater") bucketwaterCount += slot.quantity;
+      else hasUnexpectedIngredient = true;
+    }
+    const exactRecipe =
+      !hasUnexpectedIngredient &&
+      herbsQty === 2 &&
+      bucketwaterCount === 1 &&
+      craftTool?.id === HERB_SOUP_RECIPE.tool &&
+      craftTool.quantity === 1;
+    if (!exactRecipe) {
+      craftingLocked.current = false;
+      setCraftResult(null);
+      showPlayerBubble('"There is no recipe for that."');
+      return;
+    }
+
     audioManager.playSoundEffect('cookingpot', { maxDurationMs: 6000 });
 
-    // Compute bucketwater count from craft slots to determine multiplier
-    let bucketwaterCount = 0;
-    for (const slot of craftIngSlots) {
-      if (slot?.id === "bucketwater") bucketwaterCount += slot.quantity;
-    }
-    if (bucketwaterCount < 1) bucketwaterCount = 1; // safety fallback
-    const herbsoupQty = bucketwaterCount * 2;
-
-    // Output: ONE stack of herbsoup + ONE stack of empty buckets (one per bucketwater used)
+    // Output: 2 herb soups + the emptied bucket. The old pot is reusable and stays.
     const outputs: BagItem[] = [
-      { id: "herbsoup", itemType: "herbsoup", name: "Herb Soup", quantity: herbsoupQty, attributes: ["edible"] },
-      { id: "bucket",   itemType: "bucket",   name: "Empty Bucket", quantity: bucketwaterCount, attributes: ["vessel"] },
+      { id: "herbsoup", itemType: "herbsoup", name: "Herb Soup", quantity: 2, attributes: ["edible"] },
+      { id: "bucket",   itemType: "bucket",   name: "Empty Bucket", quantity: 1, attributes: ["vessel"] },
     ];
     const newTable = tableItems.slice();
     let placed = 0;
@@ -2066,14 +2381,44 @@ export default function KitchenScreen() {
       showPlayerBubble('"No free space available."');
       return;
     }
-    // Clear craft slots
-    setCraftIngSlots([null, null, null]);
-    setCraftTool(null);
+
+    // Consume only recipe ingredients. Never blanket-clear input slots.
+    let herbsToConsume = 2;
+    let waterToConsume = 1;
+    const newIng = craftIngSlots.map((slot): BagItem | null => {
+      if (!slot) return null;
+      if (slot.id === "herbs" && herbsToConsume > 0) {
+        const consumed = Math.min(slot.quantity, herbsToConsume);
+        herbsToConsume -= consumed;
+        const remaining = slot.quantity - consumed;
+        return remaining > 0 ? { ...slot, quantity: remaining } : null;
+      }
+      if (slot.id === "bucketwater" && waterToConsume > 0) {
+        const consumed = Math.min(slot.quantity, waterToConsume);
+        waterToConsume -= consumed;
+        const remaining = slot.quantity - consumed;
+        return remaining > 0 ? { ...slot, quantity: remaining } : null;
+      }
+      return slot;
+    });
+
+    if (herbsToConsume !== 0 || waterToConsume !== 0) {
+      craftingLocked.current = false;
+      showPlayerBubble('"There is no recipe for that."');
+      return;
+    }
+
+    // Keep refs synchronous with state so the next interaction sees the new contents.
+    tableItemsRef.current = newTable;
+    craftIngSlotsRef.current = newIng;
+    craftToolRef.current = craftTool;
+
+    setCraftIngSlots(newIng);
     setCraftResult(null);
     setTableItems(newTable);
     AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(newTable)).catch(() => {});
-    AsyncStorage.setItem(SK.CRAFT_INGREDIENTS, JSON.stringify([null, null, null])).catch(() => {});
-    AsyncStorage.setItem(SK.CRAFT_TOOL_SLOT, JSON.stringify(null)).catch(() => {});
+    AsyncStorage.setItem(SK.CRAFT_INGREDIENTS, JSON.stringify(newIng)).catch(() => {});
+    AsyncStorage.setItem(SK.CRAFT_TOOL_SLOT, JSON.stringify(craftTool)).catch(() => {});
     AsyncStorage.setItem(SK.COOKING_STEP, "3").catch(() => {});
 
     setTutState("COOKING_CRAFT_DONE");
@@ -2081,12 +2426,14 @@ export default function KitchenScreen() {
     setTimeout(() => showDialog(D_CRAFT_SUCCESS, () => {
       setTutState("COOKING_SHARE_EAT");
       tsRef.current = "COOKING_SHARE_EAT";
-      // Set first herbsoup as draggable via soupSlot
+      setFlyingItemId("herbsoup");
+      // Track the first soup for compatibility with the existing tutorial flow.
+      // In COOKING_SHARE_EAT every soup stack gets its own GestureDetector below.
       const soup1 = newTable.findIndex(it => it?.id === "herbsoup");
       if (soup1 >= 0) { setSoupSlot(soup1); soupSlotRef.current = soup1; }
       showBubble(
-        '"Take one bowl to me."',
-        "Rupert", "ALLOW_ITEM", null, () => {}, "bubble.cooking.share_request",
+        '"We made enough for two. Can you please split them into 2 bowls?"',
+        "Rupert", "ALLOW_ITEM", null, () => {}, "bubble.cooking.split_soup_request",
       );
     }), 400);
     setTimeout(() => { craftingLocked.current = false; }, 2000);
@@ -2096,8 +2443,9 @@ export default function KitchenScreen() {
     endDragClean();
     cookingShareDoneRef.current = true;
     const curSlot = soupSlotRef.current;
-    const newTable = tableItems.slice();
+    const newTable = tableItemsRef.current.slice();
     if (curSlot !== null && curSlot < 12) newTable[curSlot] = null;
+    tableItemsRef.current = newTable;
     setSoupSlot(null); soupSlotRef.current = null;
     setTableItems(newTable);
     AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(newTable)).catch(() => {});
@@ -2113,8 +2461,9 @@ export default function KitchenScreen() {
     if (cookingEatDoneRef.current) { endDragClean(); return; }
     cookingEatDoneRef.current = true;
     const curSlot = soupSlotRef.current;
-    const newTable = tableItems.slice();
+    const newTable = tableItemsRef.current.slice();
     if (curSlot !== null && curSlot < 12) newTable[curSlot] = null;
+    tableItemsRef.current = newTable;
     setSoupSlot(null); soupSlotRef.current = null;
     setSoupDragging(false);
     setTableItems(newTable);
@@ -2208,7 +2557,8 @@ export default function KitchenScreen() {
       }
     }
     if (next === null) {
-      for (let i = 0; i < lcs.length; i++) {
+      // Day-1 Herb Soup may use ingredient slots 0-2, but never the Tool slot (index 3).
+      for (let i = 0; i < 3; i++) {
         if (lcs[i] && inRect(itemX, itemY, lcs[i]!)) {
           const t = 12 + i; next = t !== soupSlotRef.current ? t : null; break;
         }
@@ -2280,7 +2630,7 @@ export default function KitchenScreen() {
   // Render helpers
   // ─────────────────────────────────────────────────────────────────────────
   const tutActive = ts !== "IDLE" && ts !== "LOADING" && ts !== "TUTORIAL_DONE";
-  const tutInteractable = ts === "SOUP_ON_TABLE" || ts === "TOOLTIP_VISIBLE" || ts === "SOUP_AVAILABLE" || ts === "COOKING_SHARE_EAT";
+  const tutInteractable = ts === "SOUP_ON_TABLE" || ts === "TOOLTIP_VISIBLE" || ts === "SOUP_AVAILABLE" || ts === "COOKING_CRAFT_READY" || ts === "COOKING_SHARE_EAT";
   const showDlgOverlay = dlgActive || ts === "QUESTION_CHOICE" || ts === "NAME_INPUT";
 
   // Current dialog line
@@ -2290,6 +2640,10 @@ export default function KitchenScreen() {
     : null;
 
   function renderSoupInSlot(slotIdx: number) {
+    // Post-craft soup stacks are rendered from tableItems so every bowl can own
+    // its own gesture. Keep the original renderer exclusively for the Day-1 flow.
+    if (ts === "COOKING_SHARE_EAT") return null;
+
     // Check only if this slot owns the soup — NOT !soupDragging.
     // The GestureDetector must stay mounted throughout the entire drag lifecycle.
     // If we unmount it when soupDragging=true, RNGH loses the gesture mid-drag
@@ -2319,140 +2673,88 @@ export default function KitchenScreen() {
     );
   }
 
-  /** Render a non-soup item that was unpacked from the bag into this slot. */
+  /** Render a normal Kitchen table item with consistent interactions. */
   function renderTableItemInSlot(slotIdx: number) {
     const item = tableItems[slotIdx];
     if (!item) return null;
     const imgSrc = ITEM_IMAGES[item.id] ?? null;
 
-    const inCookingPhase = ts === "COOKING_UNPACK_WAIT" || ts === "COOKING_CRAFT_READY";
     const isSelectedHerbbag = selectedHerbbagSlot === slotIdx;
     const isSelectedHerbs   = selectedHerbsSlot === slotIdx && item.id === "herbs";
-    const isCookingHerbbag  = inCookingPhase && item.id === "herbbag";
+    const showHerbbagTapHint = (ts === "COOKING_UNPACK_WAIT" || ts === "COOKING_CRAFT_READY") &&
+      item.id === "herbbag" && isSelectedHerbbag;
 
-    // ── Craft-phase draggable items — ALL table items draggable in COOKING_CRAFT_READY ──
-    // NO per-slot GestureDetector – the stable cookingTablePanGesture (at table+craft level)
-    // handles all drags.  Only render the item image; source disappears while dragging.
-    const isDraggable = ts === "COOKING_CRAFT_READY";
-
-    if (isDraggable) {
-      const isBeingDragged = soupDragging && cookingDragActiveSlot === slotIdx;
+    // Herb Soup keeps its dedicated share/eat tutorial behavior after crafting.
+    if (ts === "COOKING_SHARE_EAT" && item.id === "herbsoup") {
+      const isBeingDragged = soupDragging && soupSlot === slotIdx;
+      const gesture = createCookingSoupGesture(slotIdx, item.quantity);
       return (
-        <View style={{ width: "100%", height: "100%", alignItems: "center", justifyContent: "center" }}>
-          {!isBeingDragged && imgSrc && (
-            <Image source={imgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
-          )}
-          {!isBeingDragged && item.quantity > 1 && (
-            <Text style={styles.tableItemQty}>{item.quantity}</Text>
-          )}
-        </View>
+        <GestureDetector gesture={gesture}>
+          <View style={styles.soupSlotTouch}>
+            {!isBeingDragged && imgSrc && (
+              <Image source={imgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
+            )}
+            {!isBeingDragged && item.quantity > 1 && (
+              <Text style={styles.tableItemQty}>{item.quantity}</Text>
+            )}
+          </View>
+        </GestureDetector>
       );
     }
 
-    // ── Normal / herbbag / herbs tap handler ────────────────────────────────
-    function handleCookingTableTap() {
-      if (!inCookingPhase) return;
-      if (item.id === "herbbag") {
-        const remaining = item.containedQuantity ?? 0;
-        if (selectedHerbbagSlot === null || selectedHerbbagSlot !== slotIdx) {
-          setSelectedHerbbagSlot(slotIdx);
-          showCookingTooltip("Herb Bag", "Contains: " + remaining + (remaining === 1 ? " herb" : " herbs"));
-        } else {
-          unpackOneHerb(slotIdx, item);
-          const afterQty = remaining - 1;
-          if (afterQty > 0) {
-            showCookingTooltip("Herb Bag", "Contains: " + afterQty + (afterQty === 1 ? " herb" : " herbs"));
-          } else {
-            setTooltipVisible(false);
-          }
-        }
-        return;
-      }
-      if (item.id === "herbs") {
-        if (selectedHerbsSlot === null || selectedHerbsSlot !== slotIdx) {
-          // First tap: select and show tooltip
-          setSelectedHerbsSlot(slotIdx);
-          setSelectedHerbbagSlot(null);
-          showCookingTooltip(ITEM_CATALOG["herbs"].name, ITEM_CATALOG["herbs"].description);
-        } else {
-          // Second tap: split one herb from stack to a free slot
-          if (item.quantity <= 1) {
-            setSelectedHerbsSlot(null);
-            setTooltipVisible(false);
-            return;
-          }
-          const splitTable = tableItems.slice();
-          splitTable[slotIdx] = { ...item, quantity: item.quantity - 1 };
-          let splitPlaced = false;
-          for (let si = 0; si < 12; si++) {
-            if (si === slotIdx) continue;
-            if (!splitTable[si]) {
-              splitTable[si] = { id: "herbs", itemType: "herbs", name: "Herbs", quantity: 1, attributes: ["ingredient"] };
-              splitPlaced = true;
-              break;
-            }
-          }
-          if (!splitPlaced) { showPlayerBubble('"No free space available."'); return; }
-          audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
-          setTableItems(splitTable);
-          AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(splitTable)).catch(() => {});
-          setSelectedHerbsSlot(null);
-          setTooltipVisible(false);
-          checkCookingProgress(splitTable);
-        }
-        return;
-      }
-      // All other table items: show brief tooltip from catalog
-      const catalogEntry = ITEM_CATALOG[item.id];
-      if (catalogEntry) {
-        showCookingTooltip(catalogEntry.name, catalogEntry.description);
-      }
+    if (isKitchenItemInteractionState(ts)) {
+      const isBeingDragged = soupDragging && cookingDragActiveSlot === slotIdx;
+      const gesture = createCookingItemGesture(slotIdx, item.id);
+      return (
+        <GestureDetector gesture={gesture}>
+          <View
+            style={[
+              styles.soupSlotTouch,
+              isSelectedHerbbag && { borderWidth: 2, borderColor: "#E8B84B", borderRadius: 6 },
+              isSelectedHerbs   && { borderWidth: 2, borderColor: "#7EC87E", borderRadius: 6 },
+            ]}
+          >
+            {!isBeingDragged && imgSrc && (
+              <Image source={imgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
+            )}
+            {!isBeingDragged && item.quantity > 1 && (
+              <Text style={styles.tableItemQty}>{item.quantity}</Text>
+            )}
+            {!isBeingDragged && showHerbbagTapHint && (
+              <View style={{ position: "absolute", bottom: 2, right: 2, backgroundColor: "#E8B84B", borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1 }}>
+                <Text style={{ color: "#2C1810", fontSize: 8, fontWeight: "700" }}>TAP</Text>
+              </View>
+            )}
+            {!isBeingDragged && item.id === "herbs" && isSelectedHerbs && item.quantity > 1 && (
+              <View style={{ position: "absolute", bottom: 2, right: 2, backgroundColor: "#7EC87E", borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1 }}>
+                <Text style={{ color: "#2C1810", fontSize: 8, fontWeight: "700" }}>SPLIT</Text>
+              </View>
+            )}
+          </View>
+        </GestureDetector>
+      );
     }
 
+    // Other story states stay non-draggable, but inspection never disappears.
     return (
       <Pressable
-        style={[
-          styles.soupSlotTouch,
-          isSelectedHerbbag && { borderWidth: 2, borderColor: "#E8B84B", borderRadius: 6 },
-          isSelectedHerbs   && { borderWidth: 2, borderColor: "#7EC87E", borderRadius: 6 },
-        ]}
-        onPress={inCookingPhase ? handleCookingTableTap : undefined}
+        style={styles.soupSlotTouch}
+        onPress={() => {
+          const catalogEntry = ITEM_CATALOG[item.id];
+          if (catalogEntry) showCookingTooltip(catalogEntry.name, catalogEntry.description);
+        }}
         onLongPress={() => setKitchenDetailItem(item)}
         delayLongPress={500}
       >
-        <View style={{ width: "100%", height: "100%", alignItems: "center", justifyContent: "center" }}>
-          {imgSrc && (
-            <Image source={imgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
-          )}
-          {item.quantity > 1 && (
-            <Text style={styles.tableItemQty}>{item.quantity}</Text>
-          )}
-          {isCookingHerbbag && isSelectedHerbbag && (
-            <View style={{ position: "absolute", bottom: 2, right: 2, backgroundColor: "#E8B84B", borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1 }}>
-              <Text style={{ color: "#2C1810", fontSize: 8, fontWeight: "700" }}>TAP</Text>
-            </View>
-          )}
-          {inCookingPhase && item.id === "herbs" && isSelectedHerbs && item.quantity > 1 && (
-            <View style={{ position: "absolute", bottom: 2, right: 2, backgroundColor: "#7EC87E", borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1 }}>
-              <Text style={{ color: "#2C1810", fontSize: 8, fontWeight: "700" }}>SPLIT</Text>
-            </View>
-          )}
-        </View>
+        {imgSrc && (
+          <Image source={imgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
+        )}
+        {item.quantity > 1 && <Text style={styles.tableItemQty}>{item.quantity}</Text>}
       </Pressable>
     );
   }
-  // ── Refresh cooking gesture callbacks each render (fresh closures over current state) ──
-  cookingGestureCBs.current = {
-    onStart : onCookingDragStarted,
-    onHover : updateCookingHoveredSlot,
-    onDrop  : handleCookingItemDrop,
-    onCancel: () => {
-      setSoupDragging(false);
-      setCookingDragActiveSlot(-1);
-      setHoveredSlot(null);
-      hoveredSlotRef.current = null;
-    },
-  };
+
+
 
   return (
     <View style={styles.root}>
@@ -2486,23 +2788,25 @@ export default function KitchenScreen() {
             {/* Stamina bar */}
             <View style={styles.statBarOuter}>
               <Ionicons name="flash" size={15} color="#C4943A" />
-              <View
-                style={styles.statBarTrack}
-                onLayout={(e) => {
-                  const w = e.nativeEvent.layout.width;
-                  barWidthSV.value = w;
-                  setBarWidth(w);
-                }}
-              >
-                <Animated.View style={[styles.statBarFill, styles.staminaFill, staminaFillStyle]}>
-                  <View style={styles.staminaReflex} />
+              <View style={styles.statBarTrackWrap}>
+                <View
+                  style={styles.statBarTrack}
+                  onLayout={(e) => {
+                    const w = e.nativeEvent.layout.width;
+                    barWidthSV.value = w;
+                    setBarWidth(w);
+                  }}
+                >
+                  <Animated.View style={[styles.statBarFill, styles.staminaFill, staminaFillStyle]}>
+                    <View style={styles.staminaReflex} />
+                  </Animated.View>
+                </View>
+                {/* Always starts just below the right end of the Stamina bar. */}
+                <Animated.View style={[styles.plusFloat, plusFloatStyle]} pointerEvents="none">
+                  <Text style={styles.plusFloatText}>+20</Text>
                 </Animated.View>
               </View>
               <Text style={styles.statBarText}>{staminaDisplay}/{playerStats.maximumStamina}</Text>
-              {/* +20 float */}
-              <Animated.View style={[styles.plusFloat, plusFloatStyle]} pointerEvents="none">
-                <Text style={styles.plusFloatText}>+20</Text>
-              </Animated.View>
             </View>
             {/* Life bar */}
             <View style={styles.statBarOuter}>
@@ -2558,9 +2862,8 @@ export default function KitchenScreen() {
           />
         </View>
 
-        {/* Craft grid + Table grid — cooking pan gesture wraps BOTH during COOKING_CRAFT_READY
-             so items can be dragged from table ↔ craft ↔ tool in any direction.
-             Outside COOKING_CRAFT_READY the soup-drag (panGesture) must not be interfered. */}
+        {/* Craft grid + Table grid. During COOKING_CRAFT_READY each occupied input slot
+             owns its own Pan gesture, matching the reliable Day-1 soup architecture. */}
         {(() => {
           const craftGrid = (
             <View style={styles.gridContainer}>
@@ -2579,38 +2882,57 @@ export default function KitchenScreen() {
                         hoveredSlot === (12 + i) && soupDragging && styles.slotHovered,
                       ]}
                     >
-                      {craftItem && !craftBeingDragged ? (
-                        <Pressable
-                          style={styles.soupSlotTouch}
-                          onPress={() => returnCraftIngToTable(i)}
-                        >
-                          <View style={{ width: "100%", height: "100%", alignItems: "center", justifyContent: "center" }}>
-                            {craftImgSrc && <Image source={craftImgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />}
-                            {craftItem.quantity > 1 && <Text style={styles.tableItemQty}>{craftItem.quantity}</Text>}
-                          </View>
-                        </Pressable>
+                      {craftItem ? (
+                        isKitchenItemInteractionState(ts) ? (
+                          <GestureDetector gesture={createCookingItemGesture(12 + i, craftItem.id)}>
+                            <View style={styles.soupSlotTouch}>
+                              {!craftBeingDragged && craftImgSrc && (
+                                <Image source={craftImgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
+                              )}
+                              {!craftBeingDragged && craftItem.quantity > 1 && (
+                                <Text style={styles.tableItemQty}>{craftItem.quantity}</Text>
+                              )}
+                            </View>
+                          </GestureDetector>
+                        ) : (
+                          <Pressable style={styles.soupSlotTouch} onPress={() => returnCraftIngToTable(i)}>
+                            <View style={{ width: "100%", height: "100%", alignItems: "center", justifyContent: "center" }}>
+                              {craftImgSrc && <Image source={craftImgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />}
+                              {craftItem.quantity > 1 && <Text style={styles.tableItemQty}>{craftItem.quantity}</Text>}
+                            </View>
+                          </Pressable>
+                        )
                       ) : (
-                        !craftBeingDragged ? renderSoupInSlot(12 + i) : null
+                        renderSoupInSlot(12 + i)
                       )}
                     </View>
                   );
                 })}
                 {/* Tool slot */}
-                <Pressable
+                <View
                   ref={(r) => { craftSlotRefs.current[3] = r; }}
                   style={[styles.craftSlot, styles.craftSlotTool, hoveredSlot === 15 && soupDragging && styles.slotHovered]}
-                  onPress={() => craftTool && returnCraftToolToTable()}
-                  activeOpacity={0.8}
                 >
                   {!craftTool && <Ionicons name="hand-right-outline" size={26} color="#8B6914" />}
-                  {craftTool && !(soupDragging && cookingDragActiveSlot === 15) && (
-                    <View style={{ width: "100%", height: "100%", alignItems: "center", justifyContent: "center" }}>
+                  {craftTool && isKitchenItemInteractionState(ts) ? (
+                    <GestureDetector gesture={createCookingItemGesture(15, craftTool.id)}>
+                      <View style={styles.soupSlotTouch}>
+                        {!(soupDragging && cookingDragActiveSlot === 15) && ITEM_IMAGES[craftTool.id] && (
+                          <Image source={ITEM_IMAGES[craftTool.id]} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
+                        )}
+                        {!(soupDragging && cookingDragActiveSlot === 15) && craftTool.quantity > 1 && (
+                          <Text style={styles.tableItemQty}>{craftTool.quantity}</Text>
+                        )}
+                      </View>
+                    </GestureDetector>
+                  ) : craftTool ? (
+                    <Pressable style={styles.soupSlotTouch} onPress={returnCraftToolToTable}>
                       {ITEM_IMAGES[craftTool.id] && (
                         <Image source={ITEM_IMAGES[craftTool.id]} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
                       )}
-                    </View>
-                  )}
-                </Pressable>
+                    </Pressable>
+                  ) : null}
+                </View>
                 {/* Result / Recipe slot — output only, never a drag target */}
                 <TouchableOpacity
                   style={[styles.craftSlot, styles.craftSlotRecipe, craftResult ? { borderColor: "#5A9F5A", borderWidth: 1.5 } : {}]}
@@ -2664,13 +2986,6 @@ export default function KitchenScreen() {
               ))}
             </View>
           );
-          if (ts === "COOKING_CRAFT_READY") {
-            return (
-              <GestureDetector gesture={cookingTablePanGesture}>
-                <View>{craftGrid}{tableGrid}</View>
-              </GestureDetector>
-            );
-          }
           return <View>{craftGrid}{tableGrid}</View>;
         })()}
       </ScrollView>
@@ -3111,16 +3426,22 @@ export default function KitchenScreen() {
       />
 
       {/* ── Player thought bubble */}
-      {playerBubble && (
-        <View style={[StyleSheet.absoluteFill, { zIndex: 410 }]} pointerEvents="none">
-          <View style={{ position: "absolute", top: headerH + 130, left: 10, right: Math.max(10, W - Math.min(W * 0.75, 420) - 10) }}>
-            <View style={styles.playerBubbleArrow} />
-            <View style={styles.playerBubbleCard}>
-              <Text style={styles.playerBubbleText}>{playerBubble}</Text>
+      {playerBubble && (() => {
+        const playerL = layouts.current.player;
+        const topPos = playerL
+          ? playerL.y + playerL.h + 8
+          : (headerH > 0 ? headerH + 128 : insets.top + 190);
+        return (
+          <View style={[StyleSheet.absoluteFill, { zIndex: 410 }]} pointerEvents="none">
+            <View style={{ position: "absolute", top: topPos, left: 10, right: Math.max(10, W - Math.min(W * 0.75, 420) - 10) }}>
+              <View style={styles.playerBubbleArrow} />
+              <View style={styles.playerBubbleCard}>
+                <Text style={styles.playerBubbleText}>{playerBubble}</Text>
+              </View>
             </View>
           </View>
-        </View>
-      )}
+        );
+      })()}
     </View>
   );
 }
@@ -3150,6 +3471,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10, paddingVertical: 5, gap: 7,
     overflow: "visible",
   },
+  statBarTrackWrap: { flex: 1, height: 9, position: "relative", overflow: "visible" },
   statBarTrack: {
     flex: 1, height: 9, borderRadius: 5,
     backgroundColor: "#2A1800", overflow: "hidden",
@@ -3163,7 +3485,7 @@ const styles = StyleSheet.create({
   lifeFill: { backgroundColor: "#CC2200" },
   statBarText: { color: "#F0E8D5", fontSize: 11, fontFamily: "Oldenburg", minWidth: 40, textAlign: "right" },
   plusFloat: {
-    position: "absolute", right: -8, top: -20,
+    position: "absolute", right: -8, top: 12,
     backgroundColor: "rgba(196,148,58,0.92)", borderRadius: 10,
     paddingHorizontal: 7, paddingVertical: 2, zIndex: 10,
   },
@@ -3433,26 +3755,31 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     fontStyle: "italic",
   },
-  // Player thought bubble
+  // Player thought bubble — match the standard light player-thought style used in Garden.
   playerBubbleArrow: {
     width: 0, height: 0,
     borderLeftWidth: 8, borderRightWidth: 8, borderBottomWidth: 10,
     borderLeftColor: "transparent", borderRightColor: "transparent",
-    borderBottomColor: "rgba(30,18,5,0.9)",
+    borderBottomColor: "rgba(240,230,200,0.95)",
     marginLeft: 16,
   },
   playerBubbleCard: {
-    backgroundColor: "rgba(30,18,5,0.9)",
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "rgba(196,148,58,0.4)",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    backgroundColor: "rgba(240,230,200,0.95)",
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "rgba(196,148,58,0.50)",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     alignSelf: "flex-start" as const,
     maxWidth: "100%",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.4,
+    shadowRadius: 7,
+    elevation: 14,
   },
   playerBubbleText: {
-    color: "#F0E8D5",
+    color: "#2A1000",
     fontSize: 13,
     fontStyle: "italic",
     lineHeight: 18,

@@ -38,6 +38,7 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import {
   CRITICAL_ASSET_KEYS,
@@ -108,6 +109,7 @@ export default function GameLoading() {
     const startTime = Date.now();
     const failures: string[] = [];
     let cancelled = false;
+    let restoredLocation: "kitchen" | "garden" | "dormitory" = "kitchen";
 
     const run = async () => {
       // 1. Restore gameplay snapshot (load-game only)
@@ -115,6 +117,10 @@ export default function GameLoading() {
       if (params.from === "load-game") {
         try {
           await restoreFromSnapshot(slotId);
+          const savedLocation = await AsyncStorage.getItem("@game:save_location");
+          if (savedLocation === "kitchen" || savedLocation === "garden" || savedLocation === "dormitory") {
+            restoredLocation = savedLocation;
+          }
         } catch (e) {
           if (__DEV__) console.error("[GameLoading] restoreFromSnapshot failed:", e);
         }
@@ -175,6 +181,10 @@ export default function GameLoading() {
             slotId: params.slotId ?? "1",
           },
         });
+      } else if (restoredLocation === "dormitory") {
+        router.replace({ pathname: "/dormitory", params: { loadedFromSave: "1" } });
+      } else if (restoredLocation === "garden") {
+        router.replace({ pathname: "/garden", params: { loadedFromSave: "1" } });
       } else {
         router.replace("/kitchen");
       }

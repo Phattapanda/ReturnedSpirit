@@ -1,71 +1,37 @@
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  View,
+  Animated,
+  Image,
+  Pressable,
+  StyleSheet,
   Text,
   TouchableOpacity,
-  TouchableWithoutFeedback,
-  Image,
-  StyleSheet,
+  View,
   useWindowDimensions,
 } from "react-native";
+import { useEventListener } from "expo";
 import { useRouter } from "expo-router";
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  runOnJS,
-  Easing,
-} from "react-native-reanimated";
-import { Ionicons } from "@expo/vector-icons";
 import { useAudioPlayer } from "expo-audio";
+import { VideoView, useVideoPlayer } from "expo-video";
+import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// ─── Constants ───────────────────────────────────────────────────────────────
+// Bundled portrait cinematic used for new-game intro playback.
+const INTRO_VIDEO = require("../assets/intro.mp4");
 
-const TYPING_MS = 44;
-const FADE_IN_MS = 1600;
-const FADE_OUT_MS = 850;
-const BLACK_HOLD_MS = 3200; // hold after text complete before fading
-const KNOCK_OFFSET_MS = 500; // delay before knock plays after text done
-const KNOCK_DURATION_MS = 2700; // estimated knock sound duration
-const BUBBLE_TO_DIALOG_MS = 1300;
+const ROOM = require("../assets/images/intro4.jpg");
 
-// ─── Assets ──────────────────────────────────────────────────────────────────
-
-const IMGS = {
-  i1: require("../assets/images/intro1.jpg"),
-  i2: require("../assets/images/intro2.jpg"),
-  i3: require("../assets/images/intro3.jpg"),
-  i4: require("../assets/images/intro4.jpg"),
-};
-
-// ─── Portrait system ──────────────────────────────────────────────────────────
-
-export type PortraitVariant = "rupert" | "rupertsad" | "rupertlaugh" | "avatar1_tired";
-
-const PORTRAITS: Record<PortraitVariant, unknown> = {
+const PORTRAITS = {
   rupert: require("../assets/images/rupert.png"),
   rupertsad: require("../assets/images/rupertsad.png"),
   rupertlaugh: require("../assets/images/rupertlaugh.png"),
   avatar1_tired: require("../assets/images/avatar1_tired.png"),
-};
+} as const;
 
-const SOUNDS = {
-  walking: require("../assets/audio/walkingslowondirt.mp3"),
-  footsteps: require("../assets/audio/slowfootsteps.mp3"),
-  breathing: require("../assets/audio/heavy-breathing.mp3"),
-  dragging: require("../assets/audio/dragging-on-floor.mp3"),
-  doorclose: require("../assets/audio/door-close.mp3"),
-  birds: require("../assets/audio/morning-birds.mp3"),
-  knock: require("../assets/audio/knock.mp3"),
-  tap: require("../assets/audio/tap.wav"),
-  walkingwood: require("../assets/audio/walking-on-wood.mp3"),
-};
+type PortraitVariant = keyof typeof PORTRAITS;
 
-// ─── Dialog system ───────────────────────────────────────────────────────────
-
-export type DialogPhase =
+type DialogPhase =
   | "awake"
   | "rupert_1"
   | "rupert_2"
@@ -157,197 +123,219 @@ const DIALOG_FLOW: DialogEntry[] = [
   },
 ];
 
-// ─── Scene config ─────────────────────────────────────────────────────────────
-
-type SceneCfg = {
-  type: "image" | "black";
-  image?: unknown;
-  text: string;
-  ambient: unknown;
-  sfxOnLeave?: unknown;
-  autoHoldMs?: number; // auto-advance this many ms after text completes
-  hasKnock?: boolean;
+const SOUNDS = {
+  knock: require("../assets/audio/knock.mp3"),
+  tap: require("../assets/audio/tap.wav"),
+  walkingwood: require("../assets/audio/walking-on-wood.mp3"),
 };
 
-const SCENES: SceneCfg[] = [
-  {
-    type: "image",
-    image: IMGS.i1,
-    text: "You have been on the road in the woods for hours. Cold rain begins to fall. Every drop seeps through your thin cloak. Mud clings to your boots. Your legs are trembling.",
-    ambient: SOUNDS.walking,
-  },
-  {
-    type: "image",
-    image: IMGS.i2,
-    text: "A faint, amber glow appears between the trees—barely visible. Your heart begins to race. You drag yourself onward...",
-    ambient: SOUNDS.footsteps,
-  },
-  {
-    type: "image",
-    image: IMGS.i3,
-    text: "Weather-beaten walls, a broken lantern above a heavy door. It looks abandoned, yet the light feels real. Your legs give way. The world tilts. The door rushes toward you...",
-    ambient: SOUNDS.breathing,
-  },
-  {
-    // Black screen with centred voice line
-    type: "black",
-    text: '"You poor soul. You can rest here."',
-    ambient: SOUNDS.dragging,
-    sfxOnLeave: SOUNDS.doorclose,
-    autoHoldMs: BLACK_HOLD_MS,
-  },
-  {
-    type: "image",
-    image: IMGS.i4,
-    text: "Morning.\nLight streams through the tattered curtain.\nA rough blanket. A hard bed.\nYou are alive.",
-    ambient: SOUNDS.birds,
-    hasKnock: true,
-  },
-];
+const SKIP_HOLD_MS = 900;
+const ROOM_FADE_MS = 650;
+const KNOCK_DELAY_MS = 450;
+const KNOCK_TO_BUBBLE_MS = 2200;
+const BUBBLE_TO_DIALOG_MS = 1300;
 
-// ─── Component ───────────────────────────────────────────────────────────────
+type IntroStage = "video" | "room";
 
 export default function IntroScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: screenW, height: screenH } = useWindowDimensions();
 
-  // ── UI state (drives rendering)
-  const [renderIdx, setRenderIdx] = useState(0);
-  const [displayedText, setDisplayedText] = useState("");
-  const [showArrow, setShowArrow] = useState(false);
+  const [stage, setStage] = useState<IntroStage>("video");
   const [showBubble, setShowBubble] = useState(false);
   const [showDialog, setShowDialog] = useState(false);
-  const [dialogPortrait, setDialogPortrait] = useState<PortraitVariant>("rupert");
   const [dialogPhase, setDialogPhase] = useState<DialogPhase>("awake");
+  const [dialogPortrait, setDialogPortrait] = useState<PortraitVariant>("rupertlaugh");
+  const [videoReady, setVideoReady] = useState(false);
+  const [holdActive, setHoldActive] = useState(false);
 
-  // ── Internal refs (no re-renders, always fresh in callbacks)
-  const R = useRef({
-    sceneIdx: 0,
-    charIdx: 0,
-    isTypingDone: false,
-    isTransitioning: false,
-    mounted: true,
-    typingTimer: null as ReturnType<typeof setInterval> | null,
-    autoAdvTimer: null as ReturnType<typeof setTimeout> | null,
-    volTimer: null as ReturnType<typeof setInterval> | null,
-  }).current;
+  const mountedRef = useRef(true);
+  const transitionStartedRef = useRef(false);
+  const roomSequenceStartedRef = useRef(false);
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const skipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Shared animation values
-  const overlayOp = useSharedValue(1.0); // 1 = black, 0 = clear
-  const textOp = useSharedValue(0.0);
-  const bubbleOp = useSharedValue(0.0);
-  const dialogY = useSharedValue(500);
-  // NOTE: Portrait opacity animation was removed.
-  // RNAnimated.Image with useNativeDriver:true caused the image to be invisible
-  // on both web and Expo Go (native animation layer conflict when source changes).
-  // Now: portrait swaps instantly via plain Image + key prop (force remount on change).
+  const blackOpacity = useRef(new Animated.Value(1)).current;
+  const holdProgress = useRef(new Animated.Value(0)).current;
+  const dialogTranslate = useRef(new Animated.Value(500)).current;
+  const bubbleOpacity = useRef(new Animated.Value(0)).current;
 
-  // ── Audio players (initialised; replaced per scene)
-  const ambient = useAudioPlayer(SOUNDS.walking);
-  const sfx = useAudioPlayer(SOUNDS.knock);
+  const knockPlayer = useAudioPlayer(SOUNDS.knock);
   const tapPlayer = useAudioPlayer(SOUNDS.tap);
   const walkPlayer = useAudioPlayer(SOUNDS.walkingwood);
 
-  // ─── Cleanup ─────────────────────────────────────────────────────────────
+  const videoPlayer = useVideoPlayer(INTRO_VIDEO, (player) => {
+    player.loop = false;
+    player.play();
+  });
+
+  useEventListener(videoPlayer, "playToEnd", () => {
+    finishVideo();
+  });
+
+  useEventListener(videoPlayer, "statusChange", ({ status }) => {
+    // Never trap a new game on a failed cinematic. If the video cannot load,
+    // fall through to the same room/knock sequence used after a skip.
+    if (status === "error") finishVideo();
+  });
 
   useEffect(() => {
-    // Prevent accidental auto-play on mount
-    try { ambient.volume = 0; } catch {}
-    try { sfx.volume = 0; } catch {}
+    mountedRef.current = true;
+    try { knockPlayer.volume = 1; } catch {}
+    try { tapPlayer.volume = 1; } catch {}
+    try { walkPlayer.volume = 1; } catch {}
 
     return () => {
-      R.mounted = false;
-      clearTypingTimer();
-      clearAutoAdv();
-      clearVolTimer();
-      try { ambient.pause(); } catch {}
-      try { sfx.pause(); } catch {}
+      mountedRef.current = false;
+      for (const timer of timersRef.current) clearTimeout(timer);
+      timersRef.current = [];
+      if (skipTimerRef.current) {
+        clearTimeout(skipTimerRef.current);
+        skipTimerRef.current = null;
+      }
+      try { videoPlayer.pause(); } catch {}
+      try { knockPlayer.pause(); } catch {}
       try { tapPlayer.pause(); } catch {}
       try { walkPlayer.pause(); } catch {}
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [knockPlayer, tapPlayer, videoPlayer, walkPlayer]);
 
-  // ─── Timer helpers ────────────────────────────────────────────────────────
-
-  function clearTypingTimer() {
-    if (R.typingTimer) { clearInterval(R.typingTimer); R.typingTimer = null; }
-  }
-  function clearAutoAdv() {
-    if (R.autoAdvTimer) { clearTimeout(R.autoAdvTimer); R.autoAdvTimer = null; }
-  }
-  function clearVolTimer() {
-    if (R.volTimer) { clearInterval(R.volTimer); R.volTimer = null; }
+  function later(fn: () => void, ms: number) {
+    const timer = setTimeout(() => {
+      if (mountedRef.current) fn();
+    }, ms);
+    timersRef.current.push(timer);
   }
 
-  // ─── Audio helpers ────────────────────────────────────────────────────────
-
-  function fadeInAmbient(src: unknown, loop = true) {
-    try {
-      ambient.replace(src as never);
-      ambient.loop = loop;
-      ambient.volume = 0;
-      clearVolTimer();
-      let v = 0;
-      R.volTimer = setInterval(() => {
-        if (!R.mounted) { clearVolTimer(); return; }
-        v = Math.min(1, v + 0.04);
-        try { ambient.volume = v; } catch {}
-        if (v >= 1) clearVolTimer();
-      }, 50); // ~1.25s total fade-in
-      setTimeout(() => { try { ambient.play(); } catch {} }, 200);
-    } catch {}
+  function revealVideo() {
+    if (videoReady) return;
+    setVideoReady(true);
+    Animated.timing(blackOpacity, {
+      toValue: 0,
+      duration: 350,
+      useNativeDriver: true,
+    }).start();
   }
 
-  function stopAmbient() {
-    clearVolTimer();
-    try { ambient.pause(); } catch {}
+  function finishVideo() {
+    if (transitionStartedRef.current) return;
+    transitionStartedRef.current = true;
+    setHoldActive(false);
+    holdProgress.stopAnimation();
+    try { videoPlayer.pause(); } catch {}
+
+    Animated.timing(blackOpacity, {
+      toValue: 1,
+      duration: 400,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (!finished || !mountedRef.current) return;
+      setStage("room");
+      setShowBubble(false);
+      setShowDialog(false);
+      blackOpacity.setValue(1);
+      later(startRoomSequence, 40);
+    });
   }
 
-  function playSfx(src: unknown) {
-    try {
-      sfx.replace(src as never);
-      sfx.loop = false;
-      sfx.volume = 1;
-      setTimeout(() => { try { sfx.play(); } catch {} }, 150);
-    } catch {}
+  function startRoomSequence() {
+    if (roomSequenceStartedRef.current) return;
+    roomSequenceStartedRef.current = true;
+
+    Animated.timing(blackOpacity, {
+      toValue: 0,
+      duration: ROOM_FADE_MS,
+      useNativeDriver: true,
+    }).start();
+
+    later(() => {
+      try {
+        knockPlayer.seekTo(0);
+        knockPlayer.play();
+      } catch {}
+
+      later(() => {
+        setShowBubble(true);
+        Animated.timing(bubbleOpacity, {
+          toValue: 1,
+          duration: 350,
+          useNativeDriver: true,
+        }).start();
+
+        later(() => {
+          setShowBubble(false);
+          bubbleOpacity.setValue(0);
+          setDialogPortrait("rupertlaugh");
+          setDialogPhase("awake");
+          setShowDialog(true);
+          Animated.spring(dialogTranslate, {
+            toValue: 0,
+            useNativeDriver: true,
+            damping: 18,
+            stiffness: 150,
+            mass: 0.9,
+          }).start();
+        }, BUBBLE_TO_DIALOG_MS);
+      }, KNOCK_TO_BUBBLE_MS);
+    }, KNOCK_DELAY_MS);
   }
 
-  // ─── Portrait change (cross-fade) ────────────────────────────────────────
-  // Instant portrait swap (cross-fade removed: opacity animation caused
-  // invisible portraits on web and Expo Go due to native-driver conflicts)
+  function handleSkipPressIn() {
+    if (stage !== "video" || transitionStartedRef.current) return;
+
+    if (skipTimerRef.current) clearTimeout(skipTimerRef.current);
+    setHoldActive(true);
+    holdProgress.setValue(0);
+    Animated.timing(holdProgress, {
+      toValue: 1,
+      duration: SKIP_HOLD_MS,
+      useNativeDriver: false,
+    }).start();
+
+    // Do not rely on React Native's onLongPress firing over a native VideoView.
+    // The hold itself owns an explicit timer and reaches the same finishVideo()
+    // path as normal playback completion.
+    skipTimerRef.current = setTimeout(() => {
+      skipTimerRef.current = null;
+      if (!mountedRef.current || stage !== "video" || transitionStartedRef.current) return;
+      finishVideo();
+    }, SKIP_HOLD_MS);
+  }
+
+  function handleSkipPressOut() {
+    if (skipTimerRef.current) {
+      clearTimeout(skipTimerRef.current);
+      skipTimerRef.current = null;
+    }
+    setHoldActive(false);
+    holdProgress.stopAnimation();
+    Animated.timing(holdProgress, {
+      toValue: 0,
+      duration: 120,
+      useNativeDriver: false,
+    }).start();
+  }
+
   function changePortrait(variant: PortraitVariant) {
-    if (variant === dialogPortrait) return;
     setDialogPortrait(variant);
   }
 
-  // ─── Dialog helpers ───────────────────────────────────────────────────────
-
   function playTapSound() {
     try {
-      tapPlayer.replace(SOUNDS.tap as never);
-      tapPlayer.loop = false;
-      tapPlayer.volume = 1;
-      setTimeout(() => { try { tapPlayer.play(); } catch {} }, 50);
+      tapPlayer.seekTo(0);
+      tapPlayer.play();
     } catch {}
   }
 
   function playWalkingWood() {
     try {
-      walkPlayer.replace(SOUNDS.walkingwood as never);
-      walkPlayer.loop = false;
-      walkPlayer.volume = 1;
-      setTimeout(() => { try { walkPlayer.play(); } catch {} }, 80);
+      walkPlayer.seekTo(0);
+      walkPlayer.play();
     } catch {}
   }
 
-  function navigateToKitchen() {
-    router.replace("/kitchen");
-  }
-
   async function saveIntroProgress() {
-    // Auto-save the intro checkpoint so load-game → kitchen tutorial begins
     try {
       const rawSlot = await AsyncStorage.getItem("@game:active_slot");
       const rawSlots = await AsyncStorage.getItem("game_slots");
@@ -357,29 +345,28 @@ export default function IntroScreen() {
         const updated = slots.map((s: { slot: number }) =>
           s.slot === slotNum
             ? { ...s, savedAt: new Date().toISOString(), tutorialDone: false }
-            : s
+            : s,
         );
         await AsyncStorage.setItem("game_slots", JSON.stringify(updated));
       }
     } catch {}
-    navigateToKitchen();
+    router.replace("/kitchen");
   }
 
   function goToKitchen() {
-    if (!R.mounted) return;
-    stopAmbient();
-    textOp.value = withTiming(0, { duration: 300 });
-    overlayOp.value = withTiming(1, { duration: 1200 }, (finished) => {
-      if (finished) {
-        runOnJS(saveIntroProgress)();
-      }
+    Animated.timing(blackOpacity, {
+      toValue: 1,
+      duration: 900,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished && mountedRef.current) void saveIntroProgress();
     });
   }
 
   function advanceDialog() {
     const next = DIALOG_ADVANCE[dialogPhase];
     if (!next) return;
-    const entry = DIALOG_FLOW.find((e) => e.phase === next);
+    const entry = DIALOG_FLOW.find((item) => item.phase === next);
     if (entry) changePortrait(entry.portrait);
     setDialogPhase(next);
   }
@@ -388,304 +375,108 @@ export default function IntroScreen() {
     playTapSound();
     if (nextPhase === "kitchen") {
       playWalkingWood();
-      setTimeout(() => {
-        if (R.mounted) goToKitchen();
-      }, 600);
-    } else {
-      const entry = DIALOG_FLOW.find((e) => e.phase === nextPhase);
-      if (entry) changePortrait(entry.portrait);
-      setDialogPhase(nextPhase as DialogPhase);
-    }
-  }
-
-  // ─── Typing ───────────────────────────────────────────────────────────────
-
-  function startTyping(idx: number) {
-    if (!R.mounted) return;
-    // Guard: user may have tapped during fade-in and already completed the text
-    if (R.isTypingDone) return;
-    clearTypingTimer();
-    const fullText = SCENES[idx].text;
-    R.charIdx = 0;
-    setShowArrow(false);
-    setDisplayedText("");
-
-    R.typingTimer = setInterval(() => {
-      if (!R.mounted) { clearTypingTimer(); return; }
-      R.charIdx++;
-      setDisplayedText(fullText.slice(0, R.charIdx));
-      if (R.charIdx >= fullText.length) {
-        clearTypingTimer();
-        R.isTypingDone = true;
-        onTypingComplete(idx);
-      }
-    }, TYPING_MS);
-  }
-
-  function onTypingComplete(idx: number) {
-    if (!R.mounted) return;
-    const s = SCENES[idx];
-
-    // Show arrow for normal image scenes
-    if (s.type === "image" && !s.hasKnock) {
-      setShowArrow(true);
+      later(goToKitchen, 500);
+      return;
     }
 
-    // Auto-advance for black screen (after hold)
-    if (s.autoHoldMs) {
-      clearAutoAdv();
-      R.autoAdvTimer = setTimeout(() => {
-        if (R.mounted) doTransition();
-      }, s.autoHoldMs);
-    }
-
-    // Knock → bubble → dialog flow for last scene
-    if (s.hasKnock) {
-      setTimeout(() => {
-        if (!R.mounted) return;
-        playSfx(SOUNDS.knock);
-        // After knock finishes, show speech bubble
-        setTimeout(() => {
-          if (!R.mounted) return;
-          setShowBubble(true);
-          bubbleOp.value = withTiming(1, { duration: 700 });
-          // After bubble, show dialog with warm laughing portrait
-          setTimeout(() => {
-            if (!R.mounted) return;
-            setDialogPortrait("rupertlaugh");
-            setDialogPhase("awake");
-            setShowDialog(true);
-            dialogY.value = withTiming(0, { duration: 580 });
-          }, BUBBLE_TO_DIALOG_MS);
-        }, KNOCK_DURATION_MS);
-      }, KNOCK_OFFSET_MS);
-    }
+    const entry = DIALOG_FLOW.find((item) => item.phase === nextPhase);
+    if (entry) changePortrait(entry.portrait);
+    setDialogPhase(nextPhase);
   }
 
-  // ─── Scene lifecycle ──────────────────────────────────────────────────────
-
-  function launchScene(idx: number) {
-    if (!R.mounted) return;
-    const s = SCENES[idx];
-
-    // Update all tracking refs
-    R.sceneIdx = idx;
-    R.isTypingDone = false;
-    R.isTransitioning = false;
-
-    // Reset UI state
-    setRenderIdx(idx);
-    setDisplayedText("");
-    setShowArrow(false);
-    setShowBubble(false);
-    setShowDialog(false);
-
-    // Reset animated values (immediately, no animation)
-    bubbleOp.value = 0;
-    dialogY.value = 500;
-    textOp.value = 0;
-
-    // Start ambient audio for this scene (loops except black screen)
-    fadeInAmbient(s.ambient, s.type !== "black");
-
-    // Fade in from black, then start typing
-    overlayOp.value = withTiming(0, {
-      duration: FADE_IN_MS,
-      easing: Easing.out(Easing.ease),
-    }, (finished) => {
-      if (finished) {
-        // Fade in text container
-        textOp.value = withTiming(1, { duration: 600 });
-        runOnJS(startTyping)(idx);
-      }
-    });
-  }
-
-  // Called from JS thread after transition overlay reaches full black
-  function onTransitionComplete(nextIdx: number) {
-    stopAmbient();
-    if (nextIdx >= SCENES.length) {
-      router.replace("/");
-    } else {
-      launchScene(nextIdx);
-    }
-  }
-
-  function doTransition() {
-    if (!R.mounted || R.isTransitioning) return;
-    R.isTransitioning = true;
-    clearTypingTimer();
-    clearAutoAdv();
-
-    const idx = R.sceneIdx;
-    const s = SCENES[idx];
-
-    // Fade out text
-    textOp.value = withTiming(0, { duration: 380 });
-
-    // Play exit SFX if configured (e.g. door-close leaving black screen)
-    if (s.sfxOnLeave) {
-      stopAmbient();
-      playSfx(s.sfxOnLeave);
-    }
-
-    // Fade to black, then go to next scene
-    overlayOp.value = withTiming(1, {
-      duration: FADE_OUT_MS,
-      easing: Easing.in(Easing.ease),
-    }, (finished) => {
-      if (finished) {
-        runOnJS(onTransitionComplete)(idx + 1);
-      }
-    });
-  }
-
-  // ─── Mount ────────────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      if (R.mounted) launchScene(0);
-    }, 350);
-    return () => clearTimeout(t);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // ─── User interactions ────────────────────────────────────────────────────
-
-  function handleTap() {
-    if (R.isTransitioning) return;
-    if (!R.isTypingDone) {
-      // Instantly reveal full text
-      clearTypingTimer();
-      const idx = R.sceneIdx;
-      const fullText = SCENES[idx].text;
-      R.charIdx = fullText.length;
-      R.isTypingDone = true;
-      setDisplayedText(fullText);
-      onTypingComplete(idx);
-    }
-  }
-
-  function handleArrow() {
-    if (!R.isTypingDone || R.isTransitioning) return;
-    doTransition();
-  }
-
-  // ─── Animated styles ──────────────────────────────────────────────────────
-
-  const overlayStyle = useAnimatedStyle(() => ({ opacity: overlayOp.value }));
-  const textStyle = useAnimatedStyle(() => ({ opacity: textOp.value }));
-  const bubbleStyle = useAnimatedStyle(() => ({ opacity: bubbleOp.value }));
-  const dialogSlide = useAnimatedStyle(() => ({
-    transform: [{ translateY: dialogY.value }],
-  }));
-  // portraitStyle was removed – portrait now uses RNAnimated.Image directly
-
-  const scene = SCENES[renderIdx];
-  const currentDialogEntry = DIALOG_FLOW.find((e) => e.phase === dialogPhase) ?? null;
-
-  // ─── Render ───────────────────────────────────────────────────────────────
+  const currentDialogEntry = DIALOG_FLOW.find((entry) => entry.phase === dialogPhase) ?? null;
+  const holdWidth = holdProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0%", "100%"],
+  });
 
   return (
     <View style={styles.root}>
-      {/* ── Hidden portrait preload – forces browser/RN to decode all portrait
-           images immediately when intro.tsx mounts (0×0 so never visible).
-           Belt-and-suspenders on top of the game-loading.tsx AssetManager preload. */}
       <View style={{ position: "absolute", width: 0, height: 0, overflow: "hidden" }}>
-        {(Object.values(PORTRAITS) as (typeof PORTRAITS[keyof typeof PORTRAITS])[]).map((src, i) => (
-          <Image key={i} source={src as never} style={{ width: 1, height: 1 }} />
+        {Object.values(PORTRAITS).map((source, index) => (
+          <Image key={index} source={source} style={{ width: 1, height: 1 }} />
         ))}
+        <Image source={ROOM} style={{ width: 1, height: 1 }} />
       </View>
 
-      {/* ── Scene background ── */}
-      {scene.type === "image" && scene.image ? (
-        <Image
-          source={scene.image as never}
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: screenW,
-            height: screenH,
-          }}
-          resizeMode="cover" resizeMethod="resize"
-        />
-      ) : (
-        <View style={[StyleSheet.absoluteFill, styles.blackBg]} />
-      )}
-
-      {/* ── Full-screen tap area + text overlay ── */}
-      <TouchableWithoutFeedback onPress={handleTap}>
+      {stage === "video" ? (
         <View style={StyleSheet.absoluteFill}>
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              styles.textArea,
-              scene.type === "black" ? styles.textAreaCenter : styles.textAreaTop,
-              scene.type !== "black" && { paddingTop: insets.top + 16 },
-              textStyle,
-            ]}
-          >
-            <Text
-              style={[
-                styles.storyText,
-                scene.type === "black" && styles.storyTextCentered,
-              ]}
-            >
-              {displayedText}
-            </Text>
-          </Animated.View>
-        </View>
-      </TouchableWithoutFeedback>
-
-      {/* ── Next-scene arrow ── */}
-      {showArrow && (
-        <TouchableOpacity
-          testID="intro-arrow"
-          style={[styles.arrowBtn, { bottom: insets.bottom + 28 }]}
-          onPress={handleArrow}
-          activeOpacity={0.75}
-        >
-          <View style={styles.arrowCircle}>
-            <Ionicons name="chevron-forward" size={26} color="#F5E6C8" />
+          {/* Native video surfaces can capture touch input on-device. Keep the
+              video subtree non-interactive and put the hold target above it. */}
+          <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+            <VideoView
+              style={{ width: screenW, height: screenH }}
+              player={videoPlayer}
+              nativeControls={false}
+              contentFit="cover"
+              onFirstFrameRender={revealVideo}
+            />
           </View>
-        </TouchableOpacity>
+
+          <Pressable
+            testID="intro-hold-to-skip"
+            style={StyleSheet.absoluteFill}
+            onPressIn={handleSkipPressIn}
+            onPressOut={handleSkipPressOut}
+          >
+            <View
+              pointerEvents="none"
+              style={[styles.skipWrap, { bottom: insets.bottom + 24 }]}
+            >
+              <Text style={styles.skipText}>{holdActive ? "Keep holding..." : "Hold to skip"}</Text>
+              <View style={styles.skipTrack}>
+                <Animated.View style={[styles.skipProgress, { width: holdWidth }]} />
+              </View>
+            </View>
+          </Pressable>
+        </View>
+      ) : (
+        <Image
+          source={ROOM}
+          style={{ position: "absolute", width: screenW, height: screenH }}
+          resizeMode="cover"
+          resizeMethod="resize"
+        />
       )}
 
-      {/* ── Speech bubble (scene 4 after knock) ── */}
-      {showBubble && !showDialog && (
+      {stage === "room" && showBubble && !showDialog && (
         <Animated.View
           pointerEvents="none"
-          style={[styles.bubble, { bottom: insets.bottom + 68 }, bubbleStyle]}
+          style={[
+            styles.bubble,
+            { bottom: insets.bottom + 68, opacity: bubbleOpacity },
+          ]}
         >
           <Text style={styles.bubbleText}>{'"Are you awake?"'}</Text>
           <View style={styles.bubbleTail} />
         </Animated.View>
       )}
 
-      {/* ── Dialog panel ── */}
-      {showDialog && (
+      {stage === "room" && showDialog && currentDialogEntry && (
         <Animated.View
-          style={[styles.dialogPanel, { paddingBottom: insets.bottom + 20 }, dialogSlide]}
+          style={[
+            styles.dialogPanel,
+            {
+              paddingBottom: insets.bottom + 20,
+              transform: [{ translateY: dialogTranslate }],
+            },
+          ]}
         >
-          {/* Portrait – plain Image (no opacity animation to avoid invisible-image bugs).
-               key={dialogPortrait} forces remount on variant change for clean swap. */}
           <View style={styles.portraitWrap}>
             <Image
               key={dialogPortrait}
-              source={PORTRAITS[dialogPortrait] as never}
+              source={PORTRAITS[dialogPortrait]}
               style={styles.portrait}
-              resizeMode="cover" resizeMethod="resize"
+              resizeMode="cover"
+              resizeMethod="resize"
             />
           </View>
 
-          {/* Speaker name */}
-          {currentDialogEntry?.speakerName ? (
+          {currentDialogEntry.speakerName ? (
             <Text style={styles.npcName}>{currentDialogEntry.speakerName}</Text>
           ) : null}
 
-          {/* Dialog or narration text */}
-          {currentDialogEntry?.text ? (
+          {currentDialogEntry.text ? (
             <View style={styles.dialogBox}>
               <Text
                 style={[
@@ -698,8 +489,7 @@ export default function IntroScreen() {
             </View>
           ) : null}
 
-          {/* Continue button (non-choice phases) */}
-          {currentDialogEntry && !currentDialogEntry.choices ? (
+          {!currentDialogEntry.choices ? (
             <TouchableOpacity
               testID="dialog-continue"
               style={styles.continueBtn}
@@ -711,11 +501,10 @@ export default function IntroScreen() {
             </TouchableOpacity>
           ) : null}
 
-          {/* Choice buttons */}
-          {currentDialogEntry?.choices?.map((choice, i) => (
+          {currentDialogEntry.choices?.map((choice, index) => (
             <TouchableOpacity
-              key={i}
-              testID={`choice-${i}`}
+              key={index}
+              testID={`choice-${index}`}
               style={styles.choiceBtn}
               onPress={() => handleChoice(choice.nextPhase)}
               activeOpacity={0.8}
@@ -726,80 +515,50 @@ export default function IntroScreen() {
         </Animated.View>
       )}
 
-      {/* ── Black transition overlay — always on top ── */}
       <Animated.View
-        style={[StyleSheet.absoluteFill, styles.blackOverlay, overlayStyle]}
         pointerEvents="none"
+        style={[StyleSheet.absoluteFill, styles.blackOverlay, { opacity: blackOpacity }]}
       />
     </View>
   );
 }
-
-// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: "#000",
   },
-  blackBg: {
+  blackOverlay: {
     backgroundColor: "#000",
+    zIndex: 50,
   },
-
-  // Text area
-  textArea: {
+  skipWrap: {
     position: "absolute",
-    left: 0,
-    right: 0,
-  },
-  textAreaTop: {
-    top: 0,
-    backgroundColor: "rgba(0, 0, 0, 0.70)",
-    paddingHorizontal: 20,
-    paddingBottom: 24,
-  },
-  textAreaCenter: {
-    top: 0,
-    bottom: 0,
-    justifyContent: "center",
+    left: 28,
+    right: 28,
     alignItems: "center",
-    paddingHorizontal: 36,
   },
-  storyText: {
-    color: "#F0E8D5",
-    fontSize: 16,
-    lineHeight: 27,
-    fontStyle: "italic",
-    letterSpacing: 0.25,
+  skipText: {
+    color: "rgba(255,255,255,0.88)",
+    fontSize: 13,
+    letterSpacing: 0.4,
+    marginBottom: 8,
+    textShadowColor: "rgba(0,0,0,0.75)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
-  storyTextCentered: {
-    textAlign: "center",
-    fontSize: 22,
-    lineHeight: 36,
-    fontFamily: "Oldenburg",
-    fontStyle: "normal",
-    color: "#F5E6C8",
-    letterSpacing: 0.5,
+  skipTrack: {
+    width: 150,
+    height: 3,
+    borderRadius: 2,
+    overflow: "hidden",
+    backgroundColor: "rgba(255,255,255,0.22)",
   },
-
-  // Arrow
-  arrowBtn: {
-    position: "absolute",
-    right: 24,
-    zIndex: 5,
+  skipProgress: {
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "rgba(245,230,200,0.95)",
   },
-  arrowCircle: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: "rgba(196, 148, 58, 0.28)",
-    borderWidth: 1.5,
-    borderColor: "rgba(245, 230, 200, 0.55)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  // Speech bubble
   bubble: {
     position: "absolute",
     left: 24,
@@ -834,8 +593,6 @@ const styles = StyleSheet.create({
     fontFamily: "Oldenburg",
     textAlign: "center",
   },
-
-  // Dialog panel
   dialogPanel: {
     position: "absolute",
     bottom: 0,
@@ -845,7 +602,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 24,
-    paddingTop: 74,           // 62 (half portrait) + 12 breathing room
+    paddingTop: 74,
     alignItems: "center",
     gap: 12,
     borderTopWidth: 1.5,
@@ -859,7 +616,7 @@ const styles = StyleSheet.create({
   },
   portraitWrap: {
     position: "absolute",
-    top: -62,                 // stick out by half of 124px
+    top: -62,
     width: 124,
     height: 124,
     borderRadius: 62,
@@ -895,58 +652,39 @@ const styles = StyleSheet.create({
     fontStyle: "italic",
     textAlign: "center",
   },
+  narratorText: {
+    fontStyle: "normal",
+    color: "#E8DEC8",
+  },
   continueBtn: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     gap: 6,
-    backgroundColor: "rgba(196, 148, 58, 0.18)",
+    backgroundColor: "#8B5A2B",
     borderRadius: 12,
-    paddingVertical: 13,
-    paddingHorizontal: 26,
-    borderWidth: 1,
-    borderColor: "rgba(196, 148, 58, 0.35)",
-    marginTop: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    minWidth: 150,
   },
   continueTxt: {
     color: "#F5E6C8",
     fontSize: 15,
-    fontFamily: "Oldenburg",
-    letterSpacing: 0.6,
+    fontWeight: "700",
   },
-
-  // Black overlay — always rendered on top via JSX order
-  blackOverlay: {
-    backgroundColor: "#000",
-    zIndex: 10,
-  },
-
-  // Choice buttons (dialog choices)
   choiceBtn: {
     width: "100%",
-    backgroundColor: "rgba(196, 148, 58, 0.13)",
     borderRadius: 12,
-    paddingVertical: 13,
-    paddingHorizontal: 20,
     borderWidth: 1,
-    borderColor: "rgba(196, 148, 58, 0.30)",
-    marginTop: 4,
-    alignItems: "flex-start",
+    borderColor: "rgba(196, 148, 58, 0.45)",
+    backgroundColor: "rgba(196, 148, 58, 0.12)",
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    alignItems: "center",
   },
   choiceTxt: {
     color: "#F5E6C8",
     fontSize: 15,
-    fontFamily: "Oldenburg",
-    letterSpacing: 0.4,
-  },
-  narratorLabel: {
-    color: "rgba(245, 230, 200, 0.45)",
-    fontSize: 11,
-    fontStyle: "italic",
-    letterSpacing: 1.5,
-    marginTop: 2,
-  },
-  narratorText: {
-    textAlign: "left",
-    fontStyle: "italic",
+    fontWeight: "600",
   },
 });
