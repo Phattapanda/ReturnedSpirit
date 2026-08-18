@@ -4,20 +4,30 @@ import type { MealTag } from "@/src/game/item-system";
 
 export const GUEST_STATE_KEY = "@game:guest_state";
 
-export type GuestId = "old_farmer" | (string & {});
+export type GuestId = "old_farmer" | "coachman" | (string & {});
+
+export type GuestFavorTier = {
+  minFavor: number;
+  maxFavor: number;
+  /** Weekday indices use the existing game convention: MO=0 ... SU=6. */
+  visitDays: readonly number[];
+  /** Reserved for guests whose favor changes another system, e.g. Coachman transport. */
+  transportDiscountPercent?: number;
+};
 
 export type GuestProfile = {
   id: GuestId;
   name: string;
   portraitKey: string;
-  /** Weekday indices use the existing game convention: MO=0 ... SU=6. */
+  /** Default visit days. favorTiers can override these at the guest's current favor. */
   visitDays: readonly number[];
+  favorTiers?: readonly GuestFavorTier[];
   initialFavor: number;
   favoriteDishId: string | null;
   leastFavoriteDishId: string | null;
   preferredMealTags: readonly MealTag[];
   dislikedMealTags: readonly MealTag[];
-  /** Foundation-only offer pool. Values can later map to concrete trade offers. */
+  /** Empty means this guest has no interest in trading. */
   tradePool: readonly number[];
 };
 
@@ -41,7 +51,8 @@ export type GuestState = {
 export type GuestVisitView = {
   profile: GuestProfile;
   favor: number;
-  tradeOfferRoll: number;
+  tradeOfferRoll: number | null;
+  transportDiscountPercent: number;
   selected: boolean;
 };
 
@@ -60,7 +71,29 @@ export const OLD_FARMER_PROFILE: GuestProfile = {
   tradePool: Array.from({ length: 25 }, (_, index) => index),
 };
 
-export const GUEST_PROFILES: readonly GuestProfile[] = [OLD_FARMER_PROFILE];
+export const COACHMAN_PROFILE: GuestProfile = {
+  id: "coachman",
+  name: "Coachman",
+  portraitKey: "coachman",
+  // Base tier: WE / FR / SA. Higher favor adds one visit day per tier.
+  visitDays: [2, 4, 5],
+  favorTiers: [
+    { minFavor: 0,  maxFavor: 24,  visitDays: [2, 4, 5],                transportDiscountPercent: 0 },
+    { minFavor: 25, maxFavor: 49,  visitDays: [0, 2, 4, 5],             transportDiscountPercent: 10 },
+    { minFavor: 50, maxFavor: 74,  visitDays: [0, 1, 2, 4, 5],          transportDiscountPercent: 20 },
+    { minFavor: 75, maxFavor: 99,  visitDays: [0, 1, 2, 3, 4, 5],       transportDiscountPercent: 40 },
+    { minFavor: 100, maxFavor: 100, visitDays: [0, 1, 2, 3, 4, 5, 6],   transportDiscountPercent: 60 },
+  ],
+  initialFavor: 0,
+  favoriteDishId: null,
+  leastFavoriteDishId: null,
+  preferredMealTags: [],
+  dislikedMealTags: [],
+  // Coachman buys meals but does not trade items.
+  tradePool: [],
+};
+
+export const GUEST_PROFILES: readonly GuestProfile[] = [OLD_FARMER_PROFILE, COACHMAN_PROFILE];
 
 export const DEFAULT_GUEST_STATE: GuestState = {
   version: 1,
@@ -129,14 +162,34 @@ export async function saveGuestState(state: GuestState): Promise<GuestState> {
   return normalized;
 }
 
-export function isGuestScheduled(profile: GuestProfile, dayIndex: number): boolean {
-  return profile.visitDays.includes(normalizeWeekday(dayIndex));
+export function getGuestFavorTier(profile: GuestProfile, favor: number): GuestFavorTier | null {
+  if (!profile.favorTiers?.length) return null;
+  const normalizedFavor = clampFavor(favor);
+  return profile.favorTiers.find(
+    (tier) => normalizedFavor >= tier.minFavor && normalizedFavor <= tier.maxFavor,
+  ) ?? null;
 }
 
-function rollTradeOffer(profile: GuestProfile): number {
-  if (profile.tradePool.length === 0) return 0;
+export function getGuestVisitDays(profile: GuestProfile, favor: number): readonly number[] {
+  return getGuestFavorTier(profile, favor)?.visitDays ?? profile.visitDays;
+}
+
+export function getGuestTransportDiscountPercent(profile: GuestProfile, favor: number): number {
+  return Math.max(0, getGuestFavorTier(profile, favor)?.transportDiscountPercent ?? 0);
+}
+
+export function isGuestScheduled(
+  profile: GuestProfile,
+  dayIndex: number,
+  favor: number = profile.initialFavor,
+): boolean {
+  return getGuestVisitDays(profile, favor).includes(normalizeWeekday(dayIndex));
+}
+
+function rollTradeOffer(profile: GuestProfile): number | null {
+  if (profile.tradePool.length === 0) return null;
   const index = Math.floor(Math.random() * profile.tradePool.length);
-  return profile.tradePool[index] ?? profile.tradePool[0] ?? 0;
+  return profile.tradePool[index] ?? profile.tradePool[0] ?? null;
 }
 
 /**
@@ -171,12 +224,14 @@ async function syncGuestCalendar(dayIndex: number): Promise<GuestState> {
 }
 
 /**
- * Prepare today's scheduled guests. Each guest receives one trade roll for the
- * current calendarDaySerial; reopening the room or reloading preserves that roll.
+ * Prepare today's scheduled guests. Guests with a trade pool receive one trade roll
+ * for the current calendarDaySerial; reopening the room preserves that roll.
  */
 export async function prepareGuestsForDay(dayIndex: number): Promise<GuestVisitView[]> {
   let state = await syncGuestCalendar(dayIndex);
-  const scheduled = GUEST_PROFILES.filter((profile) => isGuestScheduled(profile, dayIndex));
+
+  const favorFor = (profile: GuestProfile) => clampFavor(state.favors[profile.id] ?? profile.initialFavor);
+  const scheduled = GUEST_PROFILES.filter((profile) => isGuestScheduled(profile, dayIndex, favorFor(profile)));
   let changed = false;
 
   const scheduledIds = new Set(scheduled.map((profile) => profile.id));
@@ -194,13 +249,24 @@ export async function prepareGuestsForDay(dayIndex: number): Promise<GuestVisitV
       changed = true;
     }
 
+    if (profile.tradePool.length === 0) {
+      if (nextTrades[profile.id] !== undefined) {
+        delete nextTrades[profile.id];
+        changed = true;
+      }
+      continue;
+    }
+
     const existingTrade = nextTrades[profile.id];
     if (!existingTrade || existingTrade.daySerial !== state.calendarDaySerial) {
-      nextTrades[profile.id] = {
-        daySerial: state.calendarDaySerial,
-        offerRoll: rollTradeOffer(profile),
-      };
-      changed = true;
+      const offerRoll = rollTradeOffer(profile);
+      if (offerRoll !== null) {
+        nextTrades[profile.id] = {
+          daySerial: state.calendarDaySerial,
+          offerRoll,
+        };
+        changed = true;
+      }
     }
   }
 
@@ -208,12 +274,18 @@ export async function prepareGuestsForDay(dayIndex: number): Promise<GuestVisitV
     state = await saveGuestState({ ...state, favors: nextFavors, visitTrades: nextTrades });
   }
 
-  return scheduled.map((profile) => ({
-    profile,
-    favor: clampFavor(state.favors[profile.id] ?? profile.initialFavor),
-    tradeOfferRoll: state.visitTrades[profile.id]?.offerRoll ?? 0,
-    selected: state.activeGuestId === profile.id,
-  }));
+  return scheduled.map((profile) => {
+    const favor = clampFavor(state.favors[profile.id] ?? profile.initialFavor);
+    return {
+      profile,
+      favor,
+      tradeOfferRoll: profile.tradePool.length > 0
+        ? state.visitTrades[profile.id]?.offerRoll ?? null
+        : null,
+      transportDiscountPercent: getGuestTransportDiscountPercent(profile, favor),
+      selected: state.activeGuestId === profile.id,
+    };
+  });
 }
 
 export async function setActiveGuest(guestId: GuestId | null): Promise<GuestState> {
