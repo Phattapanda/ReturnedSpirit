@@ -259,7 +259,7 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
     name: "Herb Soup",
     description: "A warm soup made from fresh herbs. Restores 20 Stamina.",
     attributes: [ITEM_ATTRIBUTE.EDIBLE],
-    mealTags: [MEAL_TAG.SOUP, MEAL_TAG.VEGETARIAN, MEAL_TAG.HERBS, MEAL_TAG.HEALTHY],
+    mealTags: [MEAL_TAG.SOUP, MEAL_TAG.VEGETARIAN, MEAL_TAG.HERBS, MEAL_TAG.HEALTHY, MEAL_TAG.WARM],
   },
   herbs:       { name: "Herbs",            description: "Fresh herbs picked from the garden.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   bucket:      { name: "Empty Bucket",     description: "A sturdy wooden bucket. It needs to be filled.", attributes: [ITEM_ATTRIBUTE.VESSEL] },
