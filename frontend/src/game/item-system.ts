@@ -20,6 +20,9 @@ export const MEAL_TAG = {
   HEALTHY: "healthy",
   MEAT: "meat",
   SWEET: "sweet",
+  HEARTY: "hearty",
+  WARM: "warm",
+  COLD: "cold",
 } as const;
 
 export type MealTag = (typeof MEAL_TAG)[keyof typeof MEAL_TAG];
