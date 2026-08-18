@@ -28,6 +28,8 @@ const ITEM_IMAGES: Record<string, ReturnType<typeof require>> = {
   bucketwater: require("../../assets/images/bucketwater.png"),
   herbseed:    require("../../assets/images/herbseed.png"),
   herbs:       require("../../assets/images/herbs.png"),
+  herbsoup:    require("../../assets/images/herbsoup.png"),
+  oldpot:      require("../../assets/images/oldpot.png"),
   bag1:        require("../../assets/images/bag1.png"),
   wood:        require("../../assets/images/wood.png"),
   stone:       require("../../assets/images/stone.png"),

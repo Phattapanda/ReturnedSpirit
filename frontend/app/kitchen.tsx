@@ -36,6 +36,7 @@ import {
   canStack, getContainerStackLimit,
   type PlayerBagData, type BagItem,
 } from "@/src/game/item-system";
+import { planKitchenItemToBag } from "@/src/game/kitchen-bag-transfer";
 import { PLAYER_STATS_KEY, DEFAULT_PLAYER_STATS, type PlayerStats } from "@/src/game/player-stats";
 import { loadLogbook, type LogEntry, LOGBOOK_KEY } from "@/src/game/logbook";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
@@ -182,6 +183,9 @@ function rupertSrc(p: "normal" | "sad" | "laugh") {
 function inRect(x: number, y: number, r: LRect): boolean {
   return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
 }
+function inExpandedRect(x: number, y: number, r: LRect, pad = 14): boolean {
+  return x >= r.x - pad && x <= r.x + r.w + pad && y >= r.y - pad && y <= r.y + r.h + pad;
+}
 
 // ─── Dialog data (modal story only) ───────────────────────────────────────────
 
@@ -290,6 +294,7 @@ export default function KitchenScreen() {
   const focusCountRef = useRef(0);
   // ── Bag & Stats
   const [playerBag, setPlayerBag] = useState<PlayerBagData>(DEFAULT_BAG);
+  const playerBagRef = useRef<PlayerBagData>(DEFAULT_BAG);
   const [playerStats, setPlayerStats] = useState<PlayerStats>(DEFAULT_PLAYER_STATS);
   const [bagOpen, setBagOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
@@ -518,6 +523,8 @@ export default function KitchenScreen() {
   // Slot index currently under the dragging soup (for drop-zone highlight)
   const [hoveredSlot, setHoveredSlot] = useState<number | null>(null);
   const hoveredSlotRef = useRef<number | null>(null);
+  const [bagDropHovered, setBagDropHovered] = useState(false);
+  const bagDropHoveredRef = useRef(false);
 
   // ── Stamina animation counter timer
   const staminaCountTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -543,12 +550,13 @@ export default function KitchenScreen() {
   // ── Layout measurement refs (declared early: used in cookingTablePanGesture worklet below) ──
   const playerPortraitRef  = useRef<View>(null);
   const rupertPortraitRef  = useRef<View>(null);
+  const bagIconRef         = useRef<View>(null);
   const tableSlotRefs      = useRef<(View | null)[]>(Array(12).fill(null));
   const craftSlotRefs = useRef<(View | null)[]>(Array(4).fill(null));  // 0-2 ingredients, 3 = tool
   const layouts = useRef<{
-    player: LRect | null; rupert: LRect | null;
+    player: LRect | null; rupert: LRect | null; bag: LRect | null;
     tableSlots: (LRect | null)[]; craftSlots: (LRect | null)[];
-  }>({ player: null, rupert: null, tableSlots: Array(12).fill(null), craftSlots: Array(4).fill(null) });
+  }>({ player: null, rupert: null, bag: null, tableSlots: Array(12).fill(null), craftSlots: Array(4).fill(null) });
 
   // Cooking item gestures are created per occupied slot further below, next to
   // the existing Day-1 soup gesture helpers.
@@ -581,7 +589,8 @@ export default function KitchenScreen() {
   useEffect(() => { tsRef.current = ts; }, [ts]);
   // Sync staminaMaxSV when playerStats.maximumStamina changes (e.g. after Status upgrade)
   useEffect(() => { staminaMaxSV.value = playerStats.maximumStamina; }, [playerStats.maximumStamina]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Sync tableItemsRef so the stable cooking gesture always reads current items
+  // Sync bag/table refs so drag callbacks always read current contents
+  useEffect(() => { playerBagRef.current = playerBag; }, [playerBag]);
   useEffect(() => { tableItemsRef.current = tableItems; }, [tableItems]);
   // Sync craft refs so the stable gesture always reads current craft state
   useEffect(() => { craftIngSlotsRef.current = craftIngSlots; }, [craftIngSlots]);
@@ -963,6 +972,9 @@ export default function KitchenScreen() {
     });
     rupertPortraitRef.current?.measureInWindow((x, y, w, h) => {
       layouts.current.rupert = { x, y, w, h };
+    });
+    bagIconRef.current?.measureInWindow((x, y, w, h) => {
+      layouts.current.bag = { x, y, w, h };
     });
     tableSlotRefs.current.forEach((r, i) => {
       r?.measureInWindow((x, y, w, h) => {
@@ -1973,12 +1985,30 @@ export default function KitchenScreen() {
     }
   }
 
+  function updateBagDropHover(next: boolean) {
+    if (bagDropHoveredRef.current === next) return;
+    bagDropHoveredRef.current = next;
+    setBagDropHovered(next);
+  }
+
   /** Update hovered slot during a generic kitchen item drag. */
   function updateCookingHoveredSlot(itemX: number, itemY: number) {
     const srcSlot = cookingDraggedSlotRef.current;
     const cur = tsRef.current;
     const lts = layouts.current.tableSlots;
     const lcs = layouts.current.craftSlots;
+    const bagRect = layouts.current.bag;
+
+    if (playerBagRef.current.unlocked && bagRect && inExpandedRect(itemX, itemY, bagRect)) {
+      updateBagDropHover(true);
+      if (hoveredSlotRef.current !== null) {
+        hoveredSlotRef.current = null;
+        setHoveredSlot(null);
+      }
+      return;
+    }
+    updateBagDropHover(false);
+
     let next: number | null = null;
 
     // Ingredient and Tool targets are only fully open while the recipe tutorial is active.
@@ -2016,6 +2046,10 @@ export default function KitchenScreen() {
     cookingDragItemIdRef.current = itemId;
     setCookingDragActiveSlot(slotIdx);
     setFlyingItemId(itemId);
+    updateBagDropHover(false);
+    bagIconRef.current?.measureInWindow((x, y, w, h) => {
+      layouts.current.bag = { x, y, w, h };
+    });
 
     // Keep the source visible until React has committed the new overlay image.
     requestAnimationFrame(() => {
@@ -2062,6 +2096,7 @@ export default function KitchenScreen() {
     setCookingDragActiveSlot(-1);
     hoveredSlotRef.current = null;
     setHoveredSlot(null);
+    updateBagDropHover(false);
   }
 
   /**
@@ -2113,6 +2148,47 @@ export default function KitchenScreen() {
     return Gesture.Race(itemPan, itemLongPress, itemTap);
   }
 
+  async function returnCookingItemToBag(srcSlot: number) {
+    const plan = planKitchenItemToBag(srcSlot, playerBagRef.current, {
+      tableItems: tableItemsRef.current,
+      craftIngredients: craftIngSlotsRef.current,
+      craftTool: craftToolRef.current,
+    });
+
+    if (!plan.canTransfer) {
+      showPlayerBubble('"My bag is full."');
+      return;
+    }
+
+    playerBagRef.current = plan.bag;
+    tableItemsRef.current = plan.tableItems;
+    craftIngSlotsRef.current = plan.craftIngredients;
+    craftToolRef.current = plan.craftTool;
+
+    setPlayerBag(plan.bag);
+    setTableItems(plan.tableItems);
+    setCraftIngSlots(plan.craftIngredients);
+    setCraftTool(plan.craftTool);
+    setSelectedHerbbagSlot(null);
+    setSelectedHerbsSlot(null);
+    setTooltipVisible(false);
+
+    await Promise.all([
+      AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(plan.bag)),
+      AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(plan.tableItems)),
+      AsyncStorage.setItem(SK.CRAFT_INGREDIENTS, JSON.stringify(plan.craftIngredients)),
+      AsyncStorage.setItem(SK.CRAFT_TOOL_SLOT, JSON.stringify(plan.craftTool)),
+    ]).catch(() => {});
+
+    audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
+    if (plan.remainderQty > 0) {
+      showPlayerBubble('"That is all I can fit."');
+    }
+    if (tsRef.current === "COOKING_CRAFT_READY") {
+      setTimeout(updateCraftResultPreview, 50);
+    }
+  }
+
   /** Drop a generic Kitchen item. Source is supplied by the item's own GestureDetector. */
   function handleCookingItemDrop(srcSlot: number, absX: number, absY: number) {
     cookingDraggedSlotRef.current = -1;
@@ -2121,11 +2197,18 @@ export default function KitchenScreen() {
     setCookingDragActiveSlot(-1);
     setHoveredSlot(null);
     hoveredSlotRef.current = null;
+    updateBagDropHover(false);
     soupVis.value = withTiming(0, { duration: 100 });
 
     const cur = tsRef.current;
     if (!isKitchenItemInteractionState(cur)) return;
     if (cur === "COOKING_UNPACK_WAIT" && srcSlot > 11) return;
+
+    const bagRect = layouts.current.bag;
+    if (playerBagRef.current.unlocked && bagRect && inExpandedRect(absX, absY, bagRect)) {
+      void returnCookingItemToBag(srcSlot);
+      return;
+    }
 
     const lcs = layouts.current.craftSlots;
     const lts = layouts.current.tableSlots;
@@ -2860,18 +2943,21 @@ export default function KitchenScreen() {
           <View ref={rupertPortraitRef} style={styles.circleWrap}>
             <Image source={rupertSrc(rupertPortrait)} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />
           </View>
-          <BagIconButton
-            unlocked={playerBag.unlocked}
-            onPress={() => {
-              setBagOpen(true);
-              if (ts === "COOKING_UNPACK_WAIT" && !bagOpenedOnceDuringCooking.current) {
-                bagOpenedOnceDuringCooking.current = true;
-                setBagPulseActive(false);
-              }
-            }}
-            pulsing={bagPulseActive}
-            style={styles.circleWrap}
-          />
+          <View ref={bagIconRef} collapsable={false} style={styles.bagDropTarget}>
+            <BagIconButton
+              unlocked={playerBag.unlocked}
+              onPress={() => {
+                setBagOpen(true);
+                if (ts === "COOKING_UNPACK_WAIT" && !bagOpenedOnceDuringCooking.current) {
+                  bagOpenedOnceDuringCooking.current = true;
+                  setBagPulseActive(false);
+                }
+              }}
+              pulsing={bagPulseActive}
+              style={styles.circleWrap}
+            />
+            {bagDropHovered && <View pointerEvents="none" style={styles.bagDropHighlight} />}
+          </View>
         </View>
 
         {/* Craft grid + Table grid. During COOKING_CRAFT_READY each occupied input slot
@@ -3533,6 +3619,15 @@ const styles = StyleSheet.create({
   circleWrapLocked: { borderColor: "#3A3A3A", backgroundColor: "#1A1A1A", alignItems: "center", justifyContent: "center" },
   circleImg: { width: "100%", height: "100%" },
   playerPortraitImage: { transform: [{ scale: 1.06 }] },
+  bagDropTarget: { width: 96, height: 96, borderRadius: 48, position: "relative" },
+  bagDropHighlight: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 48,
+    borderWidth: 3,
+    borderColor: "#F5E6C8",
+    backgroundColor: "rgba(196,148,58,0.18)",
+    zIndex: 5,
+  },
 
   // Grid
   gridContainer: {
