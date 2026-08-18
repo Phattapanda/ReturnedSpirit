@@ -62,7 +62,8 @@ function normalizeMealState(raw: unknown): DiningMealState {
     return { ...cloneItem(item), quantity: 1 };
   });
 
-  const activeCandidate = Number(candidate.activeSlotIndex);
+  const hasActiveCandidate = candidate.activeSlotIndex !== null && candidate.activeSlotIndex !== undefined;
+  const activeCandidate = hasActiveCandidate ? Number(candidate.activeSlotIndex) : NaN;
   const activeSlotIndex =
     Number.isInteger(activeCandidate) &&
     activeCandidate >= 0 &&
