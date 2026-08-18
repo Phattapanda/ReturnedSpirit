@@ -214,10 +214,11 @@ export default function DiningScreen() {
 
       <ScrollView
         style={styles.scrollArea}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 24, paddingTop: 8 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         showsVerticalScrollIndicator={false}
         bounces={false}
       >
+        {/* Keep this row identical to Kitchen/Garden for room-to-room consistency. */}
         <View style={styles.portraitRow}>
           <TouchableOpacity
             style={styles.circleWrap}
@@ -240,7 +241,7 @@ export default function DiningScreen() {
           />
         </View>
 
-        {/* Six meal slots mirror the Kitchen crafting row: one compact horizontal line, no heading. */}
+        {/* Exact Kitchen crafting-row geometry: six equal square slots, one line, no heading. */}
         <View style={styles.mealBar}>
           {Array.from({ length: MEAL_SLOT_COUNT }).map((_, i) => (
             <View key={i} style={styles.mealSlot}>
@@ -402,11 +403,12 @@ const styles = StyleSheet.create({
 
   scrollArea: { flex: 1, zIndex: 1 },
 
+  // Exact Kitchen/Garden portrait geometry.
   portraitRow: {
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
-    gap: 18,
+    gap: 22,
     paddingVertical: 12,
     backgroundColor: "rgba(14,7,1,0.65)",
   },
@@ -427,30 +429,27 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
 
+  // Exact Kitchen crafting-row geometry.
   mealBar: {
-    marginHorizontal: 18,
-    marginTop: 16,
+    marginHorizontal: 8,
+    marginVertical: 5,
     flexDirection: "row",
-    gap: 6,
-    padding: 8,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    borderColor: "rgba(196,148,58,0.35)",
-    backgroundColor: "rgba(14,8,2,0.90)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.45,
-    shadowRadius: 10,
-    elevation: 14,
+    gap: 4,
+    backgroundColor: "rgba(10,6,1,0.90)",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(90,65,30,0.35)",
+    padding: 5,
+    overflow: "hidden",
   },
   mealSlot: {
     flex: 1,
     aspectRatio: 1,
-    minWidth: 0,
+    minHeight: 44,
+    backgroundColor: "rgba(20,11,3,0.93)",
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "rgba(90,65,30,0.46)",
-    backgroundColor: "rgba(20,11,3,0.93)",
+    borderColor: "rgba(90,65,30,0.42)",
     alignItems: "center",
     justifyContent: "center",
   },
