@@ -17,6 +17,19 @@ export type CurrencyBreakdown = {
   copper: number;
 };
 
+type CurrencyListener = (totalCopper: number) => void;
+const currencyListeners = new Set<CurrencyListener>();
+
+function emitCurrency(totalCopper: number) {
+  for (const listener of currencyListeners) listener(totalCopper);
+}
+
+/** Subscribe to in-session currency changes made through this module. */
+export function subscribeCurrency(listener: CurrencyListener): () => void {
+  currencyListeners.add(listener);
+  return () => currencyListeners.delete(listener);
+}
+
 /** Keep persisted currency safe and deterministic: whole Copper, never negative. */
 export function normalizeCopper(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_CURRENCY_COPPER;
@@ -55,6 +68,7 @@ export async function loadCurrencyCopper(): Promise<number> {
 export async function saveCurrencyCopper(totalCopper: number): Promise<number> {
   const normalized = normalizeCopper(totalCopper);
   await AsyncStorage.setItem(CURRENCY_KEY, String(normalized));
+  emitCurrency(normalized);
   return normalized;
 }
 
