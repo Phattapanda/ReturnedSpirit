@@ -16,8 +16,10 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import SceneBackground from "@/src/components/SceneBackground";
 import CurrencyHud from "@/src/components/CurrencyHud";
+import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import StatusModal from "@/src/components/StatusModal";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, type PlayerStats } from "@/src/game/player-stats";
+import { DEFAULT_BAG, PLAYER_BAG_KEY, type PlayerBagData } from "@/src/game/item-system";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
 import {
   PLAYER_AVATAR_KEY,
@@ -80,10 +82,12 @@ export default function DiningScreen() {
   const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(1);
   const [timeOfDay, setTimeOfDay]           = useState<"morning" | "evening">("evening");
   const [headerH, setHeaderH]               = useState(0);
+  const [playerBag, setPlayerBag]           = useState<PlayerBagData>(DEFAULT_BAG);
 
   // ── Modals
   const [statusOpen, setStatusOpen] = useState(false);
   const [showMenu, setShowMenu]     = useState(false);
+  const [bagOpen, setBagOpen]       = useState(false);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Load current game state from the shared save architecture
@@ -104,6 +108,7 @@ export default function DiningScreen() {
         const rawDay  = await AsyncStorage.getItem(DSK.DAY_INDEX);
         const rawAv   = await AsyncStorage.getItem(PLAYER_AVATAR_KEY);
         const rawTod  = await AsyncStorage.getItem(DSK.TIME_OF_DAY);
+        const rawBag  = await AsyncStorage.getItem(PLAYER_BAG_KEY);
 
         if (!active) return;
 
@@ -113,6 +118,9 @@ export default function DiningScreen() {
         setDayIdx(rawDay !== null ? parseInt(rawDay, 10) : 0);
         setPlayerAvatarId(normalizePlayerAvatarId(rawAv));
         setTimeOfDay(rawTod === "morning" ? "morning" : "evening");
+        if (rawBag) {
+          try { setPlayerBag(JSON.parse(rawBag)); } catch { /* default */ }
+        }
 
         // Record Dining Hall as the current runtime location (used by manual save).
         await AsyncStorage.setItem(DSK.SAVE_LOCATION, "dining");
@@ -233,7 +241,7 @@ export default function DiningScreen() {
         showsVerticalScrollIndicator={false}
         bounces={false}
       >
-        {/* Portrait row (player avatar reacts to stamina; tap opens Status) */}
+        {/* Portrait row: player + reserved Rupert position + existing bag access. */}
         <View style={styles.portraitRow}>
           <TouchableOpacity
             style={styles.circleWrap}
@@ -247,15 +255,23 @@ export default function DiningScreen() {
               resizeMethod="resize"
             />
           </TouchableOpacity>
+
+          {/* Reserved for Rupert when he is actually present in the Dining Hall. */}
+          <View style={[styles.circleWrap, styles.rupertReserve]} pointerEvents="none" />
+
+          <BagIconButton
+            unlocked={playerBag.unlocked}
+            onPress={() => setBagOpen(true)}
+          />
         </View>
 
-        {/* ── Meal slots (6 empty placeholders for future meals) ── */}
+        {/* ── Meal slots: 6 larger crafting-style placeholders in a 3 × 2 grid ── */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Meals</Text>
-          <View style={styles.mealRow}>
+          <View style={styles.mealGrid}>
             {Array.from({ length: MEAL_SLOT_COUNT }).map((_, i) => (
               <View key={i} style={styles.mealSlot}>
-                <Ionicons name="restaurant-outline" size={18} color="rgba(196,148,58,0.30)" />
+                <Ionicons name="restaurant-outline" size={25} color="rgba(196,148,58,0.30)" />
               </View>
             ))}
           </View>
@@ -333,6 +349,16 @@ export default function DiningScreen() {
         </View>
       </Modal>
 
+      {/* ── Existing Shoulder Bag. Dining has no item-transfer target yet. ── */}
+      <PlayerBag
+        bag={playerBag}
+        visible={bagOpen}
+        context="room"
+        dayIdx={dayIdx}
+        onClose={() => setBagOpen(false)}
+        onTransferItem={() => {}}
+      />
+
       {/* ── Player Status / Growth Points ── */}
       <StatusModal
         visible={statusOpen}
@@ -395,10 +421,10 @@ const styles = StyleSheet.create({
 
   scrollArea: { flex: 1, zIndex: 1 },
 
-  // Portrait
+  // Portrait / companion / bag row. Same three-position rhythm as the Kitchen.
   portraitRow: {
     flexDirection: "row", justifyContent: "center", alignItems: "center",
-    gap: 22, paddingVertical: 12, backgroundColor: "rgba(14,7,1,0.65)",
+    gap: 18, paddingVertical: 12, backgroundColor: "rgba(14,7,1,0.65)",
   },
   circleWrap: {
     width: 96, height: 96, borderRadius: 48,
@@ -406,6 +432,11 @@ const styles = StyleSheet.create({
   },
   circleImg: { width: "100%", height: "100%" },
   playerPortraitImage: { transform: [{ scale: 1.06 }] },
+  rupertReserve: {
+    opacity: 0,
+    borderColor: "transparent",
+    backgroundColor: "transparent",
+  },
 
   // Section cards
   sectionCard: {
@@ -422,13 +453,17 @@ const styles = StyleSheet.create({
     letterSpacing: 1, marginBottom: 10,
   },
 
-  // Meal slots
-  mealRow: { flexDirection: "row", justifyContent: "space-between", gap: 8 },
+  // Meal slots: deliberately modeled after the Kitchen craft-slot proportions.
+  mealGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    rowGap: 9,
+  },
   mealSlot: {
-    flex: 1, aspectRatio: 1, borderRadius: 12,
-    backgroundColor: "rgba(196,148,58,0.05)",
-    borderWidth: 1.5, borderColor: "rgba(196,148,58,0.28)",
-    borderStyle: "dashed",
+    width: "31%", aspectRatio: 1, minHeight: 72,
+    backgroundColor: "rgba(20,11,3,0.93)", borderRadius: 8,
+    borderWidth: 1, borderColor: "rgba(90,65,30,0.42)",
     alignItems: "center", justifyContent: "center",
   },
 
