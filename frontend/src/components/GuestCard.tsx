@@ -36,19 +36,19 @@ const GUEST_PORTRAITS: Record<string, ReturnType<typeof require>> = {
 };
 
 /**
- * Foundation-only GuestCard, intentionally modeled after GardenPlot:
+ * Foundation GuestCard, intentionally modeled after GardenPlot:
  * - square guest portrait on the LEFT, like the crop/Herb Bed image
  * - guest name + request text in the main information area
- * - four large, finger-friendly service tiles below
+ * - finger-friendly service tiles below
  *
  * Favor remains in the guest model but is intentionally NOT shown here. A later
  * guest-detail view can expose it from the portrait. Dialog presentation is kept
  * separate so future half-body dialog art does not constrain this card layout.
- * Service actions remain visual-only in Point 6.
  */
 export function GuestCard({ guest, onSelect }: GuestCardProps) {
   const { profile, selected } = guest;
   const portrait = GUEST_PORTRAITS[profile.portraitKey];
+  const canTrade = profile.tradePool.length > 0;
 
   return (
     <TouchableOpacity
@@ -89,13 +89,15 @@ export function GuestCard({ guest, onSelect }: GuestCardProps) {
           </View>
         </View>
 
-        <View style={styles.serviceButton} pointerEvents="none">
-          <View style={styles.tradeItemWrap}>
-            <Image source={TRADE_POTATO} style={styles.tradeItemImage} resizeMode="contain" resizeMethod="resize" />
-            {/* Stack badge will be added when roll → concrete item quantity is defined. */}
+        {canTrade && (
+          <View style={styles.serviceButton} pointerEvents="none">
+            <View style={styles.tradeItemWrap}>
+              <Image source={TRADE_POTATO} style={styles.tradeItemImage} resizeMode="contain" resizeMethod="resize" />
+              {/* Stack badge will be added when roll → concrete item quantity is defined. */}
+            </View>
+            <Text style={styles.serviceLabel}>Trade</Text>
           </View>
-          <Text style={styles.serviceLabel}>Trade</Text>
-        </View>
+        )}
 
         <View style={styles.serviceButton} pointerEvents="none">
           <Image source={SERVICE_WATER} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
