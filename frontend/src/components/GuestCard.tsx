@@ -1,5 +1,12 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  ActivityIndicator,
+  Image,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -15,60 +22,77 @@ type GuestCardProps = {
   onSelect: (guestId: GuestId) => void;
 };
 
-const ACTION_ICONS = [
-  "chatbubble-ellipses-outline",
-  "restaurant-outline",
-  "swap-horizontal-outline",
-  "gift-outline",
-] as const;
+const COIN_COPPER = require("../../assets/images/coin_copper.png");
 
 /**
- * Foundation-only GuestCard. The four activity buttons are intentionally inert;
- * their gameplay is implemented in later guest/dining steps.
+ * Foundation-only GuestCard.
+ *
+ * Visual contract intentionally follows the Garden Plot:
+ * - guest information/request occupies the large upper-left area
+ * - portrait lives on the upper-right
+ * - four large activity/service tiles run across the bottom
+ *
+ * Favor remains in the guest model but is intentionally NOT shown on the card.
+ * It will later live in the guest detail window behind/from the portrait.
  */
 export function GuestCard({ guest, onSelect }: GuestCardProps) {
-  const { profile, favor, tradeOfferRoll, selected } = guest;
+  const { profile, selected } = guest;
 
   return (
     <TouchableOpacity
       style={[styles.card, selected && styles.cardSelected]}
       onPress={() => onSelect(profile.id)}
-      activeOpacity={0.86}
+      activeOpacity={0.88}
     >
-      <View style={styles.infoColumn}>
-        <View>
+      <View style={styles.guestTopRow}>
+        <View style={styles.guestTextArea}>
           <Text style={styles.name}>{profile.name}</Text>
-          <Text style={styles.subtitle}>Favor {favor}/100</Text>
+          <Text style={styles.requestText}>“I could use something to eat.”</Text>
         </View>
 
-        <View style={styles.favorTrack}>
-          <View style={[styles.favorFill, { width: `${favor}%` }]} />
-        </View>
-
-        <View style={styles.tradeBadge}>
-          <Ionicons name="swap-horizontal-outline" size={14} color="#C4943A" />
-          <Text style={styles.tradeText}>Trade roll {tradeOfferRoll}</Text>
-        </View>
-
-        {selected && (
-          <View style={styles.selectedBadge}>
-            <Text style={styles.selectedText}>Active guest</Text>
-          </View>
-        )}
-      </View>
-
-      <View style={styles.guestColumn}>
         {/* Portrait placeholder until the Old Farmer portrait asset is supplied. */}
         <View style={styles.portraitWrap}>
-          <Ionicons name="person-outline" size={38} color="rgba(196,148,58,0.72)" />
+          <Ionicons name="person-outline" size={42} color="rgba(196,148,58,0.76)" />
+        </View>
+      </View>
+
+      <View style={styles.serviceRow}>
+        {/* Sell artwork will replace this placeholder once its PNG is supplied. */}
+        <View style={styles.serviceButton}>
+          <View style={styles.serviceArtwork}>
+            <Ionicons name="cash-outline" size={38} color="#C4943A" />
+          </View>
+          <View style={styles.serviceLabelRow}>
+            <Text style={styles.serviceLabel}>Sell for --</Text>
+            <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" />
+          </View>
         </View>
 
-        <View style={styles.actionRow}>
-          {ACTION_ICONS.map((icon) => (
-            <View key={icon} style={styles.actionButton}>
-              <Ionicons name={icon} size={15} color="rgba(240,232,213,0.42)" />
-            </View>
-          ))}
+        {/* The actual rolled trade item/stack will replace this placeholder later. */}
+        <View style={styles.serviceButton}>
+          <View style={styles.serviceArtwork}>
+            <Ionicons name="cube-outline" size={38} color="#C4943A" />
+          </View>
+          <Text style={styles.serviceLabel}>Trade</Text>
+        </View>
+
+        {/* Water-glass artwork will replace this placeholder once its PNG is supplied. */}
+        <View style={styles.serviceButton}>
+          <View style={styles.serviceArtwork}>
+            <Ionicons name="water-outline" size={38} color="#C4943A" />
+          </View>
+          <View style={styles.serviceLabelWrap}>
+            <Text style={styles.serviceLabel}>Offer water for 1</Text>
+            <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" />
+          </View>
+        </View>
+
+        {/* Speech-bubble artwork will replace this placeholder once its PNG is supplied. */}
+        <View style={styles.serviceButton}>
+          <View style={styles.serviceArtwork}>
+            <Ionicons name="chatbubbles-outline" size={38} color="#C4943A" />
+          </View>
+          <Text style={styles.serviceLabel}>Talk</Text>
         </View>
       </View>
     </TouchableOpacity>
@@ -118,149 +142,153 @@ export default function DiningGuestArea({ dayIndex }: DiningGuestAreaProps) {
     })));
   }
 
+  if (loading) {
+    return (
+      <View style={styles.emptyCard}>
+        <ActivityIndicator size="small" color="#C4943A" />
+      </View>
+    );
+  }
+
+  if (guests.length === 0) {
+    return (
+      <View style={styles.emptyCard}>
+        <Ionicons name="moon-outline" size={24} color="rgba(196,148,58,0.30)" />
+        <Text style={styles.emptyText}>No guests today</Text>
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.sectionCard}>
-      {loading ? (
-        <View style={styles.emptyArea}>
-          <ActivityIndicator size="small" color="#C4943A" />
-        </View>
-      ) : guests.length === 0 ? (
-        <View style={styles.emptyArea}>
-          <Ionicons name="moon-outline" size={24} color="rgba(196,148,58,0.30)" />
-          <Text style={styles.emptyText}>No guests today</Text>
-        </View>
-      ) : (
-        <View style={styles.guestList}>
-          {guests.map((guest) => (
-            <GuestCard key={guest.profile.id} guest={guest} onSelect={handleSelect} />
-          ))}
-        </View>
-      )}
+    <View style={styles.guestList}>
+      {guests.map((guest) => (
+        <GuestCard key={guest.profile.id} guest={guest} onSelect={handleSelect} />
+      ))}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  sectionCard: {
+  guestList: {
     marginHorizontal: 18,
-    marginTop: 16,
-    backgroundColor: "rgba(14,8,2,0.90)",
-    borderRadius: 18,
+    marginTop: 18,
+    gap: 14,
+  },
+  card: {
+    backgroundColor: "rgba(20,11,3,0.94)",
+    borderRadius: 16,
     borderWidth: 1.5,
-    borderColor: "rgba(196,148,58,0.35)",
-    padding: 12,
+    borderColor: "rgba(196,148,58,0.42)",
+    padding: 10,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.5,
     shadowRadius: 12,
     elevation: 16,
   },
-  guestList: { gap: 10 },
-  card: {
-    minHeight: 142,
-    flexDirection: "row",
-    backgroundColor: "rgba(20,11,3,0.94)",
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: "rgba(90,65,30,0.46)",
-    padding: 12,
-    gap: 12,
-  },
   cardSelected: {
-    borderColor: "#C4943A",
-    backgroundColor: "rgba(36,20,5,0.96)",
+    borderWidth: 2,
+    borderColor: "#D8A64A",
+    backgroundColor: "rgba(47,25,6,0.97)",
+    transform: [{ translateY: -8 }],
   },
-  infoColumn: {
+  guestTopRow: {
+    minHeight: 112,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 4,
+    paddingBottom: 10,
+  },
+  guestTextArea: {
     flex: 1,
-    justifyContent: "space-between",
-    paddingVertical: 2,
+    alignSelf: "stretch",
+    paddingVertical: 4,
   },
   name: {
     color: "#F5E6C8",
-    fontSize: 15,
+    fontSize: 16,
     fontFamily: "Oldenburg",
-    letterSpacing: 0.4,
+    letterSpacing: 0.45,
   },
-  subtitle: {
-    marginTop: 4,
-    color: "rgba(240,232,213,0.70)",
-    fontSize: 11,
+  requestText: {
+    marginTop: 16,
+    color: "rgba(240,232,213,0.86)",
+    fontSize: 13,
+    lineHeight: 20,
     fontFamily: "Oldenburg",
-  },
-  favorTrack: {
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    overflow: "hidden",
-    marginVertical: 8,
-  },
-  favorFill: {
-    height: "100%",
-    borderRadius: 4,
-    backgroundColor: "#C4943A",
-  },
-  tradeBadge: {
-    alignSelf: "flex-start",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 8,
-    backgroundColor: "rgba(196,148,58,0.10)",
-    borderWidth: 1,
-    borderColor: "rgba(196,148,58,0.25)",
-  },
-  tradeText: {
-    color: "rgba(240,232,213,0.72)",
-    fontSize: 10,
-    fontFamily: "Oldenburg",
-  },
-  selectedBadge: {
-    alignSelf: "flex-start",
-    marginTop: 7,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 6,
-    backgroundColor: "rgba(196,148,58,0.18)",
-  },
-  selectedText: {
-    color: "#C4943A",
-    fontSize: 9,
-    fontFamily: "Oldenburg",
-  },
-  guestColumn: {
-    width: 104,
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 9,
   },
   portraitWrap: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
+    width: 92,
+    height: 92,
+    borderRadius: 46,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(35,22,10,0.94)",
-    borderWidth: 2,
-    borderColor: "rgba(196,148,58,0.58)",
+    backgroundColor: "rgba(35,22,10,0.96)",
+    borderWidth: 2.5,
+    borderColor: "rgba(196,148,58,0.68)",
   },
-  actionRow: {
+  serviceRow: {
     flexDirection: "row",
-    gap: 4,
+    alignItems: "stretch",
+    gap: 6,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(196,148,58,0.18)",
   },
-  actionButton: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
+  serviceButton: {
+    flex: 1,
+    minHeight: 104,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(196,148,58,0.28)",
+    backgroundColor: "rgba(18,10,3,0.82)",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 4,
+    paddingTop: 8,
+    paddingBottom: 7,
+  },
+  serviceArtwork: {
+    height: 58,
+    width: "100%",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.025)",
-    borderWidth: 1,
-    borderColor: "rgba(196,148,58,0.18)",
   },
-  emptyArea: {
-    minHeight: 116,
+  serviceLabel: {
+    color: "#F0E8D5",
+    fontSize: 9.5,
+    lineHeight: 13,
+    textAlign: "center",
+    fontFamily: "Oldenburg",
+  },
+  serviceLabelRow: {
+    minHeight: 26,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 2,
+  },
+  serviceLabelWrap: {
+    minHeight: 28,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 2,
+  },
+  miniCoin: {
+    width: 12,
+    height: 12,
+  },
+  emptyCard: {
+    minHeight: 120,
+    marginHorizontal: 18,
+    marginTop: 18,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: "rgba(196,148,58,0.30)",
+    backgroundColor: "rgba(14,8,2,0.90)",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
