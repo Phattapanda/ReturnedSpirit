@@ -38,6 +38,7 @@ import {
 } from "@/src/game/shared-resources";
 
 import SceneBackground from "@/src/components/SceneBackground";
+import CurrencyHud from "@/src/components/CurrencyHud";
 import StatusModal from "@/src/components/StatusModal";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, type PlayerStats } from "@/src/game/player-stats";
 import { PLAYER_BAG_KEY, DEFAULT_BAG } from "@/src/game/item-system";
@@ -828,6 +829,7 @@ export default function DormitoryScreen() {
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <View style={styles.root}>
+      <CurrencyHud />
       {/* ── Background (responsive, top-aligned, no cover zoom) ── */}
       <SceneBackground source={isEvening ? IMG.room_evening : IMG.room_morning} topOffset={headerH} />
       <View style={[StyleSheet.absoluteFill, { top: headerH }, styles.bgOverlay]} pointerEvents="none" />

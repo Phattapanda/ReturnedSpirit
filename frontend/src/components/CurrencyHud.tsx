@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Animated, StyleSheet, Text, View } from "react-native";
+import { Animated, Image, StyleSheet, Text, View } from "react-native";
 import { usePathname } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -10,6 +10,12 @@ import {
   subscribeCurrency,
 } from "@/src/game/currency-system";
 
+const COIN_IMAGES = {
+  gold: require("../../assets/images/coin_gold.png"),
+  silver: require("../../assets/images/coin_silver.png"),
+  copper: require("../../assets/images/coin_copper.png"),
+} as const;
+
 function isGameplayRoute(pathname: string): boolean {
   return pathname === "/kitchen" ||
     pathname === "/garden" ||
@@ -19,11 +25,11 @@ function isGameplayRoute(pathname: string): boolean {
 }
 
 /**
- * Global currency HUD aligned with the room/location-name row.
+ * Currency HUD aligned with the room/location-name row.
  *
- * The HUD lives above the router so the currency state stays centralized, but its
- * visual presence follows room navigation: it disappears as the route changes and
- * enters with the next gameplay room instead of remaining fixed over the transition.
+ * Mounted inside each gameplay room screen (Kitchen / Garden / Dormitory / future
+ * Dining) rather than at the router root, so it enters and leaves together with its
+ * room during Stack transitions instead of floating as a persistent global overlay.
  * Pointer events are disabled so it never interferes with gameplay/header controls.
  */
 export default function CurrencyHud() {
@@ -93,15 +99,15 @@ export default function CurrencyHud() {
       ]}
     >
       <View style={styles.denomination}>
-        <View style={[styles.coin, styles.goldCoin]} />
+        <Image source={COIN_IMAGES.gold} style={styles.coin} resizeMode="contain" />
         <Text style={styles.amount}>{balance.gold}</Text>
       </View>
       <View style={styles.denomination}>
-        <View style={[styles.coin, styles.silverCoin]} />
+        <Image source={COIN_IMAGES.silver} style={styles.coin} resizeMode="contain" />
         <Text style={styles.amount}>{balance.silver}</Text>
       </View>
       <View style={styles.denomination}>
-        <View style={[styles.coin, styles.copperCoin]} />
+        <Image source={COIN_IMAGES.copper} style={styles.coin} resizeMode="contain" />
         <Text style={styles.amount}>{balance.copper}</Text>
       </View>
     </Animated.View>
@@ -123,15 +129,9 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   coin: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: "rgba(245,230,200,0.65)",
+    width: 18,
+    height: 18,
   },
-  goldCoin: { backgroundColor: "#C4943A" },
-  silverCoin: { backgroundColor: "#B8B8B0" },
-  copperCoin: { backgroundColor: "#A86132" },
   amount: {
     color: "#F0E8D5",
     fontSize: 11,
