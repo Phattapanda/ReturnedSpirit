@@ -76,15 +76,9 @@ export function GuestCard({ guest, onSelect }: GuestCardProps) {
       <View style={styles.serviceRow}>
         <View style={styles.serviceButton} pointerEvents="none">
           <Image source={SERVICE_SELL} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
-          <View style={styles.serviceLabelInline}>
-            <Text
-              style={styles.serviceLabel}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.78}
-            >
-              Sell for X
-            </Text>
+          <Text style={styles.serviceLabel}>Sell for</Text>
+          <View style={styles.serviceValueRow}>
+            <Text style={styles.serviceValueText}>X</Text>
             <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" resizeMethod="resize" />
           </View>
         </View>
@@ -101,15 +95,9 @@ export function GuestCard({ guest, onSelect }: GuestCardProps) {
 
         <View style={styles.serviceButton} pointerEvents="none">
           <Image source={SERVICE_WATER} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
-          <View style={styles.serviceLabelInline}>
-            <Text
-              style={styles.serviceLabel}
-              numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.68}
-            >
-              Offer water for 1
-            </Text>
+          <Text style={styles.serviceLabel}>Offer water</Text>
+          <View style={styles.serviceValueRow}>
+            <Text style={styles.serviceValueText}>for 1</Text>
             <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" resizeMethod="resize" />
           </View>
         </View>
@@ -195,7 +183,7 @@ export default function DiningGuestArea({ dayIndex }: DiningGuestAreaProps) {
 const styles = StyleSheet.create({
   guestList: {
     marginHorizontal: 18,
-    marginTop: 18,
+    marginTop: 5,
     gap: 14,
   },
 
@@ -243,19 +231,20 @@ const styles = StyleSheet.create({
   },
   guestTextArea: {
     flex: 1,
-    gap: 8,
+    gap: 5,
   },
   name: {
-    color: "#F5E6C8",
-    fontSize: 16,
+    color: "#C4943A",
+    fontSize: 13,
     fontFamily: "Oldenburg",
-    letterSpacing: 0.45,
+    letterSpacing: 0.8,
   },
   requestText: {
-    color: "rgba(240,232,213,0.86)",
-    fontSize: 13,
-    lineHeight: 20,
+    color: "#F0E8D5",
+    fontSize: 12,
+    lineHeight: 18,
     fontFamily: "Oldenburg",
+    opacity: 0.85,
   },
 
   divider: {
@@ -264,7 +253,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 10,
   },
 
-  // Exact GardenPlot action rhythm: shorter fields, smaller images, text directly below.
+  // Exact GardenPlot action rhythm: image, label, then changing value/cost below.
   serviceRow: {
     flexDirection: "row",
     gap: 6,
@@ -300,19 +289,24 @@ const styles = StyleSheet.create({
   },
   serviceLabel: {
     color: "#F0E8D5",
-    fontSize: 9.5,
+    fontSize: 10,
     lineHeight: 12,
     textAlign: "center",
     fontFamily: "Oldenburg",
-    flexShrink: 1,
   },
-  serviceLabelInline: {
-    width: "100%",
+  serviceValueRow: {
     flexDirection: "row",
     flexWrap: "nowrap",
     alignItems: "center",
     justifyContent: "center",
     gap: 2,
+  },
+  serviceValueText: {
+    color: "rgba(240,232,213,0.55)",
+    fontSize: 9,
+    lineHeight: 11,
+    textAlign: "center",
+    fontFamily: "Oldenburg",
   },
   miniCoin: {
     width: 10,
@@ -323,7 +317,7 @@ const styles = StyleSheet.create({
   emptyCard: {
     minHeight: 120,
     marginHorizontal: 18,
-    marginTop: 18,
+    marginTop: 5,
     borderRadius: 16,
     borderWidth: 1.5,
     borderColor: "rgba(196,148,58,0.30)",
