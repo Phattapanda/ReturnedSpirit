@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -19,6 +19,15 @@ import CurrencyHud from "@/src/components/CurrencyHud";
 import DiningGuestArea from "@/src/components/GuestCard";
 import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import StatusModal from "@/src/components/StatusModal";
+import {
+  DEFAULT_DINING_MEAL_STATE,
+  DINING_MEAL_SLOT_COUNT,
+  loadDiningMealState,
+  planBagItemToMealSlot,
+  saveDiningMealState,
+  selectActiveMealSlot,
+  type DiningMealState,
+} from "@/src/game/dining-meal-system";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, type PlayerStats } from "@/src/game/player-stats";
 import { DEFAULT_BAG, PLAYER_BAG_KEY, type PlayerBagData } from "@/src/game/item-system";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
@@ -43,12 +52,17 @@ const DSK = {
 const IMG = {
   dining:      require("../assets/images/dining.png"),
   dining_dawn: require("../assets/images/dining_dawn.png"),
+  herbsoup:      require("../assets/images/herbsoup.png"),
   loc_kitchen:   require("../assets/images/gotokitchen.png"),
   loc_garden:    require("../assets/images/gotogarden.png"),
   loc_dining:    require("../assets/images/gotodining.png"),
   loc_dormitory: require("../assets/images/gotodormitory.png"),
   loc_mail:      require("../assets/images/gotomail.png"),
   loc_explore:   require("../assets/images/goexplore.png"),
+};
+
+const MEAL_IMAGES: Record<string, ReturnType<typeof require>> = {
+  herbsoup: IMG.herbsoup,
 };
 
 const DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
@@ -61,8 +75,6 @@ const LOCS = [
   { id: "mail",      nav: false },
   { id: "explore",   nav: false },
 ] as const;
-
-const MEAL_SLOT_COUNT = 6;
 
 export default function DiningScreen() {
   const router = useRouter();
@@ -78,6 +90,9 @@ export default function DiningScreen() {
   const [timeOfDay, setTimeOfDay] = useState<"morning" | "evening">("evening");
   const [headerH, setHeaderH] = useState(0);
   const [playerBag, setPlayerBag] = useState<PlayerBagData>(DEFAULT_BAG);
+  const [mealState, setMealState] = useState<DiningMealState>(DEFAULT_DINING_MEAL_STATE);
+  const [playerThought, setPlayerThought] = useState<string | null>(null);
+  const thoughtTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [statusOpen, setStatusOpen] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -99,6 +114,7 @@ export default function DiningScreen() {
         const rawAv = await AsyncStorage.getItem(PLAYER_AVATAR_KEY);
         const rawTod = await AsyncStorage.getItem(DSK.TIME_OF_DAY);
         const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
+        const loadedMeals = await loadDiningMealState();
 
         if (!active) return;
 
@@ -108,6 +124,7 @@ export default function DiningScreen() {
         setDayIdx(rawDay !== null ? parseInt(rawDay, 10) : 0);
         setPlayerAvatarId(normalizePlayerAvatarId(rawAv));
         setTimeOfDay(rawTod === "morning" ? "morning" : "evening");
+        setMealState(loadedMeals);
         if (rawBag) {
           try { setPlayerBag(JSON.parse(rawBag)); } catch { /* default */ }
         }
@@ -119,6 +136,58 @@ export default function DiningScreen() {
     })();
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (thoughtTimer.current) clearTimeout(thoughtTimer.current);
+    };
+  }, []);
+
+  function showPlayerThought(text: string) {
+    if (thoughtTimer.current) clearTimeout(thoughtTimer.current);
+    setPlayerThought(text);
+    thoughtTimer.current = setTimeout(() => setPlayerThought(null), 2600);
+  }
+
+  async function handleBagToMealSlot(bagSlotIndex: number) {
+    const plan = planBagItemToMealSlot(playerBag, bagSlotIndex, mealState);
+
+    if (!plan.ok) {
+      if (plan.reason === "missing_item") return;
+      setBagOpen(false);
+      if (plan.reason === "not_edible") {
+        showPlayerThought("I can't serve this.");
+      } else {
+        showPlayerThought("There is no free meal slot.");
+      }
+      return;
+    }
+
+    setPlayerBag(plan.bag);
+    setMealState(plan.mealState);
+    audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
+
+    try {
+      await Promise.all([
+        AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(plan.bag)),
+        saveDiningMealState(plan.mealState),
+      ]);
+    } catch (e) {
+      if (__DEV__) console.error("[Dining] meal transfer save failed:", e);
+    }
+  }
+
+  async function handleMealSlotTap(slotIndex: number) {
+    if (!mealState.slots[slotIndex]) return;
+    const next = selectActiveMealSlot(mealState, slotIndex);
+    if (next.activeSlotIndex === mealState.activeSlotIndex) return;
+    setMealState(next);
+    try {
+      await saveDiningMealState(next);
+    } catch (e) {
+      if (__DEV__) console.error("[Dining] active meal save failed:", e);
+    }
+  }
 
   async function updateSaveSlot(day: number, stamina: number, life: number): Promise<number> {
     try {
@@ -218,7 +287,6 @@ export default function DiningScreen() {
         showsVerticalScrollIndicator={false}
         bounces={false}
       >
-        {/* Keep this row identical to Kitchen/Garden for room-to-room consistency. */}
         <View style={styles.portraitRow}>
           <TouchableOpacity
             style={styles.circleWrap}
@@ -239,15 +307,43 @@ export default function DiningScreen() {
             unlocked={playerBag.unlocked}
             onPress={() => setBagOpen(true)}
           />
+
+          {playerThought && (
+            <View style={styles.playerThoughtWrap} pointerEvents="none">
+              <View style={styles.playerThoughtArrow} />
+              <View style={styles.playerThoughtCard}>
+                <Text style={styles.playerThoughtText}>{playerThought}</Text>
+              </View>
+            </View>
+          )}
         </View>
 
-        {/* Exact Kitchen crafting-row geometry: six equal square slots, one line, no heading. */}
         <View style={styles.mealBar}>
-          {Array.from({ length: MEAL_SLOT_COUNT }).map((_, i) => (
-            <View key={i} style={styles.mealSlot}>
-              <Ionicons name="restaurant-outline" size={22} color="rgba(196,148,58,0.34)" />
-            </View>
-          ))}
+          {Array.from({ length: DINING_MEAL_SLOT_COUNT }).map((_, i) => {
+            const meal = mealState.slots[i];
+            const isActive = mealState.activeSlotIndex === i && !!meal;
+            const mealImage = meal ? MEAL_IMAGES[meal.id] : null;
+
+            return (
+              <TouchableOpacity
+                key={i}
+                style={[styles.mealSlot, isActive && styles.mealSlotActive]}
+                activeOpacity={meal ? 0.78 : 1}
+                disabled={!meal}
+                onPress={() => handleMealSlotTap(i)}
+              >
+                {meal ? (
+                  mealImage ? (
+                    <Image source={mealImage} style={styles.mealImage} resizeMode="contain" resizeMethod="resize" />
+                  ) : (
+                    <Text style={styles.mealFallbackText} numberOfLines={2}>{meal.name}</Text>
+                  )
+                ) : (
+                  <Ionicons name="restaurant-outline" size={22} color="rgba(196,148,58,0.34)" />
+                )}
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
         <DiningGuestArea dayIndex={dayIdx} />
@@ -319,7 +415,7 @@ export default function DiningScreen() {
         context="room"
         dayIdx={dayIdx}
         onClose={() => setBagOpen(false)}
-        onTransferItem={() => {}}
+        onTransferItem={(slotIdx) => handleBagToMealSlot(slotIdx)}
       />
 
       <StatusModal
@@ -403,7 +499,6 @@ const styles = StyleSheet.create({
 
   scrollArea: { flex: 1, zIndex: 1 },
 
-  // Exact Kitchen/Garden portrait geometry.
   portraitRow: {
     flexDirection: "row",
     justifyContent: "center",
@@ -411,6 +506,8 @@ const styles = StyleSheet.create({
     gap: 22,
     paddingVertical: 12,
     backgroundColor: "rgba(14,7,1,0.65)",
+    position: "relative",
+    zIndex: 4,
   },
   circleWrap: {
     width: 96,
@@ -428,8 +525,45 @@ const styles = StyleSheet.create({
     borderColor: "transparent",
     backgroundColor: "transparent",
   },
+  playerThoughtWrap: {
+    position: "absolute",
+    left: 14,
+    top: 104,
+    width: 184,
+    zIndex: 30,
+  },
+  playerThoughtArrow: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 8,
+    borderRightWidth: 8,
+    borderBottomWidth: 10,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    borderBottomColor: "rgba(240,230,200,0.97)",
+    marginLeft: 34,
+  },
+  playerThoughtCard: {
+    backgroundColor: "rgba(240,230,200,0.97)",
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "rgba(196,148,58,0.50)",
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 7,
+    elevation: 14,
+  },
+  playerThoughtText: {
+    color: "#2A1000",
+    fontSize: 12,
+    lineHeight: 18,
+    fontStyle: "italic",
+    fontFamily: "Oldenburg",
+  },
 
-  // Exact Kitchen crafting-row geometry.
   mealBar: {
     marginHorizontal: 8,
     marginVertical: 5,
@@ -452,6 +586,23 @@ const styles = StyleSheet.create({
     borderColor: "rgba(90,65,30,0.42)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  mealSlotActive: {
+    borderWidth: 2,
+    borderColor: "#D8A64A",
+    backgroundColor: "rgba(47,25,6,0.97)",
+  },
+  mealImage: {
+    width: "82%",
+    height: "82%",
+  },
+  mealFallbackText: {
+    color: "#F0E8D5",
+    fontSize: 8,
+    lineHeight: 10,
+    textAlign: "center",
+    fontFamily: "Oldenburg",
+    paddingHorizontal: 2,
   },
 
   locationBar: {
