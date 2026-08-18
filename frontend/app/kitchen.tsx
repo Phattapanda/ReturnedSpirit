@@ -40,6 +40,13 @@ import { PLAYER_STATS_KEY, DEFAULT_PLAYER_STATS, type PlayerStats } from "@/src/
 import { loadLogbook, type LogEntry, LOGBOOK_KEY } from "@/src/game/logbook";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
 import { ensureAssetReady } from "@/src/assets/AssetManager";
+import {
+  DEFAULT_PLAYER_AVATAR_ID,
+  PLAYER_AVATAR_KEY,
+  getPlayerAvatarForStamina,
+  normalizePlayerAvatarId,
+  type PlayerAvatarId,
+} from "@/src/game/player-avatar";
 
 // ─── Storage keys ─────────────────────────────────────────────────────────────
 
@@ -166,12 +173,8 @@ const ITEM_IMAGES: Record<string, ReturnType<typeof require>> = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function avatarSrc(st: number) {
-  if (st >= 90) return IMG.avLaugh;
-  if (st >= 60) return IMG.avNormal;
-  if (st >= 30) return IMG.avSad;
-  if (st >= 10) return IMG.avTired;
-  return IMG.avSick;
+function avatarSrc(avatarId: PlayerAvatarId, st: number) {
+  return getPlayerAvatarForStamina(avatarId, st);
 }
 function rupertSrc(p: "normal" | "sad" | "laugh") {
   return p === "sad" ? IMG.rupertsad : p === "laugh" ? IMG.rupertlaugh : IMG.rupert;
@@ -249,6 +252,15 @@ export default function KitchenScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: W, height: H } = useWindowDimensions();
+  const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(DEFAULT_PLAYER_AVATAR_ID);
+
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem(PLAYER_AVATAR_KEY)
+      .then((raw) => { if (active) setPlayerAvatarId(normalizePlayerAvatarId(raw)); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   // ── Audio
   const audioManager = useAudioManager();
@@ -2843,7 +2855,7 @@ export default function KitchenScreen() {
         {/* Portrait row */}
         <View style={styles.portraitRow}>
           <TouchableOpacity ref={playerPortraitRef} style={styles.circleWrap} onPress={() => setStatusOpen(true)} activeOpacity={0.8}>
-            <Image source={avatarSrc(staminaCurrent)} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />
+            <Image source={avatarSrc(playerAvatarId, staminaCurrent)} style={[styles.circleImg, styles.playerPortraitImage]} resizeMode="cover" resizeMethod="resize" />
           </TouchableOpacity>
           <View ref={rupertPortraitRef} style={styles.circleWrap}>
             <Image source={rupertSrc(rupertPortrait)} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />
@@ -3137,10 +3149,10 @@ export default function KitchenScreen() {
               <Image
                 source={
                   curLine?.portrait === "player"
-                    ? avatarSrc(staminaCurrent)
+                    ? avatarSrc(playerAvatarId, staminaCurrent)
                     : rupertSrc(rupertPortrait)
                 }
-                style={styles.dlgPortrait}
+                style={[styles.dlgPortrait, curLine?.portrait === "player" && styles.playerPortraitImage]}
                 resizeMode="cover" resizeMethod="resize"
                
               />
@@ -3520,6 +3532,7 @@ const styles = StyleSheet.create({
   },
   circleWrapLocked: { borderColor: "#3A3A3A", backgroundColor: "#1A1A1A", alignItems: "center", justifyContent: "center" },
   circleImg: { width: "100%", height: "100%" },
+  playerPortraitImage: { transform: [{ scale: 1.06 }] },
 
   // Grid
   gridContainer: {

@@ -79,6 +79,18 @@ export const ASSET_REGISTRY: AssetEntry[] = [
     group: 'portraits_player',
   },
 
+  // ── Additional selectable player portraits ─────────────────────────────────
+  { key: 'av2_normal', module: require('../../assets/images/avatar2_normal.png'), group: 'portraits_player' },
+  { key: 'av2_laugh',  module: require('../../assets/images/avatar2_laugh.png'),  group: 'portraits_player' },
+  { key: 'av2_sad',    module: require('../../assets/images/avatar2_sad.png'),    group: 'portraits_player' },
+  { key: 'av2_tired',  module: require('../../assets/images/avatar2_tired.png'),  group: 'portraits_player' },
+  { key: 'av2_sick',   module: require('../../assets/images/avatar2_sick.png'),   group: 'portraits_player' },
+  { key: 'av3_normal', module: require('../../assets/images/avatar3_normal.png'), group: 'portraits_player' },
+  { key: 'av3_laugh',  module: require('../../assets/images/avatar3_laugh.png'),  group: 'portraits_player' },
+  { key: 'av3_sad',    module: require('../../assets/images/avatar3_sad.png'),    group: 'portraits_player' },
+  { key: 'av3_tired',  module: require('../../assets/images/avatar3_tired.png'),  group: 'portraits_player' },
+  { key: 'av3_sick',   module: require('../../assets/images/avatar3_sick.png'),   group: 'portraits_player' },
+
   // ── Rupert portraits (all variants) ────────────────────────────────────────
   {
     key: 'rupert',

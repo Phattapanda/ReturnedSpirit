@@ -42,6 +42,13 @@ import StatusModal from "@/src/components/StatusModal";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, type PlayerStats } from "@/src/game/player-stats";
 import { PLAYER_BAG_KEY, DEFAULT_BAG } from "@/src/game/item-system";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
+import {
+  DEFAULT_PLAYER_AVATAR_ID,
+  PLAYER_AVATAR_KEY,
+  getPlayerAvatarForStamina,
+  normalizePlayerAvatarId,
+  type PlayerAvatarId,
+} from "@/src/game/player-avatar";
 
 const DSK = {
   STAMINA:               "@game:stamina",
@@ -94,12 +101,8 @@ const IMG = {
 
 const DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
 
-function avatarSrc(st: number) {
-  if (st >= 90) return IMG.avLaugh;
-  if (st >= 60) return IMG.avNormal;
-  if (st >= 30) return IMG.avSad;
-  if (st >= 10) return IMG.avTired;
-  return IMG.avSick;
+function avatarSrc(avatarId: PlayerAvatarId, st: number) {
+  return getPlayerAvatarForStamina(avatarId, st);
 }
 
 // ─── Day-change helper (shared logic) ────────────────────────────────────────
@@ -141,6 +144,15 @@ export default function DormitoryScreen() {
   const params = useLocalSearchParams<{ loadedFromSave?: string }>();
   const insets = useSafeAreaInsets();
   const { width: W } = useWindowDimensions();
+  const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(DEFAULT_PLAYER_AVATAR_ID);
+
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem(PLAYER_AVATAR_KEY)
+      .then((raw) => { if (active) setPlayerAvatarId(normalizePlayerAvatarId(raw)); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   // ── HUD
   const [staminaCurrent, setStaminaCurrent] = useState(40);
@@ -896,7 +908,7 @@ export default function DormitoryScreen() {
             onPress={() => setStatusOpen(true)}
             activeOpacity={0.8}
           >
-            <Image source={avatarSrc(staminaCurrent)} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />
+            <Image source={avatarSrc(playerAvatarId, staminaCurrent)} style={[styles.circleImg, styles.playerPortraitImage]} resizeMode="cover" resizeMethod="resize" />
           </TouchableOpacity>
           <View style={[styles.circleWrap, styles.bagCircle]}>
             <Ionicons name="lock-closed" size={28} color="rgba(150,130,100,0.55)" />
@@ -1225,6 +1237,7 @@ const styles = StyleSheet.create({
     overflow: "hidden", borderWidth: 2.5, borderColor: "#C4943A", backgroundColor: "#2C1810",
   },
   circleImg: { width: "100%", height: "100%" },
+  playerPortraitImage: { transform: [{ scale: 1.06 }] },
   bagCircle: {
     borderColor: "#3A3A3A", backgroundColor: "#1A1A1A",
     alignItems: "center", justifyContent: "center",

@@ -22,6 +22,7 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   "@game:stamina_max",
   "@game:life",
   "@game:player_name",
+  "@game:player_avatar_id",
   "@game:day_index",
   "@game:stamina_spent_today",
   "@game:unlocked_locs",

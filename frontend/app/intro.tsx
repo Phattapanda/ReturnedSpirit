@@ -16,6 +16,13 @@ import { VideoView, useVideoPlayer } from "expo-video";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import {
+  DEFAULT_PLAYER_AVATAR_ID,
+  PLAYER_AVATAR_KEY,
+  getPlayerAvatarSource,
+  normalizePlayerAvatarId,
+  type PlayerAvatarId,
+} from "@/src/game/player-avatar";
 
 // Bundled portrait cinematic used for new-game intro playback.
 const INTRO_VIDEO = require("../assets/intro.mp4");
@@ -26,10 +33,9 @@ const PORTRAITS = {
   rupert: require("../assets/images/rupert.png"),
   rupertsad: require("../assets/images/rupertsad.png"),
   rupertlaugh: require("../assets/images/rupertlaugh.png"),
-  avatar1_tired: require("../assets/images/avatar1_tired.png"),
 } as const;
 
-type PortraitVariant = keyof typeof PORTRAITS;
+type PortraitVariant = keyof typeof PORTRAITS | "player_tired";
 
 type DialogPhase =
   | "awake"
@@ -92,31 +98,31 @@ const DIALOG_FLOW: DialogEntry[] = [
   },
   {
     phase: "look_1",
-    portrait: "avatar1_tired",
+    portrait: "player_tired",
     speakerName: null,
     text: "You look around the room. You are lying on a hard bed with a stained sheet.",
   },
   {
     phase: "look_2",
-    portrait: "avatar1_tired",
+    portrait: "player_tired",
     speakerName: null,
     text: "The curtains are very old and full of holes, so you get woken up by the first rays of light.",
   },
   {
     phase: "look_3",
-    portrait: "avatar1_tired",
+    portrait: "player_tired",
     speakerName: null,
     text: "A solitary candle stands on the small table beside the bed.",
   },
   {
     phase: "look_4",
-    portrait: "avatar1_tired",
+    portrait: "player_tired",
     speakerName: null,
     text: "It looks as though the place hasn't been cleaned in a while.",
   },
   {
     phase: "choice_down",
-    portrait: "avatar1_tired",
+    portrait: "player_tired",
     speakerName: null,
     text: null,
     choices: [{ label: "Go downstairs.", nextPhase: "kitchen" }],
@@ -141,6 +147,15 @@ export default function IntroScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: screenW, height: screenH } = useWindowDimensions();
+  const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(DEFAULT_PLAYER_AVATAR_ID);
+
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem(PLAYER_AVATAR_KEY)
+      .then((raw) => { if (active) setPlayerAvatarId(normalizePlayerAvatarId(raw)); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   const [stage, setStage] = useState<IntroStage>("video");
   const [showBubble, setShowBubble] = useState(false);
@@ -464,9 +479,9 @@ export default function IntroScreen() {
         >
           <View style={styles.portraitWrap}>
             <Image
-              key={dialogPortrait}
-              source={PORTRAITS[dialogPortrait]}
-              style={styles.portrait}
+              key={`${dialogPortrait}-${playerAvatarId}`}
+              source={dialogPortrait === "player_tired" ? getPlayerAvatarSource(playerAvatarId, "tired") : PORTRAITS[dialogPortrait]}
+              style={[styles.portrait, dialogPortrait === "player_tired" && styles.playerPortraitImage]}
               resizeMode="cover"
               resizeMethod="resize"
             />
@@ -629,6 +644,7 @@ const styles = StyleSheet.create({
     width: 124,
     height: 124,
   },
+  playerPortraitImage: { transform: [{ scale: 1.06 }] },
   npcName: {
     color: "#C4943A",
     fontSize: 15,
