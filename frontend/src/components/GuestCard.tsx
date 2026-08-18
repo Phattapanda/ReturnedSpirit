@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import {
   prepareGuestsForDay,
@@ -90,16 +91,21 @@ export default function DiningGuestArea({ dayIndex }: DiningGuestAreaProps) {
     let active = true;
     setLoading(true);
 
-    prepareGuestsForDay(dayIndex)
-      .then((prepared) => {
+    (async () => {
+      try {
+        // Dining initially renders with its local default day before its room state
+        // finishes loading. Always prefer the persisted core day so that mount timing
+        // can never create an extra guest visit/trade roll.
+        const rawDay = await AsyncStorage.getItem("@game:day_index");
+        const persistedDay = rawDay !== null ? parseInt(rawDay, 10) : dayIndex;
+        const prepared = await prepareGuestsForDay(Number.isFinite(persistedDay) ? persistedDay : dayIndex);
         if (active) setGuests(prepared);
-      })
-      .catch(() => {
+      } catch {
         if (active) setGuests([]);
-      })
-      .finally(() => {
+      } finally {
         if (active) setLoading(false);
-      });
+      }
+    })();
 
     return () => { active = false; };
   }, [dayIndex]);
