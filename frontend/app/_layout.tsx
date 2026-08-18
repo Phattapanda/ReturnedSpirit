@@ -8,6 +8,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { useAppFonts } from "@/src/hooks/use-app-fonts";
 import { AudioProvider } from "@/src/audio/AudioProvider";
+import CurrencyHud from "@/src/components/CurrencyHud";
 
 LogBox.ignoreAllLogs(true);
 SplashScreen.preventAutoHideAsync();
@@ -29,6 +30,7 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <AudioProvider>
           <Stack screenOptions={{ headerShown: false, animation: "slide_from_right" }} />
+          <CurrencyHud />
         </AudioProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
