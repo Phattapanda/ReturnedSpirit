@@ -36,16 +36,15 @@ const GUEST_PORTRAITS: Record<string, ReturnType<typeof require>> = {
 };
 
 /**
- * Foundation-only GuestCard.
+ * Foundation-only GuestCard, intentionally modeled after GardenPlot:
+ * - square guest portrait on the LEFT, like the crop/Herb Bed image
+ * - guest name + request text in the main information area
+ * - four large, finger-friendly service tiles below
  *
- * Visual contract intentionally follows the Garden Plot:
- * - guest information/request occupies the large upper-left area
- * - portrait lives on the upper-right
- * - four large activity/service tiles run across the bottom
- *
- * Favor remains in the guest model but is intentionally NOT shown on the card.
- * It will later live in the guest detail window opened from the portrait.
- * Service actions are visual-only in Point 6.
+ * Favor remains in the guest model but is intentionally NOT shown here. A later
+ * guest-detail view can expose it from the portrait. Dialog presentation is kept
+ * separate so future half-body dialog art does not constrain this card layout.
+ * Service actions remain visual-only in Point 6.
  */
 export function GuestCard({ guest, onSelect }: GuestCardProps) {
   const { profile, selected } = guest;
@@ -58,55 +57,63 @@ export function GuestCard({ guest, onSelect }: GuestCardProps) {
       activeOpacity={0.88}
     >
       <View style={styles.guestTopRow}>
-        <View style={styles.guestTextArea}>
-          <Text style={styles.name}>{profile.name}</Text>
-          <Text style={styles.requestText}>“I could use something to eat.”</Text>
-        </View>
-
         <View style={styles.portraitWrap}>
           {portrait ? (
             <Image source={portrait} style={styles.portraitImage} resizeMode="cover" resizeMethod="resize" />
           ) : (
-            <Ionicons name="person-outline" size={42} color="rgba(196,148,58,0.76)" />
+            <Ionicons name="person-outline" size={40} color="rgba(196,148,58,0.76)" />
           )}
+        </View>
+
+        <View style={styles.guestTextArea}>
+          <Text style={styles.name}>{profile.name}</Text>
+          <Text style={styles.requestText}>“I could use something to eat.”</Text>
         </View>
       </View>
 
+      <View style={styles.divider} />
+
       <View style={styles.serviceRow}>
         <View style={styles.serviceButton} pointerEvents="none">
-          <View style={styles.serviceArtwork}>
-            <Image source={SERVICE_SELL} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
-          </View>
-          <View style={styles.serviceLabelRow}>
-            <Text style={styles.serviceLabel}>Sell for X</Text>
+          <Image source={SERVICE_SELL} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
+          <View style={styles.serviceLabelInline}>
+            <Text
+              style={styles.serviceLabel}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.78}
+            >
+              Sell for X
+            </Text>
             <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" resizeMethod="resize" />
           </View>
         </View>
 
         <View style={styles.serviceButton} pointerEvents="none">
-          <View style={styles.serviceArtwork}>
-            <View style={styles.tradeItemWrap}>
-              <Image source={TRADE_POTATO} style={styles.tradeItemImage} resizeMode="contain" resizeMethod="resize" />
-              {/* Stack quantity badge is intentionally omitted until roll → item/quantity is defined. */}
-            </View>
+          <View style={styles.tradeItemWrap}>
+            <Image source={TRADE_POTATO} style={styles.tradeItemImage} resizeMode="contain" resizeMethod="resize" />
+            {/* Stack badge will be added when roll → concrete item quantity is defined. */}
           </View>
           <Text style={styles.serviceLabel}>Trade</Text>
         </View>
 
         <View style={styles.serviceButton} pointerEvents="none">
-          <View style={styles.serviceArtwork}>
-            <Image source={SERVICE_WATER} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
-          </View>
-          <View style={styles.serviceLabelWrap}>
-            <Text style={styles.serviceLabel}>Offer water for 1</Text>
+          <Image source={SERVICE_WATER} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
+          <View style={styles.serviceLabelInline}>
+            <Text
+              style={styles.serviceLabel}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.68}
+            >
+              Offer water for 1
+            </Text>
             <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" resizeMethod="resize" />
           </View>
         </View>
 
         <View style={styles.serviceButton} pointerEvents="none">
-          <View style={styles.serviceArtwork}>
-            <Image source={SERVICE_TALK} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
-          </View>
+          <Image source={SERVICE_TALK} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
           <Text style={styles.serviceLabel}>Talk</Text>
         </View>
       </View>
@@ -133,7 +140,7 @@ export default function DiningGuestArea({ dayIndex }: DiningGuestAreaProps) {
     (async () => {
       try {
         // Dining initially renders with its local default day before its room state
-        // finishes loading. Always prefer the persisted core day so that mount timing
+        // finishes loading. Always prefer the persisted core day so mount timing
         // can never create an extra guest visit/trade roll.
         const rawDay = await AsyncStorage.getItem("@game:day_index");
         const persistedDay = rawDay !== null ? parseInt(rawDay, 10) : dayIndex;
@@ -189,17 +196,19 @@ const styles = StyleSheet.create({
     marginTop: 18,
     gap: 14,
   },
+
+  // GardenPlot-style outer card. Active selection is conveyed only by movement/color.
   card: {
-    backgroundColor: "rgba(20,11,3,0.94)",
+    backgroundColor: "rgba(14,8,2,0.92)",
     borderRadius: 16,
     borderWidth: 1.5,
-    borderColor: "rgba(196,148,58,0.42)",
-    padding: 10,
+    borderColor: "rgba(196,148,58,0.38)",
+    overflow: "hidden",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.5,
     shadowRadius: 12,
-    elevation: 16,
+    elevation: 18,
   },
   cardSelected: {
     borderWidth: 2,
@@ -207,18 +216,32 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(47,25,6,0.97)",
     transform: [{ translateY: -8 }],
   },
+
+  // Mirrors GardenPlot topRow/cropWrap: portrait left, information right.
   guestTopRow: {
-    minHeight: 112,
     flexDirection: "row",
+    padding: 14,
+    gap: 14,
     alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 4,
-    paddingBottom: 10,
+  },
+  portraitWrap: {
+    width: 90,
+    height: 90,
+    borderRadius: 12,
+    overflow: "hidden",
+    borderWidth: 2,
+    borderColor: "rgba(196,148,58,0.45)",
+    backgroundColor: "rgba(30,18,5,0.95)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  portraitImage: {
+    width: "100%",
+    height: "100%",
   },
   guestTextArea: {
     flex: 1,
-    alignSelf: "stretch",
-    paddingVertical: 4,
+    gap: 8,
   },
   name: {
     color: "#F5E6C8",
@@ -227,61 +250,44 @@ const styles = StyleSheet.create({
     letterSpacing: 0.45,
   },
   requestText: {
-    marginTop: 16,
     color: "rgba(240,232,213,0.86)",
     fontSize: 13,
     lineHeight: 20,
     fontFamily: "Oldenburg",
   },
-  portraitWrap: {
-    width: 92,
-    height: 92,
-    borderRadius: 46,
-    overflow: "hidden",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(35,22,10,0.96)",
-    borderWidth: 2.5,
-    borderColor: "rgba(196,148,58,0.68)",
+
+  divider: {
+    height: 1,
+    backgroundColor: "rgba(196,148,58,0.18)",
+    marginHorizontal: 10,
   },
-  portraitImage: {
-    width: "100%",
-    height: "100%",
-  },
+
+  // Exact GardenPlot action rhythm: shorter fields, smaller images, text directly below.
   serviceRow: {
     flexDirection: "row",
-    alignItems: "stretch",
     gap: 6,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(196,148,58,0.18)",
+    padding: 10,
   },
   serviceButton: {
     flex: 1,
-    minHeight: 112,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "rgba(196,148,58,0.28)",
-    backgroundColor: "rgba(18,10,3,0.82)",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 4,
-    paddingTop: 7,
-    paddingBottom: 7,
-  },
-  serviceArtwork: {
-    height: 68,
-    width: "100%",
+    minHeight: 70,
     alignItems: "center",
     justifyContent: "center",
+    paddingVertical: 9,
+    paddingHorizontal: 3,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(90,65,30,0.45)",
+    backgroundColor: "rgba(25,14,4,0.90)",
+    gap: 3,
   },
   serviceImage: {
-    width: "78%",
-    height: "78%",
+    width: 28,
+    height: 28,
   },
   tradeItemWrap: {
-    width: "78%",
-    height: "78%",
+    width: 28,
+    height: 28,
     position: "relative",
     alignItems: "center",
     justifyContent: "center",
@@ -293,29 +299,25 @@ const styles = StyleSheet.create({
   serviceLabel: {
     color: "#F0E8D5",
     fontSize: 9.5,
-    lineHeight: 13,
+    lineHeight: 12,
     textAlign: "center",
     fontFamily: "Oldenburg",
+    flexShrink: 1,
   },
-  serviceLabelRow: {
-    minHeight: 26,
+  serviceLabelInline: {
+    width: "100%",
     flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 2,
-  },
-  serviceLabelWrap: {
-    minHeight: 28,
-    flexDirection: "row",
-    flexWrap: "wrap",
+    flexWrap: "nowrap",
     alignItems: "center",
     justifyContent: "center",
     gap: 2,
   },
   miniCoin: {
-    width: 12,
-    height: 12,
+    width: 10,
+    height: 10,
+    flexShrink: 0,
   },
+
   emptyCard: {
     minHeight: 120,
     marginHorizontal: 18,
