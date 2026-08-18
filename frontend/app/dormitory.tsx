@@ -897,7 +897,7 @@ export default function DormitoryScreen() {
       {/* ── Scroll area ── */}
       <ScrollView
         style={styles.scrollArea}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 24, paddingTop: 8 }}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         showsVerticalScrollIndicator={false}
         bounces={false}
         scrollEnabled={!sleepTransitioning}
