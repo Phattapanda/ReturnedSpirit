@@ -16,6 +16,13 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createSnapshot } from "@/src/game/save-manager";
+import {
+  DEFAULT_PLAYER_AVATAR_ID,
+  PLAYER_AVATAR_IDS,
+  PLAYER_AVATAR_KEY,
+  getPlayerAvatarSource,
+  type PlayerAvatarId,
+} from "@/src/game/player-avatar";
 
 const BG = require("../assets/images/bg-tavern.jpg");
 
@@ -25,6 +32,7 @@ type SaveSlot = {
   name: string | null;
   savedAt: string | null;
   playtime: number;
+  avatarId?: PlayerAvatarId;
 };
 
 const DEFAULT_SLOTS: SaveSlot[] = [
@@ -39,6 +47,7 @@ export default function NewGame() {
   const [slots, setSlots] = useState<SaveSlot[]>(DEFAULT_SLOTS);
   const [selectedSlot, setSelectedSlot] = useState<number | null>(null);
   const [name, setName] = useState("");
+  const [selectedAvatarId, setSelectedAvatarId] = useState<PlayerAvatarId>(DEFAULT_PLAYER_AVATAR_ID);
   const [showModal, setShowModal] = useState(false);
 
   const loadSlots = async () => {
@@ -54,6 +63,7 @@ export default function NewGame() {
     if (slot.occupied) return;
     setSelectedSlot(slot.slot);
     setName("");
+    setSelectedAvatarId(DEFAULT_PLAYER_AVATAR_ID);
     setShowModal(true);
   };
 
@@ -61,12 +71,13 @@ export default function NewGame() {
     if (!name.trim() || selectedSlot === null) return;
     const updated = slots.map((s) =>
       s.slot === selectedSlot
-        ? { ...s, occupied: true, name: name.trim(), savedAt: new Date().toISOString(), playtime: 0, tutorialDone: false }
+        ? { ...s, occupied: true, name: name.trim(), avatarId: selectedAvatarId, savedAt: new Date().toISOString(), playtime: 0, tutorialDone: false }
         : s
     );
     setSlots(updated);
     await AsyncStorage.setItem("game_slots", JSON.stringify(updated));
     await AsyncStorage.setItem("@game:player_name", name.trim());
+    await AsyncStorage.setItem(PLAYER_AVATAR_KEY, String(selectedAvatarId));
     await AsyncStorage.setItem("@game:active_slot", String(selectedSlot));
 
     // ── Full game-state reset so new game always starts clean ──────────────
@@ -198,6 +209,25 @@ export default function NewGame() {
           <View style={[styles.sheet, { paddingBottom: insets.bottom + 24 }]}>
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle}>Begin Your Story</Text>
+            <Text style={styles.sheetSub}>Choose your avatar</Text>
+            <View style={styles.avatarRow}>
+              {PLAYER_AVATAR_IDS.map((avatarId) => (
+                <TouchableOpacity
+                  key={avatarId}
+                  testID={`avatar-choice-${avatarId}`}
+                  style={[styles.avatarChoice, selectedAvatarId === avatarId && styles.avatarChoiceSelected]}
+                  onPress={() => setSelectedAvatarId(avatarId)}
+                  activeOpacity={0.8}
+                >
+                  <Image
+                    source={getPlayerAvatarSource(avatarId, "normal")}
+                    style={styles.avatarPreviewImage}
+                    resizeMode="cover"
+                    resizeMethod="resize"
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
             <Text style={styles.sheetSub}>Name your character</Text>
             <TextInput
               testID="character-name-input"
@@ -207,7 +237,6 @@ export default function NewGame() {
               placeholder="Character name..."
               placeholderTextColor="#A89880"
               maxLength={24}
-              autoFocus
             />
             <TouchableOpacity
               testID="begin-adventure-button"
@@ -296,6 +325,13 @@ const styles = StyleSheet.create({
   sheetHandle: { width: 40, height: 4, backgroundColor: "rgba(0,0,0,0.18)", borderRadius: 2, alignSelf: "center", marginBottom: 8 },
   sheetTitle: { fontSize: 20, fontWeight: "700", color: "#2C1810", fontFamily: "Oldenburg", textAlign: "center" },
   sheetSub: { fontSize: 14, color: "#8B7355", textAlign: "center" },
+  avatarRow: { flexDirection: "row", justifyContent: "center", gap: 14, marginBottom: 2 },
+  avatarChoice: {
+    width: 78, height: 78, borderRadius: 39, overflow: "hidden",
+    borderWidth: 2, borderColor: "rgba(44,24,16,0.18)", backgroundColor: "#2C1810",
+  },
+  avatarChoiceSelected: { borderWidth: 3, borderColor: "#C4943A" },
+  avatarPreviewImage: { width: "100%", height: "100%", transform: [{ scale: 1.06 }] },
   nameInput: {
     backgroundColor: "rgba(255,255,255,0.8)",
     borderRadius: 12,

@@ -51,6 +51,13 @@ import {
 import type { ActivityId } from "@/src/game/activity-config";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
 import { ensureAssetReady } from "@/src/assets/AssetManager";
+import {
+  DEFAULT_PLAYER_AVATAR_ID,
+  PLAYER_AVATAR_KEY,
+  getPlayerAvatarForStamina,
+  normalizePlayerAvatarId,
+  type PlayerAvatarId,
+} from "@/src/game/player-avatar";
 
 // ─── Storage keys ─────────────────────────────────────────────────────────────
 
@@ -179,12 +186,8 @@ const IMG = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function avatarSrc(st: number) {
-  if (st >= 90) return IMG.avLaugh;
-  if (st >= 60) return IMG.avNormal;
-  if (st >= 30) return IMG.avSad;
-  if (st >= 10) return IMG.avTired;
-  return IMG.avSick;
+function avatarSrc(avatarId: PlayerAvatarId, st: number) {
+  return getPlayerAvatarForStamina(avatarId, st);
 }
 function rupertSrc(p: "normal" | "sad" | "laugh") {
   return p === "sad" ? IMG.rupertsad : p === "laugh" ? IMG.rupertlaugh : IMG.rupert;
@@ -236,6 +239,15 @@ export default function GardenScreen() {
   const params = useLocalSearchParams<{ loadedFromSave?: string }>();
   const insets = useSafeAreaInsets();
   const { width: W, height: H } = useWindowDimensions();
+  const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(DEFAULT_PLAYER_AVATAR_ID);
+
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem(PLAYER_AVATAR_KEY)
+      .then((raw) => { if (active) setPlayerAvatarId(normalizePlayerAvatarId(raw)); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   // ── Audio
   const audioManager = useAudioManager();
@@ -1824,7 +1836,7 @@ export default function GardenScreen() {
             onPress={handleAvatarTap}
             activeOpacity={0.85}
           >
-            <Image source={avatarSrc(staminaCurrent)} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />
+            <Image source={avatarSrc(playerAvatarId, staminaCurrent)} style={[styles.circleImg, styles.playerPortraitImage]} resizeMode="cover" resizeMethod="resize" />
           </TouchableOpacity>
           <View
             ref={rupertPortraitRef}
@@ -2328,6 +2340,7 @@ const styles = StyleSheet.create({
   },
   circleWrapLocked: { borderColor: "#3A3A3A", backgroundColor: "#1A1A1A", alignItems: "center", justifyContent: "center" },
   circleImg: { width: "100%", height: "100%" },
+  playerPortraitImage: { transform: [{ scale: 1.06 }] },
 
   // Location bar
   locationBar: {
