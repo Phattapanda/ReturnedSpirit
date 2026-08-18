@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import type { MealTag } from "@/src/game/item-system";
+import { MEAL_TAG, type MealTag } from "@/src/game/item-system";
 
 export const GUEST_STATE_KEY = "@game:guest_state";
 
@@ -85,10 +85,11 @@ export const COACHMAN_PROFILE: GuestProfile = {
     { minFavor: 100, maxFavor: 100, visitDays: [0, 1, 2, 3, 4, 5, 6],   transportDiscountPercent: 60 },
   ],
   initialFavor: 0,
-  favoriteDishId: null,
-  leastFavoriteDishId: null,
-  preferredMealTags: [],
-  dislikedMealTags: [],
+  // Reserved canonical IDs; the actual recipes/items can be added later.
+  favoriteDishId: "beefstew", // Beef Stew
+  leastFavoriteDishId: "snowberrysherbet", // Snowberry Sherbet
+  preferredMealTags: [MEAL_TAG.HEARTY, MEAL_TAG.WARM],
+  dislikedMealTags: [MEAL_TAG.COLD],
   // Coachman buys meals but does not trade items.
   tradePool: [],
 };
