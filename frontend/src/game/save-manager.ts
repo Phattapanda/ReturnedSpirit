@@ -14,6 +14,7 @@
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { CURRENCY_KEY, DEFAULT_CURRENCY_COPPER } from "@/src/game/currency-system";
 
 /** All gameplay keys that form a complete save snapshot (NO meta keys like active_slot / game_slots). */
 export const ALL_SNAPSHOT_KEYS: string[] = [
@@ -31,6 +32,7 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   "@game:player_stats",
   "@game:bag_inspected",
   "@game:logbook",
+  CURRENCY_KEY,
   // Kitchen tutorial flags
   "@tutorial:kitchen_done",
   "@kitchen:has_seen_post_garden_dialog",
@@ -97,6 +99,12 @@ export async function createSnapshot(
     }
   }
   try {
+    // New games always start with a clean zero balance, even if another slot left
+    // currency in the shared runtime AsyncStorage namespace.
+    if (trigger === "new_game") {
+      await AsyncStorage.setItem(CURRENCY_KEY, String(DEFAULT_CURRENCY_COPPER));
+    }
+
     const pairs = await AsyncStorage.multiGet(ALL_SNAPSHOT_KEYS);
     const snapshot: Record<string, string | null> = {};
     for (const [key, value] of pairs) {

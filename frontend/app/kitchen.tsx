@@ -28,6 +28,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { GestureDetector, Gesture } from "react-native-gesture-handler";
 import SceneBackground from "@/src/components/SceneBackground";
+import CurrencyHud from "@/src/components/CurrencyHud";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import StatusModal from "@/src/components/StatusModal";
@@ -2853,6 +2854,7 @@ export default function KitchenScreen() {
 
   return (
     <View style={styles.root}>
+      <CurrencyHud />
       {/* ── Hidden portrait preload – forces RN/browser to decode all portrait images
            immediately on mount. Combined with AssetManager preload in game-loading.tsx
            this guarantees zero-delay portrait display. ── */}

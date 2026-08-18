@@ -26,6 +26,7 @@ import Animated, {
 
 import GardenPlot, { GardenPlotData } from "@/src/components/GardenPlot";
 import SceneBackground from "@/src/components/SceneBackground";
+import CurrencyHud from "@/src/components/CurrencyHud";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import {
   SHARED_RESOURCE_DEFAULTS,
@@ -1749,6 +1750,7 @@ export default function GardenScreen() {
 
   return (
     <View style={styles.root}>
+      <CurrencyHud />
       {/* ── Hidden portrait preload (belt-and-suspenders on top of AssetManager) ── */}
       <View style={{ position: "absolute", width: 0, height: 0, overflow: "hidden" }}>
         <Image source={IMG.rupert}      style={{ width: 1, height: 1 }} />
