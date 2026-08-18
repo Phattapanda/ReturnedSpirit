@@ -1826,7 +1826,7 @@ export default function GardenScreen() {
       {/* ── Scrollable content ── */}
       <ScrollView
         style={styles.scrollArea}
-        contentContainerStyle={{ paddingBottom: locationBarH + insets.bottom + 8 }}
+        contentContainerStyle={{ paddingBottom: locationBarH + insets.bottom + 16 }}
         showsVerticalScrollIndicator={false}
         bounces={false}
       >
