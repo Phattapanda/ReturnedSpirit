@@ -17,6 +17,7 @@ import { useAudioManager } from "@/src/audio/AudioProvider";
 import SceneBackground from "@/src/components/SceneBackground";
 import CurrencyHud from "@/src/components/CurrencyHud";
 import DiningGuestArea from "@/src/components/GuestCard";
+import GuestTutorialDialog, { type GuestTutorialDialogLine } from "@/src/components/GuestTutorialDialog";
 import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import StatusModal from "@/src/components/StatusModal";
 import {
@@ -28,6 +29,12 @@ import {
   selectActiveMealSlot,
   type DiningMealState,
 } from "@/src/game/dining-meal-system";
+import {
+  guestTutorialHasReached,
+  loadGuestTutorialIntroStep,
+  saveGuestTutorialIntroStep,
+  type GuestTutorialIntroStep,
+} from "@/src/game/guest-tutorial";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, type PlayerStats } from "@/src/game/player-stats";
 import { DEFAULT_BAG, PLAYER_BAG_KEY, type PlayerBagData } from "@/src/game/item-system";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
@@ -50,9 +57,12 @@ const DSK = {
 } as const;
 
 const IMG = {
-  dining:      require("../assets/images/dining.png"),
-  dining_dawn: require("../assets/images/dining_dawn.png"),
+  dining:        require("../assets/images/dining.png"),
+  dining_dawn:   require("../assets/images/dining_dawn.png"),
   herbsoup:      require("../assets/images/herbsoup.png"),
+  rupert:        require("../assets/images/rupert.png"),
+  rupertlaugh:   require("../assets/images/rupertlaugh.png"),
+  old_farmer:    require("../assets/images/old_farmer.png"),
   loc_kitchen:   require("../assets/images/gotokitchen.png"),
   loc_garden:    require("../assets/images/gotogarden.png"),
   loc_dining:    require("../assets/images/gotodining.png"),
@@ -76,6 +86,35 @@ const LOCS = [
   { id: "explore",   nav: false },
 ] as const;
 
+type TutorialPortrait = "rupert" | "rupert_laugh" | "old_farmer" | "player";
+type TutorialLine = {
+  speaker: string;
+  text: string;
+  portrait: TutorialPortrait;
+};
+
+function farmerIntroduction(playerName: string): TutorialLine[] {
+  return [
+    { speaker: "Rupert", portrait: "rupert", text: '"Hello, who\'s there?"' },
+    { speaker: "Old Farmer", portrait: "old_farmer", text: '"What - who\'s here?"' },
+    { speaker: "Old Farmer", portrait: "old_farmer", text: '"You\'re actually asking that? Who else would come here besides me?"' },
+    { speaker: "Rupert", portrait: "rupert_laugh", text: '"Oh, it\'s you. I\'m sorry - I kind of forgot about you."' },
+    { speaker: "Old Farmer", portrait: "old_farmer", text: '"Oh, how lovely. We’ve been seeing each other almost every day for 50 years, and this is the recognition for it."' },
+    { speaker: "Rupert", portrait: "rupert", text: '"Don\'t be like that. I\'m sorry."' },
+    { speaker: "Old Farmer", portrait: "old_farmer", text: '"I forgive you for forgetting me if you give me something to eat."' },
+    { speaker: "Old Farmer", portrait: "old_farmer", text: '"Who is this young pal behind you?"' },
+    { speaker: playerName, portrait: "player", text: `"Nice to meet you, my name is ${playerName}."` },
+    { speaker: "Rupert", portrait: "rupert", text: `"${playerName} will be staying here for the time being."` },
+    { speaker: "Old Farmer", portrait: "old_farmer", text: '"If you\'re really sure about that... Hey, it smells delicious and I\'m hungry."' },
+  ];
+}
+
+const RUPERT_SERVING_EXPLANATION: TutorialLine[] = [
+  { speaker: "Rupert", portrait: "rupert", text: '"We already ate all of the soup."' },
+  { speaker: "Rupert", portrait: "rupert", text: '"You would need to carry the bucket from the kitchen back to the garden in the bag to fetch fresh water."' },
+  { speaker: "Rupert", portrait: "rupert", text: '"The bag is also a safe way to transport the herb soup to the dining hall."' },
+];
+
 export default function DiningScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ loadedFromSave?: string }>();
@@ -86,6 +125,7 @@ export default function DiningScreen() {
   const [lifeCurrent, setLifeCurrent] = useState(15);
   const [playerStats, setPlayerStats] = useState<PlayerStats>(DEFAULT_PLAYER_STATS);
   const [dayIdx, setDayIdx] = useState(0);
+  const [playerName, setPlayerName] = useState("Adventurer");
   const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(1);
   const [timeOfDay, setTimeOfDay] = useState<"morning" | "evening">("evening");
   const [headerH, setHeaderH] = useState(0);
@@ -93,6 +133,10 @@ export default function DiningScreen() {
   const [mealState, setMealState] = useState<DiningMealState>(DEFAULT_DINING_MEAL_STATE);
   const [playerThought, setPlayerThought] = useState<string | null>(null);
   const thoughtTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [tutorialStep, setTutorialStep] = useState<GuestTutorialIntroStep>("not_started");
+  const [tutorialLines, setTutorialLines] = useState<TutorialLine[]>([]);
+  const [tutorialLineIndex, setTutorialLineIndex] = useState(0);
 
   const [statusOpen, setStatusOpen] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -111,10 +155,13 @@ export default function DiningScreen() {
         const rawSta = await AsyncStorage.getItem(DSK.STAMINA);
         const rawLife = await AsyncStorage.getItem(DSK.LIFE);
         const rawDay = await AsyncStorage.getItem(DSK.DAY_INDEX);
+        const rawName = await AsyncStorage.getItem(DSK.PLAYER_NAME);
         const rawAv = await AsyncStorage.getItem(PLAYER_AVATAR_KEY);
         const rawTod = await AsyncStorage.getItem(DSK.TIME_OF_DAY);
         const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
         const loadedMeals = await loadDiningMealState();
+        const loadedTutorialStep = await loadGuestTutorialIntroStep();
+        const resolvedName = rawName?.trim() || "Adventurer";
 
         if (!active) return;
 
@@ -122,11 +169,26 @@ export default function DiningScreen() {
         setStaminaCurrent(rawSta ? Math.min(Math.max(parseInt(rawSta, 10), 0), loadedStats.maximumStamina) : 40);
         setLifeCurrent(rawLife ? Math.min(Math.max(parseInt(rawLife, 10), 0), loadedStats.maximumLife) : 15);
         setDayIdx(rawDay !== null ? parseInt(rawDay, 10) : 0);
+        setPlayerName(resolvedName);
         setPlayerAvatarId(normalizePlayerAvatarId(rawAv));
         setTimeOfDay(rawTod === "morning" ? "morning" : "evening");
         setMealState(loadedMeals);
         if (rawBag) {
           try { setPlayerBag(JSON.parse(rawBag)); } catch { /* default */ }
+        }
+
+        if (loadedTutorialStep === "dining_intro" || loadedTutorialStep === "farmer_intro") {
+          await saveGuestTutorialIntroStep("farmer_intro");
+          if (!active) return;
+          setTutorialStep("farmer_intro");
+          setTutorialLines(farmerIntroduction(resolvedName));
+          setTutorialLineIndex(0);
+        } else if (loadedTutorialStep === "meal_reveal") {
+          setTutorialStep("meal_reveal");
+          setTutorialLines(RUPERT_SERVING_EXPLANATION);
+          setTutorialLineIndex(0);
+        } else {
+          setTutorialStep(loadedTutorialStep);
         }
 
         await AsyncStorage.setItem(DSK.SAVE_LOCATION, "dining");
@@ -148,6 +210,50 @@ export default function DiningScreen() {
     setPlayerThought(text);
     thoughtTimer.current = setTimeout(() => setPlayerThought(null), 2600);
   }
+
+  async function advanceTutorialDialog() {
+    if (tutorialLineIndex < tutorialLines.length - 1) {
+      setTutorialLineIndex((current) => current + 1);
+      return;
+    }
+
+    if (tutorialStep === "farmer_intro") {
+      await saveGuestTutorialIntroStep("meal_reveal");
+      setTutorialStep("meal_reveal");
+      setTutorialLines(RUPERT_SERVING_EXPLANATION);
+      setTutorialLineIndex(0);
+      return;
+    }
+
+    if (tutorialStep === "meal_reveal") {
+      await saveGuestTutorialIntroStep("ready_for_water");
+      setTutorialStep("ready_for_water");
+      setTutorialLines([]);
+      setTutorialLineIndex(0);
+    }
+  }
+
+  function tutorialPortraitSource(portrait: TutorialPortrait): ReturnType<typeof require> {
+    if (portrait === "player") return getPlayerAvatarForStamina(playerAvatarId, staminaCurrent);
+    if (portrait === "old_farmer") return IMG.old_farmer;
+    if (portrait === "rupert_laugh") return IMG.rupertlaugh;
+    return IMG.rupert;
+  }
+
+  const currentTutorialLine = tutorialLines[tutorialLineIndex] ?? null;
+  const dialogLine: GuestTutorialDialogLine | null = currentTutorialLine ? {
+    speaker: currentTutorialLine.speaker,
+    text: currentTutorialLine.text,
+    portrait: tutorialPortraitSource(currentTutorialLine.portrait),
+    playerPortrait: currentTutorialLine.portrait === "player",
+  } : null;
+
+  const tutorialInDining = guestTutorialHasReached(tutorialStep, "dining_intro");
+  const showDiningServiceUi =
+    !tutorialInDining ||
+    tutorialStep === "meal_reveal" ||
+    tutorialStep === "ready_for_water";
+  const useDawnBackground = tutorialInDining || timeOfDay === "morning";
 
   async function handleBagToMealSlot(bagSlotIndex: number) {
     const plan = planBagItemToMealSlot(playerBag, bagSlotIndex, mealState);
@@ -242,7 +348,7 @@ export default function DiningScreen() {
     <View style={styles.root}>
       <CurrencyHud />
 
-      <SceneBackground source={timeOfDay === "morning" ? IMG.dining_dawn : IMG.dining} topOffset={headerH} />
+      <SceneBackground source={useDawnBackground ? IMG.dining_dawn : IMG.dining} topOffset={headerH} />
       <View style={[StyleSheet.absoluteFill, { top: headerH }, styles.bgOverlay]} pointerEvents="none" />
 
       <View
@@ -254,7 +360,7 @@ export default function DiningScreen() {
             <View style={styles.statBarOuter}>
               <Ionicons name="flash" size={15} color="#C4943A" />
               <View style={styles.statBarTrack}>
-                <View style={[styles.statBarFill, styles.staminaFill, { width: `${staminaPct * 100}%` }]}>
+                <View style={[styles.statBarFill, styles.staminaFill, { width: `${staminaPct * 100}%` }]}> 
                   <View style={styles.staminaReflex} />
                 </View>
               </View>
@@ -286,6 +392,7 @@ export default function DiningScreen() {
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         showsVerticalScrollIndicator={false}
         bounces={false}
+        scrollEnabled={!dialogLine}
       >
         <View style={styles.portraitRow}>
           <TouchableOpacity
@@ -318,35 +425,39 @@ export default function DiningScreen() {
           )}
         </View>
 
-        <View style={styles.mealBar}>
-          {Array.from({ length: DINING_MEAL_SLOT_COUNT }).map((_, i) => {
-            const meal = mealState.slots[i];
-            const isActive = mealState.activeSlotIndex === i && !!meal;
-            const mealImage = meal ? MEAL_IMAGES[meal.id] : null;
+        {showDiningServiceUi && (
+          <>
+            <View style={styles.mealBar}>
+              {Array.from({ length: DINING_MEAL_SLOT_COUNT }).map((_, i) => {
+                const meal = mealState.slots[i];
+                const isActive = mealState.activeSlotIndex === i && !!meal;
+                const mealImage = meal ? MEAL_IMAGES[meal.id] : null;
 
-            return (
-              <TouchableOpacity
-                key={i}
-                style={[styles.mealSlot, isActive && styles.mealSlotActive]}
-                activeOpacity={meal ? 0.78 : 1}
-                disabled={!meal}
-                onPress={() => handleMealSlotTap(i)}
-              >
-                {meal ? (
-                  mealImage ? (
-                    <Image source={mealImage} style={styles.mealImage} resizeMode="contain" resizeMethod="resize" />
-                  ) : (
-                    <Text style={styles.mealFallbackText} numberOfLines={2}>{meal.name}</Text>
-                  )
-                ) : (
-                  <Ionicons name="restaurant-outline" size={22} color="rgba(196,148,58,0.34)" />
-                )}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+                return (
+                  <TouchableOpacity
+                    key={i}
+                    style={[styles.mealSlot, isActive && styles.mealSlotActive]}
+                    activeOpacity={meal ? 0.78 : 1}
+                    disabled={!meal || !!dialogLine}
+                    onPress={() => handleMealSlotTap(i)}
+                  >
+                    {meal ? (
+                      mealImage ? (
+                        <Image source={mealImage} style={styles.mealImage} resizeMode="contain" resizeMethod="resize" />
+                      ) : (
+                        <Text style={styles.mealFallbackText} numberOfLines={2}>{meal.name}</Text>
+                      )
+                    ) : (
+                      <Ionicons name="restaurant-outline" size={22} color="rgba(196,148,58,0.34)" />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
 
-        <DiningGuestArea dayIndex={dayIdx} />
+            <DiningGuestArea dayIndex={dayIdx} />
+          </>
+        )}
       </ScrollView>
 
       <View style={[styles.locationBar, { paddingBottom: insets.bottom + 4 }]}>
@@ -373,7 +484,7 @@ export default function DiningScreen() {
                 styles.locBtn,
                 isCurrent ? styles.locBtnCurrent : (loc.nav ? styles.locBtnActive : styles.locBtnLocked),
               ]}
-              disabled={!loc.nav}
+              disabled={!loc.nav || !!dialogLine}
               onPress={loc.nav ? goToKitchen : undefined}
               activeOpacity={0.8}
             >
@@ -382,6 +493,12 @@ export default function DiningScreen() {
           );
         })}
       </View>
+
+      <GuestTutorialDialog
+        visible={!!dialogLine}
+        line={dialogLine}
+        onContinue={advanceTutorialDialog}
+      />
 
       <Modal visible={showMenu} transparent animationType="fade">
         <View style={styles.modalOverlay}>
