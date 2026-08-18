@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Animated, StyleSheet, Text, View } from "react-native";
 import { usePathname } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -20,13 +20,20 @@ function isGameplayRoute(pathname: string): boolean {
 
 /**
  * Global currency HUD aligned with the room/location-name row.
- * Pointer events are disabled so it never interferes with gameplay or header controls.
+ *
+ * The HUD lives above the router so the currency state stays centralized, but its
+ * visual presence follows room navigation: it disappears as the route changes and
+ * enters with the next gameplay room instead of remaining fixed over the transition.
+ * Pointer events are disabled so it never interferes with gameplay/header controls.
  */
 export default function CurrencyHud() {
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
   const [totalCopper, setTotalCopper] = useState(DEFAULT_CURRENCY_COPPER);
+  const opacity = useRef(new Animated.Value(0)).current;
+  const translateX = useRef(new Animated.Value(18)).current;
 
+  // Currency persistence/subscription is independent from navigation.
   useEffect(() => {
     let active = true;
     loadCurrencyCopper().then((value) => {
@@ -39,14 +46,52 @@ export default function CurrencyHud() {
       active = false;
       unsubscribe();
     };
-  }, [pathname]);
+  }, []);
+
+  // Follow room navigation visually instead of staying pinned during Stack transitions.
+  useEffect(() => {
+    opacity.stopAnimation();
+    translateX.stopAnimation();
+    opacity.setValue(0);
+    translateX.setValue(18);
+
+    if (!isGameplayRoute(pathname)) return;
+
+    // Let the new Stack screen begin its slide first, then bring its HUD in with it.
+    const timer = setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(opacity, {
+          toValue: 1,
+          duration: 180,
+          useNativeDriver: true,
+        }),
+        Animated.timing(translateX, {
+          toValue: 0,
+          duration: 220,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }, 120);
+
+    return () => clearTimeout(timer);
+  }, [pathname, opacity, translateX]);
 
   if (!isGameplayRoute(pathname)) return null;
 
   const balance = copperToDenominations(totalCopper);
 
   return (
-    <View pointerEvents="none" style={[styles.root, { top: insets.top + 52 }]}>
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        styles.root,
+        {
+          top: insets.top + 72,
+          opacity,
+          transform: [{ translateX }],
+        },
+      ]}
+    >
       <View style={styles.denomination}>
         <View style={[styles.coin, styles.goldCoin]} />
         <Text style={styles.amount}>{balance.gold}</Text>
@@ -59,7 +104,7 @@ export default function CurrencyHud() {
         <View style={[styles.coin, styles.copperCoin]} />
         <Text style={styles.amount}>{balance.copper}</Text>
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
