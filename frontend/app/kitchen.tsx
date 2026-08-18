@@ -326,6 +326,7 @@ export default function KitchenScreen() {
   const craftingLocked = useRef(false);
   const [selectedHerbbagSlot, setSelectedHerbbagSlot] = useState<number | null>(null);
   const [selectedHerbsSlot, setSelectedHerbsSlot] = useState<number | null>(null);
+  const [selectedSoupSlot, setSelectedSoupSlot] = useState<number | null>(null);
   const [bagPulseActive, setBagPulseActive] = useState(false);
   const bagOpenedOnceDuringCooking = useRef(false);
   const cookingShareDoneRef = useRef(false);
@@ -1249,6 +1250,12 @@ export default function KitchenScreen() {
     const item = tableItemsRef.current[sourceSlot];
     if (!item || item.id !== "herbsoup") return;
 
+    // Selection belongs to the item, never to the physical slot it used to occupy.
+    setSelectedSoupSlot(null);
+    setSelectedHerbbagSlot(null);
+    setSelectedHerbsSlot(null);
+    setTooltipVisible(false);
+
     setSoupSlot(sourceSlot);
     soupSlotRef.current = sourceSlot;
     setFlyingItemId("herbsoup");
@@ -1288,7 +1295,8 @@ export default function KitchenScreen() {
   }
 
   function splitCookingSoupStack(sourceSlot: number) {
-    if (tsRef.current !== "COOKING_SHARE_EAT") return;
+    if (!isKitchenItemInteractionState(tsRef.current)) return;
+    const shareTutorial = tsRef.current === "COOKING_SHARE_EAT";
     const currentTable = tableItemsRef.current;
     const stack = currentTable[sourceSlot];
     if (!stack || stack.id !== "herbsoup" || stack.quantity <= 1) return;
@@ -1304,22 +1312,50 @@ export default function KitchenScreen() {
     newTable[freeSlot] = { ...stack, quantity: 1 };
     tableItemsRef.current = newTable;
     setTableItems(newTable);
-    setSoupSlot(sourceSlot);
-    soupSlotRef.current = sourceSlot;
+    if (shareTutorial) {
+      setSoupSlot(sourceSlot);
+      soupSlotRef.current = sourceSlot;
+    }
     AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(newTable)).catch(() => {});
     audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
+    setSelectedSoupSlot(null);
     setTooltipVisible(false);
 
-    showBubble(
-      '\"That smells delicious. Please pass me a bowl and dig in, too.\"',
-      "Rupert", "ALLOW_ITEM", null, () => {}, "bubble.cooking.share_after_split",
-    );
+    if (shareTutorial) {
+      showBubble(
+        '\"That smells delicious. Please pass me a bowl and dig in, too.\"',
+        "Rupert", "ALLOW_ITEM", null, () => {}, "bubble.cooking.share_after_split",
+      );
+    }
+  }
+
+  function handleCookingSoupTap(sourceSlot: number) {
+    if (!isKitchenItemInteractionState(tsRef.current)) return;
+    const stack = tableItemsRef.current[sourceSlot];
+    if (!stack || stack.id !== "herbsoup") return;
+
+    if (selectedSoupSlot !== sourceSlot) {
+      setSelectedSoupSlot(sourceSlot);
+      setSelectedHerbbagSlot(null);
+      setSelectedHerbsSlot(null);
+      const catalogEntry = ITEM_CATALOG["herbsoup"];
+      showCookingTooltip(catalogEntry?.name ?? "Herb Soup", catalogEntry?.description ?? "Restores 20 Stamina.");
+      return;
+    }
+
+    if (stack.quantity <= 1) {
+      setSelectedSoupSlot(null);
+      setTooltipVisible(false);
+      return;
+    }
+
+    splitCookingSoupStack(sourceSlot);
   }
 
   function createCookingSoupGesture(sourceSlot: number, quantity: number) {
     const cookingSoupTap = Gesture.Tap()
       .maxDeltaX(8).maxDeltaY(8)
-      .onEnd(() => { runOnJS(splitCookingSoupStack)(sourceSlot); });
+      .onEnd(() => { runOnJS(handleCookingSoupTap)(sourceSlot); });
 
     const cookingSoupLongPress = Gesture.LongPress()
       .minDuration(500)
@@ -1934,6 +1970,7 @@ export default function KitchenScreen() {
       if (selectedHerbbagSlot === null || selectedHerbbagSlot !== slot) {
         setSelectedHerbbagSlot(slot);
         setSelectedHerbsSlot(null);
+        setSelectedSoupSlot(null);
         showCookingTooltip("Herb Bag", "Contains: " + remaining + (remaining === 1 ? " herb" : " herbs"));
       } else {
         unpackOneHerb(slot, item);
@@ -1947,11 +1984,18 @@ export default function KitchenScreen() {
       return;
     }
 
+    // Herb Soup follows the same select-then-split interaction as Herbs.
+    if (onTable && item.id === "herbsoup" && isKitchenItemInteractionState(cur)) {
+      handleCookingSoupTap(slot);
+      return;
+    }
+
     // Herbs use the same select-then-split interaction whenever they are on the Table.
     if (onTable && item.id === "herbs" && isKitchenItemInteractionState(cur)) {
       if (selectedHerbsSlot === null || selectedHerbsSlot !== slot) {
         setSelectedHerbsSlot(slot);
         setSelectedHerbbagSlot(null);
+        setSelectedSoupSlot(null);
         showCookingTooltip(ITEM_CATALOG["herbs"].name, ITEM_CATALOG["herbs"].description);
       } else {
         if (item.quantity <= 1) {
@@ -2049,6 +2093,13 @@ export default function KitchenScreen() {
     const cur = tsRef.current;
     if (!isKitchenItemInteractionState(cur)) return;
     if (cur === "COOKING_UNPACK_WAIT" && slotIdx > 11) return;
+
+    // Tap-selection is transient. Once an item moves, no later occupant of that
+    // physical slot may inherit the old yellow/green selection frame.
+    setSelectedHerbbagSlot(null);
+    setSelectedHerbsSlot(null);
+    setSelectedSoupSlot(null);
+    setTooltipVisible(false);
 
     cookingDraggedSlotRef.current = slotIdx;
     cookingDragItemIdRef.current = itemId;
@@ -2179,6 +2230,7 @@ export default function KitchenScreen() {
     setCraftTool(plan.craftTool);
     setSelectedHerbbagSlot(null);
     setSelectedHerbsSlot(null);
+    setSelectedSoupSlot(null);
     setTooltipVisible(false);
 
     await Promise.all([
@@ -2782,8 +2834,9 @@ export default function KitchenScreen() {
     if (!item) return null;
     const imgSrc = ITEM_IMAGES[item.id] ?? null;
 
-    const isSelectedHerbbag = selectedHerbbagSlot === slotIdx;
+    const isSelectedHerbbag = selectedHerbbagSlot === slotIdx && item.id === "herbbag";
     const isSelectedHerbs   = selectedHerbsSlot === slotIdx && item.id === "herbs";
+    const isSelectedSoup    = selectedSoupSlot === slotIdx && item.id === "herbsoup";
     const showHerbbagTapHint = (ts === "COOKING_UNPACK_WAIT" || ts === "COOKING_CRAFT_READY") &&
       item.id === "herbbag" && isSelectedHerbbag;
 
@@ -2793,12 +2846,22 @@ export default function KitchenScreen() {
       const gesture = createCookingSoupGesture(slotIdx, item.quantity);
       return (
         <GestureDetector gesture={gesture}>
-          <View style={styles.soupSlotTouch}>
+          <View
+            style={[
+              styles.soupSlotTouch,
+              isSelectedSoup && { borderWidth: 2, borderColor: "#7EC87E", borderRadius: 6 },
+            ]}
+          >
             {!isBeingDragged && imgSrc && (
               <Image source={imgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
             )}
             {!isBeingDragged && item.quantity > 1 && (
               <Text style={styles.tableItemQty}>{item.quantity}</Text>
+            )}
+            {!isBeingDragged && isSelectedSoup && item.quantity > 1 && (
+              <View style={{ position: "absolute", bottom: 2, right: 2, backgroundColor: "#7EC87E", borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1 }}>
+                <Text style={{ color: "#2C1810", fontSize: 8, fontWeight: "700" }}>SPLIT</Text>
+              </View>
             )}
           </View>
         </GestureDetector>
@@ -2815,6 +2878,7 @@ export default function KitchenScreen() {
               styles.soupSlotTouch,
               isSelectedHerbbag && { borderWidth: 2, borderColor: "#E8B84B", borderRadius: 6 },
               isSelectedHerbs   && { borderWidth: 2, borderColor: "#7EC87E", borderRadius: 6 },
+              isSelectedSoup    && { borderWidth: 2, borderColor: "#7EC87E", borderRadius: 6 },
             ]}
           >
             {!isBeingDragged && imgSrc && (
@@ -2829,6 +2893,11 @@ export default function KitchenScreen() {
               </View>
             )}
             {!isBeingDragged && item.id === "herbs" && isSelectedHerbs && item.quantity > 1 && (
+              <View style={{ position: "absolute", bottom: 2, right: 2, backgroundColor: "#7EC87E", borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1 }}>
+                <Text style={{ color: "#2C1810", fontSize: 8, fontWeight: "700" }}>SPLIT</Text>
+              </View>
+            )}
+            {!isBeingDragged && item.id === "herbsoup" && isSelectedSoup && item.quantity > 1 && (
               <View style={{ position: "absolute", bottom: 2, right: 2, backgroundColor: "#7EC87E", borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1 }}>
                 <Text style={{ color: "#2C1810", fontSize: 8, fontWeight: "700" }}>SPLIT</Text>
               </View>
