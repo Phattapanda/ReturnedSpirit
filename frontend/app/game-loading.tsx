@@ -109,7 +109,7 @@ export default function GameLoading() {
     const startTime = Date.now();
     const failures: string[] = [];
     let cancelled = false;
-    let restoredLocation: "kitchen" | "garden" | "dormitory" = "kitchen";
+    let restoredLocation: "kitchen" | "garden" | "dormitory" | "dining" = "kitchen";
 
     const run = async () => {
       // 1. Restore gameplay snapshot (load-game only)
@@ -118,7 +118,7 @@ export default function GameLoading() {
         try {
           await restoreFromSnapshot(slotId);
           const savedLocation = await AsyncStorage.getItem("@game:save_location");
-          if (savedLocation === "kitchen" || savedLocation === "garden" || savedLocation === "dormitory") {
+          if (savedLocation === "kitchen" || savedLocation === "garden" || savedLocation === "dormitory" || savedLocation === "dining") {
             restoredLocation = savedLocation;
           }
         } catch (e) {
@@ -185,6 +185,8 @@ export default function GameLoading() {
         router.replace({ pathname: "/dormitory", params: { loadedFromSave: "1" } });
       } else if (restoredLocation === "garden") {
         router.replace({ pathname: "/garden", params: { loadedFromSave: "1" } });
+      } else if (restoredLocation === "dining") {
+        router.replace({ pathname: "/dining", params: { loadedFromSave: "1" } });
       } else {
         router.replace("/kitchen");
       }

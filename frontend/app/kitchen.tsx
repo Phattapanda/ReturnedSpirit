@@ -140,6 +140,13 @@ const LOCS = [
   { id: "explore",   active: false, locked: true  },
 ];
 
+// ── TEMP DEV (Point 5 – Dining Hall layout test) ────────────────────────────────
+// Temporary access so the Dining Hall shell is reachable for manual layout testing
+// in Expo Go. The permanent story unlock condition is NOT defined yet.
+// REMOVE / REPLACE this flag (and the isDiningBtn branches in the location bar
+// below) once the real Dining Hall unlock condition is implemented.
+const DEV_DINING_TEST_ACCESS = true;
+
 const IMG = {
   kitchen:     require("../assets/images/kitchen1.jpg"),
   herbsoup:    require("../assets/images/herbsoup.png"),
@@ -3099,13 +3106,15 @@ export default function KitchenScreen() {
           const isGardenPrompt = ts === "WAITING_FOR_GARDEN_LOCATION_CLICK" || ts === "TUESDAY_KITCHEN_GARDEN_PROMPT";
           const isGardenBtn = loc.id === "garden";
           const isDormBtn = loc.id === "dormitory";
+          const isDiningBtn = loc.id === "dining"; // TEMP DEV (Point 5)
           const enabledInGardenPrompt = isGardenPrompt && isGardenBtn;
 
           const isEffectivelyActive =
             loc.active ||
             enabledInGardenPrompt ||
             (isGardenBtn && gardenActive) ||
-            (isDormBtn && dormitoryUnlocked);
+            (isDormBtn && dormitoryUnlocked) ||
+            (isDiningBtn && DEV_DINING_TEST_ACCESS); // TEMP DEV (Point 5)
 
           // Resolve location image (mail has no custom PNG → fallback icon)
           const locImgKey = `loc_${loc.id}` as keyof typeof IMG;
@@ -3162,6 +3171,12 @@ export default function KitchenScreen() {
               locOnPress = () => {
                 audioManager.playSoundEffect('walking-on-wood', { maxDurationMs: 5000 });
                 router.push("/dormitory");
+              };
+            } else if (isDiningBtn && DEV_DINING_TEST_ACCESS) {
+              // TEMP DEV (Point 5): Dining Hall layout-test navigation
+              locOnPress = () => {
+                audioManager.playSoundEffect('footstep', { maxDurationMs: 4000 });
+                router.push("/dining");
               };
             }
           }
