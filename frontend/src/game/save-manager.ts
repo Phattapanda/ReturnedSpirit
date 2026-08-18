@@ -24,6 +24,10 @@ import {
   DEFAULT_GUEST_STATE,
   GUEST_STATE_KEY,
 } from "@/src/game/guest-system";
+import {
+  DEFAULT_GUEST_TUTORIAL_INTRO_STEP,
+  GUEST_TUTORIAL_INTRO_KEY,
+} from "@/src/game/guest-tutorial";
 
 /** All gameplay keys that form a complete save snapshot (NO meta keys like active_slot / game_slots). */
 export const ALL_SNAPSHOT_KEYS: string[] = [
@@ -44,6 +48,7 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   CURRENCY_KEY,
   GUEST_STATE_KEY,
   DINING_MEAL_STATE_KEY,
+  GUEST_TUTORIAL_INTRO_KEY,
   // Kitchen tutorial flags
   "@tutorial:kitchen_done",
   "@kitchen:has_seen_post_garden_dialog",
@@ -111,12 +116,13 @@ export async function createSnapshot(
   }
   try {
     // New games always start with clean shared runtime state, even if another
-    // slot left currency, guest data, or Dining meal state in AsyncStorage.
+    // slot left currency, guest data, Dining meal state, or guest tutorial data in AsyncStorage.
     if (trigger === "new_game") {
       await AsyncStorage.multiSet([
         [CURRENCY_KEY, String(DEFAULT_CURRENCY_COPPER)],
         [GUEST_STATE_KEY, JSON.stringify(DEFAULT_GUEST_STATE)],
         [DINING_MEAL_STATE_KEY, JSON.stringify(DEFAULT_DINING_MEAL_STATE)],
+        [GUEST_TUTORIAL_INTRO_KEY, DEFAULT_GUEST_TUTORIAL_INTRO_STEP],
       ]);
     }
 
