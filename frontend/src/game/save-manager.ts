@@ -16,6 +16,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CURRENCY_KEY, DEFAULT_CURRENCY_COPPER } from "@/src/game/currency-system";
 import {
+  DEFAULT_DINING_MEAL_STATE,
+  DINING_MEAL_STATE_KEY,
+} from "@/src/game/dining-meal-system";
+import {
   advanceGuestCalendar,
   DEFAULT_GUEST_STATE,
   GUEST_STATE_KEY,
@@ -39,6 +43,7 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   "@game:logbook",
   CURRENCY_KEY,
   GUEST_STATE_KEY,
+  DINING_MEAL_STATE_KEY,
   // Kitchen tutorial flags
   "@tutorial:kitchen_done",
   "@kitchen:has_seen_post_garden_dialog",
@@ -106,11 +111,12 @@ export async function createSnapshot(
   }
   try {
     // New games always start with clean shared runtime state, even if another
-    // slot left currency or guest data in the shared AsyncStorage namespace.
+    // slot left currency, guest data, or Dining meal state in AsyncStorage.
     if (trigger === "new_game") {
       await AsyncStorage.multiSet([
         [CURRENCY_KEY, String(DEFAULT_CURRENCY_COPPER)],
         [GUEST_STATE_KEY, JSON.stringify(DEFAULT_GUEST_STATE)],
+        [DINING_MEAL_STATE_KEY, JSON.stringify(DEFAULT_DINING_MEAL_STATE)],
       ]);
     }
 
