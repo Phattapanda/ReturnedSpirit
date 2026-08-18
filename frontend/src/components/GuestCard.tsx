@@ -23,6 +23,17 @@ type GuestCardProps = {
 };
 
 const COIN_COPPER = require("../../assets/images/coin_copper.png");
+const OLD_FARMER = require("../../assets/images/old_farmer.png");
+const COACHMAN = require("../../assets/images/coachman.png");
+const SERVICE_SELL = require("../../assets/images/service_sell.png");
+const SERVICE_WATER = require("../../assets/images/service_water.png");
+const SERVICE_TALK = require("../../assets/images/service_talk.png");
+const TRADE_POTATO = require("../../assets/images/potato.png");
+
+const GUEST_PORTRAITS: Record<string, ReturnType<typeof require>> = {
+  old_farmer: OLD_FARMER,
+  coachman: COACHMAN,
+};
 
 /**
  * Foundation-only GuestCard.
@@ -33,10 +44,12 @@ const COIN_COPPER = require("../../assets/images/coin_copper.png");
  * - four large activity/service tiles run across the bottom
  *
  * Favor remains in the guest model but is intentionally NOT shown on the card.
- * It will later live in the guest detail window behind/from the portrait.
+ * It will later live in the guest detail window opened from the portrait.
+ * Service actions are visual-only in Point 6.
  */
 export function GuestCard({ guest, onSelect }: GuestCardProps) {
   const { profile, selected } = guest;
+  const portrait = GUEST_PORTRAITS[profile.portraitKey];
 
   return (
     <TouchableOpacity
@@ -50,47 +63,49 @@ export function GuestCard({ guest, onSelect }: GuestCardProps) {
           <Text style={styles.requestText}>“I could use something to eat.”</Text>
         </View>
 
-        {/* Portrait placeholder until the Old Farmer portrait asset is supplied. */}
         <View style={styles.portraitWrap}>
-          <Ionicons name="person-outline" size={42} color="rgba(196,148,58,0.76)" />
+          {portrait ? (
+            <Image source={portrait} style={styles.portraitImage} resizeMode="cover" resizeMethod="resize" />
+          ) : (
+            <Ionicons name="person-outline" size={42} color="rgba(196,148,58,0.76)" />
+          )}
         </View>
       </View>
 
       <View style={styles.serviceRow}>
-        {/* Sell artwork will replace this placeholder once its PNG is supplied. */}
-        <View style={styles.serviceButton}>
+        <View style={styles.serviceButton} pointerEvents="none">
           <View style={styles.serviceArtwork}>
-            <Ionicons name="cash-outline" size={38} color="#C4943A" />
+            <Image source={SERVICE_SELL} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
           </View>
           <View style={styles.serviceLabelRow}>
-            <Text style={styles.serviceLabel}>Sell for --</Text>
-            <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" />
+            <Text style={styles.serviceLabel}>Sell for X</Text>
+            <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" resizeMethod="resize" />
           </View>
         </View>
 
-        {/* The actual rolled trade item/stack will replace this placeholder later. */}
-        <View style={styles.serviceButton}>
+        <View style={styles.serviceButton} pointerEvents="none">
           <View style={styles.serviceArtwork}>
-            <Ionicons name="cube-outline" size={38} color="#C4943A" />
+            <View style={styles.tradeItemWrap}>
+              <Image source={TRADE_POTATO} style={styles.tradeItemImage} resizeMode="contain" resizeMethod="resize" />
+              {/* Stack quantity badge is intentionally omitted until roll → item/quantity is defined. */}
+            </View>
           </View>
           <Text style={styles.serviceLabel}>Trade</Text>
         </View>
 
-        {/* Water-glass artwork will replace this placeholder once its PNG is supplied. */}
-        <View style={styles.serviceButton}>
+        <View style={styles.serviceButton} pointerEvents="none">
           <View style={styles.serviceArtwork}>
-            <Ionicons name="water-outline" size={38} color="#C4943A" />
+            <Image source={SERVICE_WATER} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
           </View>
           <View style={styles.serviceLabelWrap}>
             <Text style={styles.serviceLabel}>Offer water for 1</Text>
-            <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" />
+            <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" resizeMethod="resize" />
           </View>
         </View>
 
-        {/* Speech-bubble artwork will replace this placeholder once its PNG is supplied. */}
-        <View style={styles.serviceButton}>
+        <View style={styles.serviceButton} pointerEvents="none">
           <View style={styles.serviceArtwork}>
-            <Ionicons name="chatbubbles-outline" size={38} color="#C4943A" />
+            <Image source={SERVICE_TALK} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
           </View>
           <Text style={styles.serviceLabel}>Talk</Text>
         </View>
@@ -222,11 +237,16 @@ const styles = StyleSheet.create({
     width: 92,
     height: 92,
     borderRadius: 46,
+    overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(35,22,10,0.96)",
     borderWidth: 2.5,
     borderColor: "rgba(196,148,58,0.68)",
+  },
+  portraitImage: {
+    width: "100%",
+    height: "100%",
   },
   serviceRow: {
     flexDirection: "row",
@@ -238,7 +258,7 @@ const styles = StyleSheet.create({
   },
   serviceButton: {
     flex: 1,
-    minHeight: 104,
+    minHeight: 112,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "rgba(196,148,58,0.28)",
@@ -246,14 +266,29 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 4,
-    paddingTop: 8,
+    paddingTop: 7,
     paddingBottom: 7,
   },
   serviceArtwork: {
-    height: 58,
+    height: 68,
     width: "100%",
     alignItems: "center",
     justifyContent: "center",
+  },
+  serviceImage: {
+    width: "78%",
+    height: "78%",
+  },
+  tradeItemWrap: {
+    width: "78%",
+    height: "78%",
+    position: "relative",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tradeItemImage: {
+    width: "100%",
+    height: "100%",
   },
   serviceLabel: {
     color: "#F0E8D5",
