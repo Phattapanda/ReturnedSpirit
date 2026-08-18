@@ -16,6 +16,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import SceneBackground from "@/src/components/SceneBackground";
 import CurrencyHud from "@/src/components/CurrencyHud";
+import DiningGuestArea from "@/src/components/GuestCard";
 import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import StatusModal from "@/src/components/StatusModal";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, type PlayerStats } from "@/src/game/player-stats";
@@ -277,14 +278,8 @@ export default function DiningScreen() {
           </View>
         </View>
 
-        {/* ── Guest card area (empty placeholder for future guests) ── */}
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Guests</Text>
-          <View style={styles.guestArea}>
-            <Ionicons name="people-outline" size={26} color="rgba(196,148,58,0.28)" />
-            <Text style={styles.guestAreaText}>Guests will appear here</Text>
-          </View>
-        </View>
+        {/* Guest foundation: schedule + selectable GuestCard; no full guest gameplay yet. */}
+        <DiningGuestArea dayIndex={dayIdx} />
       </ScrollView>
 
       {/* ── Location bar (same pattern as the other rooms) ── */}
@@ -466,16 +461,6 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: "rgba(90,65,30,0.42)",
     alignItems: "center", justifyContent: "center",
   },
-
-  // Guest area
-  guestArea: {
-    minHeight: 130, borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.03)",
-    borderWidth: 1.5, borderColor: "rgba(196,148,58,0.22)",
-    borderStyle: "dashed",
-    alignItems: "center", justifyContent: "center", gap: 8,
-  },
-  guestAreaText: { color: "rgba(240,232,213,0.45)", fontSize: 12, fontStyle: "italic", fontFamily: "Oldenburg" },
 
   // Location bar
   locationBar: {
