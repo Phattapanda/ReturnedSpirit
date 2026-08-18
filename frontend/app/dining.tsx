@@ -29,7 +29,6 @@ import {
   type PlayerAvatarId,
 } from "@/src/game/player-avatar";
 
-// ─── Storage keys (reuse existing central save architecture) ────────────────────
 const DSK = {
   STAMINA:       "@game:stamina",
   LIFE:          "@game:life",
@@ -41,7 +40,6 @@ const DSK = {
   GAME_SLOTS:    "game_slots",
 } as const;
 
-// ─── Assets ─────────────────────────────────────────────────────────────────────
 const IMG = {
   dining:      require("../assets/images/dining.png"),
   dining_dawn: require("../assets/images/dining_dawn.png"),
@@ -55,13 +53,10 @@ const IMG = {
 
 const DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
 
-// Location bar entries (same visual pattern as the other rooms).
-// Only Kitchen is reachable from the Dining Hall shell for now; Dining is the
-// current room. The remaining entries are shown locked (visual only).
 const LOCS = [
   { id: "kitchen",   nav: true  },
   { id: "garden",    nav: false },
-  { id: "dining",    nav: false }, // current room
+  { id: "dining",    nav: false },
   { id: "dormitory", nav: false },
   { id: "mail",      nav: false },
   { id: "explore",   nav: false },
@@ -75,41 +70,35 @@ export default function DiningScreen() {
   const insets = useSafeAreaInsets();
   const audioManager = useAudioManager();
 
-  // ── HUD / player state
   const [staminaCurrent, setStaminaCurrent] = useState(40);
-  const [lifeCurrent, setLifeCurrent]       = useState(15);
-  const [playerStats, setPlayerStats]       = useState<PlayerStats>(DEFAULT_PLAYER_STATS);
-  const [dayIdx, setDayIdx]                 = useState(0);
+  const [lifeCurrent, setLifeCurrent] = useState(15);
+  const [playerStats, setPlayerStats] = useState<PlayerStats>(DEFAULT_PLAYER_STATS);
+  const [dayIdx, setDayIdx] = useState(0);
   const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(1);
-  const [timeOfDay, setTimeOfDay]           = useState<"morning" | "evening">("evening");
-  const [headerH, setHeaderH]               = useState(0);
-  const [playerBag, setPlayerBag]           = useState<PlayerBagData>(DEFAULT_BAG);
+  const [timeOfDay, setTimeOfDay] = useState<"morning" | "evening">("evening");
+  const [headerH, setHeaderH] = useState(0);
+  const [playerBag, setPlayerBag] = useState<PlayerBagData>(DEFAULT_BAG);
 
-  // ── Modals
   const [statusOpen, setStatusOpen] = useState(false);
-  const [showMenu, setShowMenu]     = useState(false);
-  const [bagOpen, setBagOpen]       = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
+  const [bagOpen, setBagOpen] = useState(false);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Load current game state from the shared save architecture
-  // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     let active = true;
     (async () => {
       try {
-        // Stats
         let loadedStats = DEFAULT_PLAYER_STATS;
         const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
         if (rawStats) {
           try { loadedStats = { ...DEFAULT_PLAYER_STATS, ...JSON.parse(rawStats) }; } catch { /* default */ }
         }
 
-        const rawSta  = await AsyncStorage.getItem(DSK.STAMINA);
+        const rawSta = await AsyncStorage.getItem(DSK.STAMINA);
         const rawLife = await AsyncStorage.getItem(DSK.LIFE);
-        const rawDay  = await AsyncStorage.getItem(DSK.DAY_INDEX);
-        const rawAv   = await AsyncStorage.getItem(PLAYER_AVATAR_KEY);
-        const rawTod  = await AsyncStorage.getItem(DSK.TIME_OF_DAY);
-        const rawBag  = await AsyncStorage.getItem(PLAYER_BAG_KEY);
+        const rawDay = await AsyncStorage.getItem(DSK.DAY_INDEX);
+        const rawAv = await AsyncStorage.getItem(PLAYER_AVATAR_KEY);
+        const rawTod = await AsyncStorage.getItem(DSK.TIME_OF_DAY);
+        const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
 
         if (!active) return;
 
@@ -123,7 +112,6 @@ export default function DiningScreen() {
           try { setPlayerBag(JSON.parse(rawBag)); } catch { /* default */ }
         }
 
-        // Record Dining Hall as the current runtime location (used by manual save).
         await AsyncStorage.setItem(DSK.SAVE_LOCATION, "dining");
       } catch (e) {
         if (__DEV__) console.error("[Dining] load failed:", e);
@@ -132,16 +120,13 @@ export default function DiningScreen() {
     return () => { active = false; };
   }, []);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Save helpers (reuse central snapshot system)
-  // ─────────────────────────────────────────────────────────────────────────
   async function updateSaveSlot(day: number, stamina: number, life: number): Promise<number> {
     try {
-      const rawSlot  = await AsyncStorage.getItem(DSK.ACTIVE_SLOT);
+      const rawSlot = await AsyncStorage.getItem(DSK.ACTIVE_SLOT);
       const rawSlots = await AsyncStorage.getItem(DSK.GAME_SLOTS);
       if (!rawSlot || !rawSlots) return -1;
       const slotNum = parseInt(rawSlot, 10);
-      const slots   = JSON.parse(rawSlots);
+      const slots = JSON.parse(rawSlots);
       const updated = slots.map((s: { slot: number }) =>
         s.slot === slotNum
           ? { ...s, dayIdx: day, stamina, life, lastSaved: new Date().toISOString() }
@@ -175,35 +160,28 @@ export default function DiningScreen() {
     router.replace("/");
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Navigation — reuse existing footstep sound + Stack transition
-  // ─────────────────────────────────────────────────────────────────────────
   function goToKitchen() {
     audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });
     if (router.canGoBack() && params.loadedFromSave !== "1") router.back();
     else router.replace("/kitchen");
   }
 
-  // ── Derived
   const staminaPct = Math.max(0, Math.min(1, staminaCurrent / (playerStats.maximumStamina || 1)));
-  const lifePct    = Math.max(0, Math.min(1, lifeCurrent / (playerStats.maximumLife || 1)));
+  const lifePct = Math.max(0, Math.min(1, lifeCurrent / (playerStats.maximumLife || 1)));
 
   return (
     <View style={styles.root}>
       <CurrencyHud />
 
-      {/* ── Background (normal vs. dawn, reusing shared time-of-day state) ── */}
       <SceneBackground source={timeOfDay === "morning" ? IMG.dining_dawn : IMG.dining} topOffset={headerH} />
       <View style={[StyleSheet.absoluteFill, { top: headerH }, styles.bgOverlay]} pointerEvents="none" />
 
-      {/* ── Header ── */}
       <View
         style={[styles.header, { paddingTop: insets.top + 6 }]}
         onLayout={(e) => setHeaderH(e.nativeEvent.layout.height)}
       >
         <View style={styles.headerTopRow}>
           <View style={styles.leftHeader}>
-            {/* Stamina bar */}
             <View style={styles.statBarOuter}>
               <Ionicons name="flash" size={15} color="#C4943A" />
               <View style={styles.statBarTrack}>
@@ -213,7 +191,6 @@ export default function DiningScreen() {
               </View>
               <Text style={styles.statBarText}>{staminaCurrent}/{playerStats.maximumStamina}</Text>
             </View>
-            {/* Life bar */}
             <View style={styles.statBarOuter}>
               <Ionicons name="heart" size={13} color="#CC2200" />
               <View style={styles.statBarTrack}>
@@ -235,14 +212,12 @@ export default function DiningScreen() {
         <Text style={styles.locationName}>Dining Hall</Text>
       </View>
 
-      {/* ── Scroll area ── */}
       <ScrollView
         style={styles.scrollArea}
         contentContainerStyle={{ paddingBottom: insets.bottom + 24, paddingTop: 8 }}
         showsVerticalScrollIndicator={false}
         bounces={false}
       >
-        {/* Portrait row: player + reserved Rupert position + existing bag access. */}
         <View style={styles.portraitRow}>
           <TouchableOpacity
             style={styles.circleWrap}
@@ -257,7 +232,6 @@ export default function DiningScreen() {
             />
           </TouchableOpacity>
 
-          {/* Reserved for Rupert when he is actually present in the Dining Hall. */}
           <View style={[styles.circleWrap, styles.rupertReserve]} pointerEvents="none" />
 
           <BagIconButton
@@ -266,23 +240,18 @@ export default function DiningScreen() {
           />
         </View>
 
-        {/* ── Meal slots: 6 larger crafting-style placeholders in a 3 × 2 grid ── */}
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Meals</Text>
-          <View style={styles.mealGrid}>
-            {Array.from({ length: MEAL_SLOT_COUNT }).map((_, i) => (
-              <View key={i} style={styles.mealSlot}>
-                <Ionicons name="restaurant-outline" size={25} color="rgba(196,148,58,0.30)" />
-              </View>
-            ))}
-          </View>
+        {/* Six meal slots mirror the Kitchen crafting row: one compact horizontal line, no heading. */}
+        <View style={styles.mealBar}>
+          {Array.from({ length: MEAL_SLOT_COUNT }).map((_, i) => (
+            <View key={i} style={styles.mealSlot}>
+              <Ionicons name="restaurant-outline" size={22} color="rgba(196,148,58,0.34)" />
+            </View>
+          ))}
         </View>
 
-        {/* Guest foundation: schedule + selectable GuestCard; no full guest gameplay yet. */}
         <DiningGuestArea dayIndex={dayIdx} />
       </ScrollView>
 
-      {/* ── Location bar (same pattern as the other rooms) ── */}
       <View style={[styles.locationBar, { paddingBottom: insets.bottom + 4 }]}>
         {LOCS.map((loc) => {
           const isCurrent = loc.id === "dining";
@@ -317,18 +286,17 @@ export default function DiningScreen() {
         })}
       </View>
 
-      {/* ── Menu Modal ── */}
       <Modal visible={showMenu} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.confirmPanel}>
             <Text style={styles.confirmTitle}>Menu</Text>
             <View style={{ height: 1, backgroundColor: "rgba(196,148,58,0.22)", marginVertical: 8, alignSelf: "stretch" }} />
             {[
-              { icon: "play" as const,             label: "Resume",    action: () => setShowMenu(false) },
-              { icon: "book-outline" as const,     label: "Logbook",   action: () => { setShowMenu(false); router.push("/logbook"); } },
-              { icon: "save-outline" as const,     label: "Save",      action: handleManualSave },
-              { icon: "home-outline" as const,     label: "Main Menu", action: handleMainMenu },
-              { icon: "settings-outline" as const, label: "Settings",  action: () => { setShowMenu(false); router.push("/settings"); } },
+              { icon: "play" as const, label: "Resume", action: () => setShowMenu(false) },
+              { icon: "book-outline" as const, label: "Logbook", action: () => { setShowMenu(false); router.push("/logbook"); } },
+              { icon: "save-outline" as const, label: "Save", action: handleManualSave },
+              { icon: "home-outline" as const, label: "Main Menu", action: handleMainMenu },
+              { icon: "settings-outline" as const, label: "Settings", action: () => { setShowMenu(false); router.push("/settings"); } },
             ].map((item) => (
               <TouchableOpacity
                 key={item.label}
@@ -344,7 +312,6 @@ export default function DiningScreen() {
         </View>
       </Modal>
 
-      {/* ── Existing Shoulder Bag. Dining has no item-transfer target yet. ── */}
       <PlayerBag
         bag={playerBag}
         visible={bagOpen}
@@ -354,7 +321,6 @@ export default function DiningScreen() {
         onTransferItem={() => {}}
       />
 
-      {/* ── Player Status / Growth Points ── */}
       <StatusModal
         visible={statusOpen}
         stats={playerStats}
@@ -370,60 +336,88 @@ export default function DiningScreen() {
   );
 }
 
-// ─── Styles (matching the existing gameplay-room visual language) ───────────────
 const styles = StyleSheet.create({
-  root:      { flex: 1, backgroundColor: "#0A0500" },
+  root: { flex: 1, backgroundColor: "#0A0500" },
   bgOverlay: { backgroundColor: "rgba(0,0,0,0.30)" },
 
   header: {
-    flexDirection: "column", paddingHorizontal: 12, paddingBottom: 6,
+    flexDirection: "column",
+    paddingHorizontal: 12,
+    paddingBottom: 6,
     backgroundColor: "rgba(14,7,1,0.85)",
-    borderBottomWidth: 1, borderBottomColor: "rgba(196,148,58,0.20)",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(196,148,58,0.20)",
     zIndex: 2,
   },
   headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  leftHeader:   { flex: 1, gap: 5 },
+  leftHeader: { flex: 1, gap: 5 },
   statBarOuter: {
-    flexDirection: "row", alignItems: "center",
-    backgroundColor: "rgba(10,5,0,0.82)", borderRadius: 18,
-    borderWidth: 1.5, borderColor: "rgba(130,90,20,0.50)",
-    paddingHorizontal: 10, paddingVertical: 5, gap: 7,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(10,5,0,0.82)",
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: "rgba(130,90,20,0.50)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    gap: 7,
   },
   statBarTrack: { flex: 1, height: 9, borderRadius: 5, backgroundColor: "#2A1800", overflow: "hidden" },
-  statBarFill:  { height: "100%", borderRadius: 5 },
-  staminaFill:  { backgroundColor: "#C4943A" },
+  statBarFill: { height: "100%", borderRadius: 5 },
+  staminaFill: { backgroundColor: "#C4943A" },
   staminaReflex: {
-    position: "absolute", top: 0, left: 0, right: 0, height: "45%",
-    backgroundColor: "rgba(255,255,255,0.18)", borderRadius: 4,
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: "45%",
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderRadius: 4,
   },
-  lifeFill:     { backgroundColor: "#CC2200" },
-  statBarText:  { color: "#F0E8D5", fontSize: 11, fontFamily: "Oldenburg", minWidth: 40, textAlign: "right" },
+  lifeFill: { backgroundColor: "#CC2200" },
+  statBarText: { color: "#F0E8D5", fontSize: 11, fontFamily: "Oldenburg", minWidth: 40, textAlign: "right" },
   locationName: { color: "#F0E8D5", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 1, textAlign: "center", marginTop: 4 },
-  rightHeader:  { flexDirection: "row", alignItems: "center", gap: 8, marginLeft: 10 },
+  rightHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginLeft: 10 },
   dayBadge: {
-    width: 38, height: 38, borderRadius: 8,
+    width: 38,
+    height: 38,
+    borderRadius: 8,
     backgroundColor: "rgba(196,148,58,0.16)",
-    borderWidth: 1.5, borderColor: "rgba(196,148,58,0.38)",
-    alignItems: "center", justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "rgba(196,148,58,0.38)",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  dayText:  { color: "#F5E6C8", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 0.5 },
+  dayText: { color: "#F5E6C8", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 0.5 },
   menuBtn: {
-    width: 42, height: 42, borderRadius: 21,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: "rgba(196,148,58,0.16)",
-    borderWidth: 1.5, borderColor: "rgba(196,148,58,0.38)",
-    alignItems: "center", justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: "rgba(196,148,58,0.38)",
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   scrollArea: { flex: 1, zIndex: 1 },
 
-  // Portrait / companion / bag row. Same three-position rhythm as the Kitchen.
   portraitRow: {
-    flexDirection: "row", justifyContent: "center", alignItems: "center",
-    gap: 18, paddingVertical: 12, backgroundColor: "rgba(14,7,1,0.65)",
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 18,
+    paddingVertical: 12,
+    backgroundColor: "rgba(14,7,1,0.65)",
   },
   circleWrap: {
-    width: 96, height: 96, borderRadius: 48,
-    overflow: "hidden", borderWidth: 2.5, borderColor: "#C4943A", backgroundColor: "#2C1810",
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    overflow: "hidden",
+    borderWidth: 2.5,
+    borderColor: "#C4943A",
+    backgroundColor: "#2C1810",
   },
   circleImg: { width: "100%", height: "100%" },
   playerPortraitImage: { transform: [{ scale: 1.06 }] },
@@ -433,69 +427,89 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
 
-  // Section cards
-  sectionCard: {
-    marginHorizontal: 18, marginTop: 16,
-    backgroundColor: "rgba(14,8,2,0.90)",
-    borderRadius: 18, borderWidth: 1.5,
-    borderColor: "rgba(196,148,58,0.35)",
-    padding: 14,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.5, shadowRadius: 12, elevation: 16,
-  },
-  sectionTitle: {
-    color: "#F5E6C8", fontSize: 14, fontFamily: "Oldenburg",
-    letterSpacing: 1, marginBottom: 10,
-  },
-
-  // Meal slots: deliberately modeled after the Kitchen craft-slot proportions.
-  mealGrid: {
+  mealBar: {
+    marginHorizontal: 18,
+    marginTop: 16,
     flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    rowGap: 9,
+    gap: 6,
+    padding: 8,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: "rgba(196,148,58,0.35)",
+    backgroundColor: "rgba(14,8,2,0.90)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.45,
+    shadowRadius: 10,
+    elevation: 14,
   },
   mealSlot: {
-    width: "31%", aspectRatio: 1, minHeight: 72,
-    backgroundColor: "rgba(20,11,3,0.93)", borderRadius: 8,
-    borderWidth: 1, borderColor: "rgba(90,65,30,0.42)",
-    alignItems: "center", justifyContent: "center",
+    flex: 1,
+    aspectRatio: 1,
+    minWidth: 0,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(90,65,30,0.46)",
+    backgroundColor: "rgba(20,11,3,0.93)",
+    alignItems: "center",
+    justifyContent: "center",
   },
 
-  // Location bar
   locationBar: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    paddingHorizontal: 10, paddingTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingTop: 8,
     backgroundColor: "rgba(14,7,1,0.92)",
-    borderTopWidth: 1, borderTopColor: "rgba(196,148,58,0.20)",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(196,148,58,0.20)",
     zIndex: 2,
   },
   locBtn: {
-    flex: 1, height: 48, borderRadius: 12,
-    alignItems: "center", justifyContent: "center",
+    flex: 1,
+    height: 48,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
     borderWidth: 1.5,
   },
-  locBtnActive:  { backgroundColor: "rgba(196,148,58,0.14)", borderColor: "rgba(196,148,58,0.40)" },
+  locBtnActive: { backgroundColor: "rgba(196,148,58,0.14)", borderColor: "rgba(196,148,58,0.40)" },
   locBtnCurrent: { backgroundColor: "rgba(196,148,58,0.26)", borderColor: "rgba(196,148,58,0.65)" },
-  locBtnLocked:  { backgroundColor: "rgba(30,22,10,0.55)", borderColor: "rgba(196,148,58,0.12)" },
-  locBtnImg:       { width: 30, height: 30 },
+  locBtnLocked: { backgroundColor: "rgba(30,22,10,0.55)", borderColor: "rgba(196,148,58,0.12)" },
+  locBtnImg: { width: 30, height: 30 },
   locBtnImgLocked: { opacity: 0.35 },
 
-  // Modal
   modalOverlay: {
-    flex: 1, backgroundColor: "rgba(0,0,0,0.76)",
-    alignItems: "center", justifyContent: "center",
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.76)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   confirmPanel: {
-    width: "82%", backgroundColor: "#160B03", borderRadius: 20, padding: 24,
-    borderWidth: 1.5, borderColor: "rgba(196,148,58,0.38)",
-    alignItems: "center", gap: 4,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.6, shadowRadius: 16, elevation: 24,
+    width: "82%",
+    backgroundColor: "#160B03",
+    borderRadius: 20,
+    padding: 24,
+    borderWidth: 1.5,
+    borderColor: "rgba(196,148,58,0.38)",
+    alignItems: "center",
+    gap: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.6,
+    shadowRadius: 16,
+    elevation: 24,
   },
   confirmTitle: { color: "#F5E6C8", fontSize: 17, fontFamily: "Oldenburg", letterSpacing: 0.8, textAlign: "center" },
   menuRow: {
-    flexDirection: "row", alignItems: "center", gap: 14,
-    paddingVertical: 13, paddingHorizontal: 6, borderRadius: 10, alignSelf: "stretch",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    paddingVertical: 13,
+    paddingHorizontal: 6,
+    borderRadius: 10,
+    alignSelf: "stretch",
   },
   menuRowText: { color: "#F0E8D5", fontSize: 15, fontFamily: "Oldenburg", letterSpacing: 0.4 },
 });
