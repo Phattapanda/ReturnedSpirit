@@ -94,6 +94,70 @@ export function planAddToBag(item: BagItem, bag: PlayerBagData): AddToBagResult 
   return { canTransfer: transferred > 0, transferQty: transferred, remainderQty: remaining, updatedSlots: newSlots };
 }
 
+export type ContainerToBagResult = {
+  canTransfer: boolean;
+  transferQty: number;
+  remainderQty: number;
+  updatedBag: PlayerBagData;
+  updatedSourceSlots: (BagItem | null)[];
+};
+
+/**
+ * Move one source-container stack into the Player Bag without mutating either input.
+ *
+ * This is intentionally room-agnostic so Kitchen, storage and future rooms can all
+ * share the exact same Bag capacity/stacking behavior. Compatible Bag stacks are
+ * filled first, then empty Bag slots are used. If only part of the source stack
+ * fits, the remainder stays in its original source slot. If nothing fits, both
+ * source and Bag are returned unchanged.
+ */
+export function planContainerItemToBag(
+  sourceSlots: (BagItem | null)[],
+  sourceSlotIdx: number,
+  bag: PlayerBagData,
+): ContainerToBagResult {
+  const sourceItem = sourceSlots[sourceSlotIdx] ?? null;
+  const unchangedSource = sourceSlots.map(slot => slot ? { ...slot } : null);
+  const unchangedBag: PlayerBagData = {
+    ...bag,
+    slots: bag.slots.map(slot => slot ? { ...slot } : null),
+  };
+
+  if (!sourceItem || !bag.unlocked || sourceSlotIdx < 0 || sourceSlotIdx >= sourceSlots.length) {
+    return {
+      canTransfer: false,
+      transferQty: 0,
+      remainderQty: sourceItem?.quantity ?? 0,
+      updatedBag: unchangedBag,
+      updatedSourceSlots: unchangedSource,
+    };
+  }
+
+  const addPlan = planAddToBag(sourceItem, bag);
+  if (!addPlan.canTransfer) {
+    return {
+      canTransfer: false,
+      transferQty: 0,
+      remainderQty: sourceItem.quantity,
+      updatedBag: unchangedBag,
+      updatedSourceSlots: unchangedSource,
+    };
+  }
+
+  const updatedSourceSlots = unchangedSource;
+  updatedSourceSlots[sourceSlotIdx] = addPlan.remainderQty > 0
+    ? { ...sourceItem, quantity: addPlan.remainderQty }
+    : null;
+
+  return {
+    canTransfer: true,
+    transferQty: addPlan.transferQty,
+    remainderQty: addPlan.remainderQty,
+    updatedBag: { ...bag, slots: addPlan.updatedSlots },
+    updatedSourceSlots,
+  };
+}
+
 export function hasBagItem(bag: PlayerBagData, itemId: string): boolean {
   return bag.slots.some(s => s !== null && s.id === itemId);
 }
