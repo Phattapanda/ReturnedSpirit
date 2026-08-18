@@ -15,7 +15,11 @@
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CURRENCY_KEY, DEFAULT_CURRENCY_COPPER } from "@/src/game/currency-system";
-import { DEFAULT_GUEST_STATE, GUEST_STATE_KEY } from "@/src/game/guest-system";
+import {
+  advanceGuestCalendar,
+  DEFAULT_GUEST_STATE,
+  GUEST_STATE_KEY,
+} from "@/src/game/guest-system";
 
 /** All gameplay keys that form a complete save snapshot (NO meta keys like active_slot / game_slots). */
 export const ALL_SNAPSHOT_KEYS: string[] = [
@@ -108,6 +112,15 @@ export async function createSnapshot(
         [CURRENCY_KEY, String(DEFAULT_CURRENCY_COPPER)],
         [GUEST_STATE_KEY, JSON.stringify(DEFAULT_GUEST_STATE)],
       ]);
+    }
+
+    // The core day index is already advanced by Dormitory before this checkpoint.
+    // Advance the guest calendar here so its once-per-visit rolls are part of the
+    // same atomic gameplay snapshot without coupling guest logic to room UI code.
+    if (trigger === "day_transition") {
+      const rawDay = await AsyncStorage.getItem("@game:day_index");
+      const newDay = rawDay !== null ? parseInt(rawDay, 10) : 0;
+      await advanceGuestCalendar(newDay);
     }
 
     const pairs = await AsyncStorage.multiGet(ALL_SNAPSHOT_KEYS);
