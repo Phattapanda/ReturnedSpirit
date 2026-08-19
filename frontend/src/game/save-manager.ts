@@ -28,6 +28,7 @@ import {
   DEFAULT_GUEST_TUTORIAL_INTRO_STEP,
   GUEST_TUTORIAL_INTRO_KEY,
 } from "@/src/game/guest-tutorial";
+import { advanceSecondGardenPlotDay } from "@/src/game/garden-crop-system";
 import {
   DEFAULT_POST_GUEST_TUTORIAL_STATE,
   POST_GUEST_TUTORIAL_STATE_KEY,
@@ -121,8 +122,6 @@ export async function createSnapshot(
     }
   }
   try {
-    // New games always start with clean shared runtime state, even if another
-    // slot left currency, guest data, Dining meal state, or guest tutorial data in AsyncStorage.
     if (trigger === "new_game") {
       await AsyncStorage.multiSet([
         [CURRENCY_KEY, String(DEFAULT_CURRENCY_COPPER)],
@@ -134,12 +133,13 @@ export async function createSnapshot(
     }
 
     // The core day index is already advanced by Dormitory before this checkpoint.
-    // Advance the guest calendar here so its once-per-visit rolls are part of the
-    // same atomic gameplay snapshot without coupling guest logic to room UI code.
+    // Guest visits and the optional second Garden plot are advanced here so both
+    // states are included in the same day-transition snapshot.
     if (trigger === "day_transition") {
       const rawDay = await AsyncStorage.getItem("@game:day_index");
       const newDay = rawDay !== null ? parseInt(rawDay, 10) : 0;
       await advanceGuestCalendar(newDay);
+      await advanceSecondGardenPlotDay();
     }
 
     const pairs = await AsyncStorage.multiGet(ALL_SNAPSHOT_KEYS);
@@ -186,19 +186,13 @@ export async function restoreFromSnapshot(slotNum: number): Promise<void> {
   }
 }
 
-/**
- * Discard unsaved runtime state by restoring the last snapshot.
- * Called when the player navigates to Main Menu without saving.
- */
+/** Discard unsaved runtime state by restoring the last snapshot. */
 export async function discardRuntimeAndRestore(slotNum: number): Promise<void> {
   if (__DEV__) console.log("[SAVE] DISCARD UNSAVED RUNTIME STATE — slot", slotNum);
   await restoreFromSnapshot(slotNum);
 }
 
-/**
- * Remove the snapshot for a slot (used when deleting a save slot).
- * Does NOT clear individual runtime keys (those will be reset on next new-game).
- */
+/** Remove the snapshot for a slot (used when deleting a save slot). */
 export async function clearSlotSnapshot(slotNum: number): Promise<void> {
   try {
     await AsyncStorage.removeItem(snapshotKey(slotNum));
