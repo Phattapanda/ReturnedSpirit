@@ -1,0 +1,80 @@
+name: Apply Dining service tutorial implementation
+
+on:
+  push:
+    branches:
+      - feat/guest-tutorial-service
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/guest-tutorial-service
+      - name: Patch Dining
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('frontend/app/dining.tsx')
+          s = p.read_text()
+
+          def rep(old, new, label):
+            global s
+            c = s.count(old)
+            if c != 1:
+              raise SystemExit(f'{label}: expected 1 match, found {c}')
+            s = s.replace(old, new, 1)
+
+          rep('''  ScrollView,\n  Image,\n  StyleSheet,\n} from "react-native";''', '''  ScrollView,\n  Animated as RNAnimated,\n  Image,\n  StyleSheet,\n  useWindowDimensions,\n} from "react-native";''', 'react native imports')
+
+          rep('''import DiningGuestArea from "@/src/components/GuestCard";''', '''import DiningGuestArea, { type GuestServiceAction } from "@/src/components/GuestCard";''', 'guest card import')
+
+          rep('''  guestTutorialHasReached,\n  loadGuestTutorialIntroStep,''', '''  guestTutorialHasReached,\n  guestTutorialKeepsRupertInDining,\n  loadGuestTutorialIntroStep,''', 'guest tutorial helper import')
+
+          rep('''import { DEFAULT_BAG, PLAYER_BAG_KEY, type PlayerBagData } from "@/src/game/item-system";\nimport { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";''', '''import { DEFAULT_BAG, PLAYER_BAG_KEY, type PlayerBagData } from "@/src/game/item-system";\nimport { addCurrencyCopper } from "@/src/game/currency-system";\nimport { setActiveGuest, type GuestVisitView } from "@/src/game/guest-system";\nimport { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";''', 'currency guest imports')
+
+          rep('''  old_farmer:    require("../assets/images/old_farmer.png"),''', '''  old_farmer:    require("../assets/images/old_farmer.png"),\n  coin_copper:   require("../assets/images/coin_copper.png"),''', 'coin asset')
+
+          rep('''const DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;''', '''const DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;\nconst OLD_FARMER_SELL_PRICE_COPPER = 8;''', 'sell price')
+
+          rep('''function rupertServingExplanation(playerName: string): TutorialLine[] {''', '''function serviceReaction(): TutorialLine[] {\n  return [\n    { speaker: "Old Farmer", portrait: "old_farmer", text: '\"That hit the spot. I\\'ll come back soon.\"' },\n    { speaker: "Rupert", portrait: "rupert_laugh", text: '\"Not bad for your first guest.\"' },\n  ];\n}\n\nfunction rupertServingExplanation(playerName: string): TutorialLine[] {''', 'reaction dialogue')
+
+          rep('''  const insets = useSafeAreaInsets();\n  const audioManager = useAudioManager();''', '''  const insets = useSafeAreaInsets();\n  const { width: W } = useWindowDimensions();\n  const audioManager = useAudioManager();''', 'window dimensions')
+
+          rep('''  const [tutorialLines, setTutorialLines] = useState<TutorialLine[]>([]);\n  const [tutorialLineIndex, setTutorialLineIndex] = useState(0);''', '''  const [tutorialLines, setTutorialLines] = useState<TutorialLine[]>([]);\n  const [tutorialLineIndex, setTutorialLineIndex] = useState(0);\n  const [serviceDialogLine, setServiceDialogLine] = useState<TutorialLine | null>(null);\n  const serviceDialogNextStep = useRef<GuestTutorialIntroStep | null>(null);\n  const [serviceBusy, setServiceBusy] = useState(false);\n  const [departingGuestId, setDepartingGuestId] = useState<"old_farmer" | null>(null);\n\n  const [transferImage, setTransferImage] = useState<ReturnType<typeof require> | null>(null);\n  const transferX = useRef(new RNAnimated.Value(0)).current;\n  const transferY = useRef(new RNAnimated.Value(0)).current;\n  const transferScale = useRef(new RNAnimated.Value(1)).current;\n  const transferOpacity = useRef(new RNAnimated.Value(0)).current;''', 'service states')
+
+          rep('''        } else if (loadedTutorialStep === "meal_reveal") {\n          setTutorialStep("meal_reveal");\n          setTutorialLines(rupertServingExplanation(resolvedName));\n          setTutorialLineIndex(0);\n        } else {\n          setTutorialStep(loadedTutorialStep);\n        }''', '''        } else if (loadedTutorialStep === "meal_reveal") {\n          setTutorialStep("meal_reveal");\n          setTutorialLines(rupertServingExplanation(resolvedName));\n          setTutorialLineIndex(0);\n        } else if (loadedTutorialStep === "service_reaction") {\n          setTutorialStep("service_reaction");\n          setTutorialLines(serviceReaction());\n          setTutorialLineIndex(0);\n        } else if (loadedTutorialStep === "service_departing") {\n          setTutorialStep("service_departing");\n          setDepartingGuestId("old_farmer");\n          setTimeout(async () => {\n            await setActiveGuest(null);\n            await saveGuestTutorialIntroStep("service_complete");\n            if (active) {\n              setTutorialStep("service_complete");\n              setDepartingGuestId(null);\n            }\n          }, 720);\n        } else {\n          setTutorialStep(loadedTutorialStep);\n        }''', 'load service restore')
+
+          rep('''  function showPlayerThought(text: string) {\n    if (thoughtTimer.current) clearTimeout(thoughtTimer.current);\n    setPlayerThought(text);\n    thoughtTimer.current = setTimeout(() => setPlayerThought(null), 2600);\n  }''', '''  function showPlayerThought(text: string) {\n    if (thoughtTimer.current) clearTimeout(thoughtTimer.current);\n    setPlayerThought(text);\n    thoughtTimer.current = setTimeout(() => setPlayerThought(null), 2600);\n  }\n\n  function runTransfer(\n    image: ReturnType<typeof require>,\n    fromX: number,\n    fromY: number,\n    toX: number,\n    toY: number,\n    onDone: () => void,\n  ) {\n    setTransferImage(image);\n    transferX.setValue(fromX);\n    transferY.setValue(fromY);\n    transferScale.setValue(1);\n    transferOpacity.setValue(1);\n    RNAnimated.parallel([\n      RNAnimated.timing(transferX, { toValue: toX, duration: 700, useNativeDriver: true }),\n      RNAnimated.timing(transferY, { toValue: toY, duration: 700, useNativeDriver: true }),\n      RNAnimated.timing(transferScale, { toValue: 0.35, duration: 700, useNativeDriver: true }),\n    ]).start(() => {\n      transferOpacity.setValue(0);\n      setTransferImage(null);\n      onDone();\n    });\n  }\n\n  function showServiceDialog(line: TutorialLine, nextStep: GuestTutorialIntroStep) {\n    serviceDialogNextStep.current = nextStep;\n    setServiceDialogLine(line);\n  }\n\n  async function closeServiceDialog() {\n    const next = serviceDialogNextStep.current;\n    serviceDialogNextStep.current = null;\n    setServiceDialogLine(null);\n    if (!next) return;\n    await saveGuestTutorialIntroStep(next);\n    setTutorialStep(next);\n  }''', 'service helpers')
+
+          rep('''    if (tutorialStep === "meal_reveal") {\n      await saveGuestTutorialIntroStep("ready_for_water");\n      setTutorialStep("ready_for_water");\n      setTutorialLines([]);\n      setTutorialLineIndex(0);\n    }\n  }''', '''    if (tutorialStep === "meal_reveal") {\n      await saveGuestTutorialIntroStep("ready_for_water");\n      setTutorialStep("ready_for_water");\n      setTutorialLines([]);\n      setTutorialLineIndex(0);\n      return;\n    }\n\n    if (tutorialStep === "service_reaction") {\n      await saveGuestTutorialIntroStep("service_departing");\n      setTutorialStep("service_departing");\n      setTutorialLines([]);\n      setTutorialLineIndex(0);\n      setDepartingGuestId("old_farmer");\n      setTimeout(async () => {\n        await setActiveGuest(null);\n        await saveGuestTutorialIntroStep("service_complete");\n        setTutorialStep("service_complete");\n        setDepartingGuestId(null);\n      }, 720);\n    }\n  }''', 'reaction completion')
+
+          rep('''  const currentTutorialLine = tutorialLines[tutorialLineIndex] ?? null;''', '''  const currentTutorialLine = serviceDialogLine ?? tutorialLines[tutorialLineIndex] ?? null;''', 'service dialog compose')
+
+          rep('''  const showDiningServiceUi =\n    !tutorialInDining ||\n    tutorialStep === "meal_reveal" ||\n    tutorialStep === "ready_for_water";\n  const showRupertInDining = tutorialStep === "meal_reveal" || tutorialStep === "ready_for_water";''', '''  const showDiningServiceUi = !tutorialInDining || guestTutorialHasReached(tutorialStep, "meal_reveal");\n  const showRupertInDining = tutorialStep === "meal_reveal" || guestTutorialKeepsRupertInDining(tutorialStep);''', 'service UI presence')
+
+          rep('''    setPlayerBag(plan.bag);\n    setMealState(plan.mealState);\n    audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });\n\n    try {''', '''    setPlayerBag(plan.bag);\n    setMealState(plan.mealState);\n    audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });\n\n    if (tutorialStep === "ready_for_water" && plan.mealState.slots[plan.targetSlotIndex]?.id === "herbsoup") {\n      await setActiveGuest("old_farmer");\n      await saveGuestTutorialIntroStep("service_sell");\n      setTutorialStep("service_sell");\n    }\n\n    try {''', 'auto active farmer')
+
+          rep('''  async function handleMealSlotTap(slotIndex: number) {''', '''  async function handleGuestService(guest: GuestVisitView, action: GuestServiceAction) {\n    if (serviceBusy || guest.profile.id !== "old_farmer") return;\n\n    if (tutorialStep === "service_sell" && action === "sell") {\n      const activeIndex = mealState.activeSlotIndex;\n      const activeMeal = activeIndex !== null ? mealState.slots[activeIndex] : null;\n      if (activeIndex === null || activeMeal?.id !== "herbsoup") {\n        showPlayerThought("I need to select the Herb Soup first.");\n        return;\n      }\n\n      setServiceBusy(true);\n      const nextSlots = [...mealState.slots];\n      nextSlots[activeIndex] = null;\n      const nextMealState: DiningMealState = { ...mealState, slots: nextSlots, activeSlotIndex: null };\n      setMealState(nextMealState);\n      await saveDiningMealState(nextMealState);\n      audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });\n\n      runTransfer(\n        IMG.herbsoup,\n        W * 0.5 - 18,\n        headerH + 165,\n        W * 0.42 - 18,\n        headerH + 330,\n        () => {\n          audioManager.playSoundEffect("bling", { maxDurationMs: 2000 });\n          runTransfer(\n            IMG.coin_copper,\n            W * 0.42 - 14,\n            headerH + 330,\n            W - 70,\n            insets.top + 68,\n            async () => {\n              await addCurrencyCopper(OLD_FARMER_SELL_PRICE_COPPER);\n              setServiceBusy(false);\n              showServiceDialog(\n                { speaker: "Old Farmer", portrait: "old_farmer", text: '\"Delicious. Here are 8 Copper.\"' },\n                "service_exchange",\n              );\n            },\n          );\n        },\n      );\n      return;\n    }\n\n    if (tutorialStep === "service_exchange" && action === "exchange") {\n      showServiceDialog(\n        { speaker: "Rupert", portrait: "rupert", text: '\"Some guests may offer an item instead of Copper. That is what Exchange is for.\"' },\n        "service_water",\n      );\n      return;\n    }\n\n    if (tutorialStep === "service_water" && action === "water") {\n      showServiceDialog(\n        { speaker: "Old Farmer", portrait: "old_farmer", text: '\"Water? No, thank you. I came here for something to eat.\"' },\n        "service_talk",\n      );\n      return;\n    }\n\n    if (tutorialStep === "service_talk" && action === "talk") {\n      await saveGuestTutorialIntroStep("service_reaction");\n      setTutorialStep("service_reaction");\n      setTutorialLines(serviceReaction());\n      setTutorialLineIndex(0);\n    }\n  }\n\n  async function handleMealSlotTap(slotIndex: number) {''', 'service handlers')
+
+          rep('''            <DiningGuestArea dayIndex={dayIdx} />''', '''            <DiningGuestArea\n              dayIndex={dayIdx}\n              forcedActiveGuestId={tutorialStep.startsWith("service_") && tutorialStep !== "service_complete" ? "old_farmer" : null}\n              enabledService={\n                serviceBusy ? null :\n                tutorialStep === "service_sell" ? "sell" :\n                tutorialStep === "service_exchange" ? "exchange" :\n                tutorialStep === "service_water" ? "water" :\n                tutorialStep === "service_talk" ? "talk" : null\n              }\n              sellPriceCopper={OLD_FARMER_SELL_PRICE_COPPER}\n              departingGuestId={departingGuestId}\n              hiddenGuestIds={tutorialStep === "service_complete" ? ["old_farmer"] : []}\n              onService={handleGuestService}\n            />''', 'guest service wiring')
+
+          rep('''          const guestDormitoryBlocked = tutorialStep === "ready_for_water" && loc.id === "dormitory";''', '''          const guestDormitoryBlocked = guestTutorialKeepsRupertInDining(tutorialStep) && loc.id === "dormitory";''', 'dormitory duration')
+
+          rep('''      <GuestTutorialDialog\n        visible={!!dialogLine}\n        line={dialogLine}\n        onContinue={advanceTutorialDialog}\n      />''', '''      <GuestTutorialDialog\n        visible={!!dialogLine}\n        line={dialogLine}\n        onContinue={serviceDialogLine ? closeServiceDialog : advanceTutorialDialog}\n      />\n\n      {transferImage && (\n        <RNAnimated.View\n          pointerEvents="none"\n          style={{\n            position: "absolute",\n            left: 0,\n            top: 0,\n            width: 36,\n            height: 36,\n            zIndex: 1200,\n            opacity: transferOpacity,\n            transform: [\n              { translateX: transferX },\n              { translateY: transferY },\n              { scale: transferScale },\n            ],\n          }}\n        >\n          <Image source={transferImage} style={{ width: 36, height: 36 }} resizeMode="contain" />\n        </RNAnimated.View>\n      )}''', 'transfer overlay')
+
+          p.write_text(s)
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/app/dining.tsx
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Add Dining guest service tutorial"
+          git push origin HEAD:feat/guest-tutorial-service
