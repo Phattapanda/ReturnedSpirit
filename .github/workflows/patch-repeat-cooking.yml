@@ -1,0 +1,123 @@
+name: Patch repeat cooking safely
+
+on:
+  push:
+    branches:
+      - feat/guest-tutorial-intro
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/guest-tutorial-intro
+          fetch-depth: 0
+
+      - name: Apply exact Kitchen patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('frontend/app/kitchen.tsx')
+          text = path.read_text()
+
+          def replace_once(old: str, new: str, label: str):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 match, found {count}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              '  const craftingLocked = useRef(false);\n',
+              '  const craftingLocked = useRef(false);\n  const cookingTutorialCompletedRef = useRef(false);\n',
+              'cooking completion ref',
+          )
+
+          replace_once(
+              '      const cookingDone = await AsyncStorage.getItem(SK.COOKING_DONE);\n      if (cookingDone !== "true") return;\n',
+              '      const cookingDone = await AsyncStorage.getItem(SK.COOKING_DONE);\n      cookingTutorialCompletedRef.current = cookingDone === "true";\n      if (cookingDone !== "true") return;\n',
+              'guest intro cooking completion sync',
+          )
+
+          replace_once(
+              '              const initCookingDone   = await AsyncStorage.getItem(SK.COOKING_DONE);\n              let initReadyToCook = initCraftingReady === "true" && initCookingDone !== "true";\n',
+              '              const initCookingDone   = await AsyncStorage.getItem(SK.COOKING_DONE);\n              cookingTutorialCompletedRef.current = initCookingDone === "true";\n              let initReadyToCook = initCraftingReady === "true" && initCookingDone !== "true";\n',
+              'initial cooking completion sync',
+          )
+
+          replace_once(
+              '            const cookingAlreadyDone = await AsyncStorage.getItem(SK.COOKING_DONE);\n            // Fallback: auto-detect readiness directly from inventory\n',
+              '            const cookingAlreadyDone = await AsyncStorage.getItem(SK.COOKING_DONE);\n            cookingTutorialCompletedRef.current = cookingAlreadyDone === "true";\n            // Fallback: auto-detect readiness directly from inventory\n',
+              'focus cooking completion sync',
+          )
+
+          replace_once(
+              '''  function isKitchenItemInteractionState(state: TState) {\n    return state === "IDLE" ||\n      state === "COOKING_UNPACK_WAIT" ||\n      state === "COOKING_CRAFT_READY" ||\n      state === "COOKING_SHARE_EAT" ||\n      state === "COOKING_DONE";\n  }\n''',
+              '''  function isKitchenItemInteractionState(state: TState) {\n    return state === "IDLE" ||\n      state === "COOKING_UNPACK_WAIT" ||\n      state === "COOKING_CRAFT_READY" ||\n      state === "COOKING_SHARE_EAT" ||\n      state === "COOKING_DONE";\n  }\n\n  function canUseRecipeSlots(state: TState) {\n    return state === "COOKING_CRAFT_READY" ||\n      (cookingTutorialCompletedRef.current && (state === "IDLE" || state === "COOKING_DONE"));\n  }\n''',
+              'recipe-slot helper',
+          )
+
+          replace_once(
+              '''    // Ingredient and Tool targets are only fully open while the recipe tutorial is active.\n    if (cur === "COOKING_CRAFT_READY") {\n      for (let i = 0; i < 3; i++) {\n''',
+              '''    // Ingredient slots stay available for normal cooking after the tutorial.\n    if (canUseRecipeSlots(cur)) {\n      for (let i = 0; i < 3; i++) {\n''',
+              'hover recipe slots',
+          )
+
+          replace_once(
+              '''    if (tsRef.current === "COOKING_CRAFT_READY") {\n      setTimeout(updateCraftResultPreview, 50);\n    }\n''',
+              '''    if (canUseRecipeSlots(tsRef.current)) {\n      setTimeout(updateCraftResultPreview, 50);\n    }\n''',
+              'bag return recipe preview',
+          )
+
+          replace_once(
+              '''    // Only the active recipe phase opens Ingredient slots as destinations.\n    if (cur === "COOKING_CRAFT_READY") {\n      for (let i = 0; i < 3; i++) {\n''',
+              '''    // Ingredient slots remain valid destinations after the tutorial for normal cooking.\n    if (canUseRecipeSlots(cur)) {\n      for (let i = 0; i < 3; i++) {\n''',
+              'drop recipe slots',
+          )
+
+          replace_once(
+              '    if (cur === "COOKING_CRAFT_READY") setTimeout(updateCraftResultPreview, 50);\n',
+              '    if (canUseRecipeSlots(cur)) setTimeout(updateCraftResultPreview, 50);\n',
+              'drop recipe preview',
+          )
+
+          replace_once(
+              '''  function handleCraft() {\n    if (craftingLocked.current) return;\n    if (!craftResult) return;\n    craftingLocked.current = true;\n''',
+              '''  function handleCraft() {\n    if (craftingLocked.current) return;\n    if (!craftResult) return;\n    craftingLocked.current = true;\n    const tutorialCraft = !cookingTutorialCompletedRef.current;\n''',
+              'repeat craft mode',
+          )
+
+          replace_once(
+              '''    AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(newTable)).catch(() => {});\n    AsyncStorage.setItem(SK.CRAFT_INGREDIENTS, JSON.stringify(newIng)).catch(() => {});\n    AsyncStorage.setItem(SK.CRAFT_TOOL_SLOT, JSON.stringify(craftTool)).catch(() => {});\n    AsyncStorage.setItem(SK.COOKING_STEP, "3").catch(() => {});\n\n    setTutState("COOKING_CRAFT_DONE");\n''',
+              '''    AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(newTable)).catch(() => {});\n    AsyncStorage.setItem(SK.CRAFT_INGREDIENTS, JSON.stringify(newIng)).catch(() => {});\n    AsyncStorage.setItem(SK.CRAFT_TOOL_SLOT, JSON.stringify(craftTool)).catch(() => {});\n\n    if (!tutorialCraft) {\n      setTutState("IDLE");\n      tsRef.current = "IDLE";\n      setTimeout(() => { craftingLocked.current = false; }, 350);\n      return;\n    }\n\n    AsyncStorage.setItem(SK.COOKING_STEP, "3").catch(() => {});\n    setTutState("COOKING_CRAFT_DONE");\n''',
+              'repeat craft exit',
+          )
+
+          replace_once(
+              '''  function finishCookingTutorial() {\n    setSoupSlot(null); soupSlotRef.current = null;\n    setTutState("COOKING_DONE");\n    tsRef.current = "COOKING_DONE";\n    AsyncStorage.setItem(SK.COOKING_DONE, "true").catch(() => {});\n''',
+              '''  function finishCookingTutorial() {\n    setSoupSlot(null); soupSlotRef.current = null;\n    setTutState("COOKING_DONE");\n    tsRef.current = "COOKING_DONE";\n    cookingTutorialCompletedRef.current = true;\n    AsyncStorage.setItem(SK.COOKING_DONE, "true").catch(() => {});\n''',
+              'finish cooking completion ref',
+          )
+
+          path.write_text(text)
+          PY
+
+      - name: Commit exact patch
+        shell: bash
+        run: |
+          if git diff --quiet -- frontend/app/kitchen.tsx; then
+            echo "No patch required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/app/kitchen.tsx
+          git commit -m "Enable normal cooking after tutorial"
+          git push origin HEAD:feat/guest-tutorial-intro
