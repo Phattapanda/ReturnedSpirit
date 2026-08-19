@@ -15,6 +15,24 @@
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CURRENCY_KEY, DEFAULT_CURRENCY_COPPER } from "@/src/game/currency-system";
+import {
+  DEFAULT_DINING_MEAL_STATE,
+  DINING_MEAL_STATE_KEY,
+} from "@/src/game/dining-meal-system";
+import {
+  advanceGuestCalendar,
+  DEFAULT_GUEST_STATE,
+  GUEST_STATE_KEY,
+} from "@/src/game/guest-system";
+import {
+  DEFAULT_GUEST_TUTORIAL_INTRO_STEP,
+  GUEST_TUTORIAL_INTRO_KEY,
+} from "@/src/game/guest-tutorial";
+import { advanceSecondGardenPlotDay } from "@/src/game/garden-crop-system";
+import {
+  DEFAULT_POST_GUEST_TUTORIAL_STATE,
+  POST_GUEST_TUTORIAL_STATE_KEY,
+} from "@/src/game/post-guest-tutorial";
 
 /** All gameplay keys that form a complete save snapshot (NO meta keys like active_slot / game_slots). */
 export const ALL_SNAPSHOT_KEYS: string[] = [
@@ -33,6 +51,10 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   "@game:bag_inspected",
   "@game:logbook",
   CURRENCY_KEY,
+  GUEST_STATE_KEY,
+  DINING_MEAL_STATE_KEY,
+  GUEST_TUTORIAL_INTRO_KEY,
+  POST_GUEST_TUTORIAL_STATE_KEY,
   // Kitchen tutorial flags
   "@tutorial:kitchen_done",
   "@kitchen:has_seen_post_garden_dialog",
@@ -54,6 +76,7 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   "@garden:tutorial_complete",
   "@garden:tutorial_state",
   "@garden:plot_01_data",
+  "@garden:plot_02_data",
   "@garden:inventory",
   "@garden:selected_fertilizer",
   "@garden:inventory_bag_unlocked",
@@ -99,10 +122,24 @@ export async function createSnapshot(
     }
   }
   try {
-    // New games always start with a clean zero balance, even if another slot left
-    // currency in the shared runtime AsyncStorage namespace.
     if (trigger === "new_game") {
-      await AsyncStorage.setItem(CURRENCY_KEY, String(DEFAULT_CURRENCY_COPPER));
+      await AsyncStorage.multiSet([
+        [CURRENCY_KEY, String(DEFAULT_CURRENCY_COPPER)],
+        [GUEST_STATE_KEY, JSON.stringify(DEFAULT_GUEST_STATE)],
+        [DINING_MEAL_STATE_KEY, JSON.stringify(DEFAULT_DINING_MEAL_STATE)],
+        [GUEST_TUTORIAL_INTRO_KEY, DEFAULT_GUEST_TUTORIAL_INTRO_STEP],
+        [POST_GUEST_TUTORIAL_STATE_KEY, JSON.stringify(DEFAULT_POST_GUEST_TUTORIAL_STATE)],
+      ]);
+    }
+
+    // The core day index is already advanced by Dormitory before this checkpoint.
+    // Guest visits and the optional second Garden plot are advanced here so both
+    // states are included in the same day-transition snapshot.
+    if (trigger === "day_transition") {
+      const rawDay = await AsyncStorage.getItem("@game:day_index");
+      const newDay = rawDay !== null ? parseInt(rawDay, 10) : 0;
+      await advanceGuestCalendar(newDay);
+      await advanceSecondGardenPlotDay();
     }
 
     const pairs = await AsyncStorage.multiGet(ALL_SNAPSHOT_KEYS);
@@ -149,19 +186,13 @@ export async function restoreFromSnapshot(slotNum: number): Promise<void> {
   }
 }
 
-/**
- * Discard unsaved runtime state by restoring the last snapshot.
- * Called when the player navigates to Main Menu without saving.
- */
+/** Discard unsaved runtime state by restoring the last snapshot. */
 export async function discardRuntimeAndRestore(slotNum: number): Promise<void> {
   if (__DEV__) console.log("[SAVE] DISCARD UNSAVED RUNTIME STATE — slot", slotNum);
   await restoreFromSnapshot(slotNum);
 }
 
-/**
- * Remove the snapshot for a slot (used when deleting a save slot).
- * Does NOT clear individual runtime keys (those will be reset on next new-game).
- */
+/** Remove the snapshot for a slot (used when deleting a save slot). */
 export async function clearSlotSnapshot(slotNum: number): Promise<void> {
   try {
     await AsyncStorage.removeItem(snapshotKey(slotNum));
