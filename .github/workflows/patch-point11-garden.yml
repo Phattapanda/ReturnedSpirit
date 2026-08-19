@@ -1,0 +1,56 @@
+name: Apply post tutorial Garden behavior
+
+on:
+  push:
+    branches:
+      - feat/post-guest-tutorial-upgrades
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/post-guest-tutorial-upgrades
+      - name: Patch Garden
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('frontend/app/garden.tsx')
+          s=p.read_text()
+          def rep(old,new,label):
+            global s
+            c=s.count(old)
+            if c!=1: raise SystemExit(f'{label}: {c}')
+            s=s.replace(old,new,1)
+
+          rep('import { guestTutorialKeepsRupertInDining, loadGuestTutorialIntroStep } from "@/src/game/guest-tutorial";', '''import {\n  guestTutorialKeepsRupertInDining,\n  guestTutorialRupertHasLeftGarden,\n  loadGuestTutorialIntroStep,\n} from "@/src/game/guest-tutorial";\nimport { loadPostGuestTutorialState } from "@/src/game/post-guest-tutorial";''', 'imports')
+
+          rep('''const TUTORIAL_PLOT_INITIAL: GardenPlotData = {''', '''const SECOND_PLOT_EMPTY: GardenPlotData = {\n  id: "garden_plot_02",\n  plotType: "small",\n  upgradeLevel: 1,\n  status: "empty",\n  cropType: null,\n  cropAsset: null,\n  seedItemId: null,\n  totalGrowthDays: 0,\n  completedGrowthDays: 0,\n  remainingGrowthDays: 0,\n  progressPercent: 0,\n  wateredToday: false,\n  weedsPulledToday: false,\n  fertilizedToday: false,\n  fertilizerTypeUsedToday: null,\n  consecutiveUnwateredDays: 0,\n  baseYield: 0,\n  accumulatedWeedYieldBonus: 0,\n  accumulatedFertilizerYieldBonus: 0,\n  readyToHarvest: false,\n  withered: false,\n};\n\nconst TUTORIAL_PLOT_INITIAL: GardenPlotData = {''', 'second plot default')
+
+          rep('''  const [rupertPortrait, setRupertPortrait] = useState<"normal" | "sad" | "laugh">("normal");\n  const [rupertInDining, setRupertInDining] = useState(false);''', '''  const [rupertPortrait, setRupertPortrait] = useState<"normal" | "sad" | "laugh">("normal");\n  // Guest-service restrictions end at service_complete, but Rupert never returns\n  // to the Garden portrait slot after leaving to greet the first guest.\n  const [rupertInDining, setRupertInDining] = useState(false);\n  const [rupertAwayFromGarden, setRupertAwayFromGarden] = useState(true);\n  const [secondPlotUnlocked, setSecondPlotUnlocked] = useState(false);''', 'garden rupert state')
+
+          rep('''        const guestTutorialStep = await loadGuestTutorialIntroStep();\n        setRupertInDining(guestTutorialKeepsRupertInDining(guestTutorialStep));''', '''        const guestTutorialStep = await loadGuestTutorialIntroStep();\n        setRupertInDining(guestTutorialKeepsRupertInDining(guestTutorialStep));\n        setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(guestTutorialStep));\n        const postGuestState = await loadPostGuestTutorialState();\n        setSecondPlotUnlocked(postGuestState.secondPlotUnlocked);''', 'mount post guest state')
+
+          rep('''          const hasWater = await AsyncStorage.getItem(GSK.HAS_WATER);\n\n          if (activityBar === "true") {''', '''          const hasWater = await AsyncStorage.getItem(GSK.HAS_WATER);\n          const cookingDone = await AsyncStorage.getItem("@kitchen:cooking_tutorial_done");\n\n          // Once the Cooking Tutorial is finished, every old Tuesday Garden gate is over.\n          // Keep unlocked UI, but restore the room as ordinary free-play instead of\n          // demanding another Bucket of Water on every later visit.\n          if (cookingDone === "true") {\n            setActivityBarVisible(activityBar === "true");\n            if (bagUnlocked === "true") {\n              setPlayerBag(prev => ({ ...prev, unlocked: true }));\n            }\n            setGardenState("IDLE");\n          } else if (activityBar === "true") {''', 'end old garden gate after cooking')
+
+          rep('''            ref={rupertPortraitRef}\n            style={[styles.circleWrap, rupertInDining && styles.rupertAway]}\n            pointerEvents="none"\n          >\n            {!rupertInDining && (''', '''            ref={rupertPortraitRef}\n            style={[styles.circleWrap, rupertAwayFromGarden && styles.rupertAway]}\n            pointerEvents="none"\n          >\n            {!rupertAwayFromGarden && (''', 'permanent garden rupert departure')
+
+          rep('''        </Animated.View>\n\n        {/* Post-tutorial hint */}''', '''        </Animated.View>\n\n        {secondPlotUnlocked && (\n          <View style={styles.secondPlotWrap}>\n            <Text style={styles.secondPlotLabel}>2nd Plot</Text>\n            <GardenPlot\n              data={SECOND_PLOT_EMPTY}\n              interactive={false}\n              onWater={() => {}}\n              onPullWeeds={() => {}}\n              onFertilize={() => {}}\n              onHarvest={() => {}}\n              onCropTap={() => {}}\n              actionCosts={{ water: waterCost, pullWeeds: pullWeedsCost, fertilize: fertilizeCost }}\n            />\n          </View>\n        )}\n\n        {/* Post-tutorial hint */}''', 'render second plot')
+
+          rep('''  idleHint: {\n    color: "rgba(196,148,58,0.45)",''', '''  secondPlotWrap: {\n    marginHorizontal: 16,\n    marginTop: 12,\n  },\n  secondPlotLabel: {\n    color: "#C4943A",\n    fontSize: 13,\n    fontFamily: "Oldenburg",\n    letterSpacing: 0.8,\n    marginBottom: 6,\n  },\n\n  idleHint: {\n    color: "rgba(196,148,58,0.45)",''', 'second plot styles')
+
+          p.write_text(s)
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/app/garden.tsx
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Free Garden after cooking and reserve Rupert slot"
+          git push origin HEAD:feat/post-guest-tutorial-upgrades
