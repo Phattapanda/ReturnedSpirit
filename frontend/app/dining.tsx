@@ -5,8 +5,10 @@ import {
   TouchableOpacity,
   Modal,
   ScrollView,
+  Animated as RNAnimated,
   Image,
   StyleSheet,
+  useWindowDimensions,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -16,7 +18,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import SceneBackground from "@/src/components/SceneBackground";
 import CurrencyHud from "@/src/components/CurrencyHud";
-import DiningGuestArea from "@/src/components/GuestCard";
+import DiningGuestArea, { type GuestServiceAction } from "@/src/components/GuestCard";
 import GuestTutorialDialog, { type GuestTutorialDialogLine } from "@/src/components/GuestTutorialDialog";
 import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import StatusModal from "@/src/components/StatusModal";
@@ -31,12 +33,15 @@ import {
 } from "@/src/game/dining-meal-system";
 import {
   guestTutorialHasReached,
+  guestTutorialKeepsRupertInDining,
   loadGuestTutorialIntroStep,
   saveGuestTutorialIntroStep,
   type GuestTutorialIntroStep,
 } from "@/src/game/guest-tutorial";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, type PlayerStats } from "@/src/game/player-stats";
 import { DEFAULT_BAG, PLAYER_BAG_KEY, type PlayerBagData } from "@/src/game/item-system";
+import { addCurrencyCopper } from "@/src/game/currency-system";
+import { setActiveGuest, type GuestVisitView } from "@/src/game/guest-system";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
 import {
   PLAYER_AVATAR_KEY,
@@ -64,6 +69,7 @@ const IMG = {
   rupertsad:     require("../assets/images/rupertsad.png"),
   rupertlaugh:   require("../assets/images/rupertlaugh.png"),
   old_farmer:    require("../assets/images/old_farmer.png"),
+  coin_copper:   require("../assets/images/coin_copper.png"),
   loc_kitchen:   require("../assets/images/gotokitchen.png"),
   loc_garden:    require("../assets/images/gotogarden.png"),
   loc_dining:    require("../assets/images/gotodining.png"),
@@ -77,6 +83,7 @@ const MEAL_IMAGES: Record<string, ReturnType<typeof require>> = {
 };
 
 const DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
+const OLD_FARMER_SELL_PRICE_COPPER = 8;
 
 const LOCS = [
   { id: "kitchen",   nav: true  },
@@ -110,6 +117,13 @@ function farmerIntroduction(playerName: string): TutorialLine[] {
   ];
 }
 
+function serviceReaction(): TutorialLine[] {
+  return [
+    { speaker: "Old Farmer", portrait: "old_farmer", text: '"That hit the spot. I\'ll come back soon."' },
+    { speaker: "Rupert", portrait: "rupert_laugh", text: '"Not bad for your first guest."' },
+  ];
+}
+
 function rupertServingExplanation(playerName: string): TutorialLine[] {
   return [
     { speaker: "Rupert", portrait: "rupert", text: '"We already ate all of the soup."' },
@@ -128,6 +142,7 @@ export default function DiningScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ loadedFromSave?: string }>();
   const insets = useSafeAreaInsets();
+  const { width: W } = useWindowDimensions();
   const audioManager = useAudioManager();
 
   const [staminaCurrent, setStaminaCurrent] = useState(40);
@@ -146,6 +161,16 @@ export default function DiningScreen() {
   const [tutorialStep, setTutorialStep] = useState<GuestTutorialIntroStep>("not_started");
   const [tutorialLines, setTutorialLines] = useState<TutorialLine[]>([]);
   const [tutorialLineIndex, setTutorialLineIndex] = useState(0);
+  const [serviceDialogLine, setServiceDialogLine] = useState<TutorialLine | null>(null);
+  const serviceDialogNextStep = useRef<GuestTutorialIntroStep | null>(null);
+  const [serviceBusy, setServiceBusy] = useState(false);
+  const [departingGuestId, setDepartingGuestId] = useState<"old_farmer" | null>(null);
+
+  const [transferImage, setTransferImage] = useState<ReturnType<typeof require> | null>(null);
+  const transferX = useRef(new RNAnimated.Value(0)).current;
+  const transferY = useRef(new RNAnimated.Value(0)).current;
+  const transferScale = useRef(new RNAnimated.Value(1)).current;
+  const transferOpacity = useRef(new RNAnimated.Value(0)).current;
 
   const [statusOpen, setStatusOpen] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -196,6 +221,21 @@ export default function DiningScreen() {
           setTutorialStep("meal_reveal");
           setTutorialLines(rupertServingExplanation(resolvedName));
           setTutorialLineIndex(0);
+        } else if (loadedTutorialStep === "service_reaction") {
+          setTutorialStep("service_reaction");
+          setTutorialLines(serviceReaction());
+          setTutorialLineIndex(0);
+        } else if (loadedTutorialStep === "service_departing") {
+          setTutorialStep("service_departing");
+          setDepartingGuestId("old_farmer");
+          setTimeout(async () => {
+            await setActiveGuest(null);
+            await saveGuestTutorialIntroStep("service_complete");
+            if (active) {
+              setTutorialStep("service_complete");
+              setDepartingGuestId(null);
+            }
+          }, 720);
         } else {
           setTutorialStep(loadedTutorialStep);
         }
@@ -220,6 +260,44 @@ export default function DiningScreen() {
     thoughtTimer.current = setTimeout(() => setPlayerThought(null), 2600);
   }
 
+  function runTransfer(
+    image: ReturnType<typeof require>,
+    fromX: number,
+    fromY: number,
+    toX: number,
+    toY: number,
+    onDone: () => void,
+  ) {
+    setTransferImage(image);
+    transferX.setValue(fromX);
+    transferY.setValue(fromY);
+    transferScale.setValue(1);
+    transferOpacity.setValue(1);
+    RNAnimated.parallel([
+      RNAnimated.timing(transferX, { toValue: toX, duration: 700, useNativeDriver: true }),
+      RNAnimated.timing(transferY, { toValue: toY, duration: 700, useNativeDriver: true }),
+      RNAnimated.timing(transferScale, { toValue: 0.35, duration: 700, useNativeDriver: true }),
+    ]).start(() => {
+      transferOpacity.setValue(0);
+      setTransferImage(null);
+      onDone();
+    });
+  }
+
+  function showServiceDialog(line: TutorialLine, nextStep: GuestTutorialIntroStep) {
+    serviceDialogNextStep.current = nextStep;
+    setServiceDialogLine(line);
+  }
+
+  async function closeServiceDialog() {
+    const next = serviceDialogNextStep.current;
+    serviceDialogNextStep.current = null;
+    setServiceDialogLine(null);
+    if (!next) return;
+    await saveGuestTutorialIntroStep(next);
+    setTutorialStep(next);
+  }
+
   async function advanceTutorialDialog() {
     if (tutorialLineIndex < tutorialLines.length - 1) {
       setTutorialLineIndex((current) => current + 1);
@@ -239,6 +317,21 @@ export default function DiningScreen() {
       setTutorialStep("ready_for_water");
       setTutorialLines([]);
       setTutorialLineIndex(0);
+      return;
+    }
+
+    if (tutorialStep === "service_reaction") {
+      await saveGuestTutorialIntroStep("service_departing");
+      setTutorialStep("service_departing");
+      setTutorialLines([]);
+      setTutorialLineIndex(0);
+      setDepartingGuestId("old_farmer");
+      setTimeout(async () => {
+        await setActiveGuest(null);
+        await saveGuestTutorialIntroStep("service_complete");
+        setTutorialStep("service_complete");
+        setDepartingGuestId(null);
+      }, 720);
     }
   }
 
@@ -250,7 +343,7 @@ export default function DiningScreen() {
     return IMG.rupert;
   }
 
-  const currentTutorialLine = tutorialLines[tutorialLineIndex] ?? null;
+  const currentTutorialLine = serviceDialogLine ?? tutorialLines[tutorialLineIndex] ?? null;
   const dialogLine: GuestTutorialDialogLine | null = currentTutorialLine ? {
     speaker: currentTutorialLine.speaker,
     text: currentTutorialLine.text,
@@ -259,11 +352,8 @@ export default function DiningScreen() {
   } : null;
 
   const tutorialInDining = guestTutorialHasReached(tutorialStep, "dining_intro");
-  const showDiningServiceUi =
-    !tutorialInDining ||
-    tutorialStep === "meal_reveal" ||
-    tutorialStep === "ready_for_water";
-  const showRupertInDining = tutorialStep === "meal_reveal" || tutorialStep === "ready_for_water";
+  const showDiningServiceUi = !tutorialInDining || guestTutorialHasReached(tutorialStep, "meal_reveal");
+  const showRupertInDining = tutorialStep === "meal_reveal" || guestTutorialKeepsRupertInDining(tutorialStep);
   const useDawnBackground = tutorialInDining || timeOfDay === "morning";
 
   async function handleBagToMealSlot(bagSlotIndex: number) {
@@ -284,6 +374,12 @@ export default function DiningScreen() {
     setMealState(plan.mealState);
     audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
 
+    if (tutorialStep === "ready_for_water" && plan.mealState.slots[plan.targetSlotIndex]?.id === "herbsoup") {
+      await setActiveGuest("old_farmer");
+      await saveGuestTutorialIntroStep("service_sell");
+      setTutorialStep("service_sell");
+    }
+
     try {
       await Promise.all([
         AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(plan.bag)),
@@ -291,6 +387,77 @@ export default function DiningScreen() {
       ]);
     } catch (e) {
       if (__DEV__) console.error("[Dining] meal transfer save failed:", e);
+    }
+  }
+
+  async function handleGuestService(guest: GuestVisitView, action: GuestServiceAction) {
+    if (serviceBusy || guest.profile.id !== "old_farmer") return;
+
+    if (tutorialStep === "service_sell" && action === "sell") {
+      const activeIndex = mealState.activeSlotIndex;
+      const activeMeal = activeIndex !== null ? mealState.slots[activeIndex] : null;
+      if (activeIndex === null || activeMeal?.id !== "herbsoup") {
+        showPlayerThought("I need to select the Herb Soup first.");
+        return;
+      }
+
+      setServiceBusy(true);
+      const nextSlots = [...mealState.slots];
+      nextSlots[activeIndex] = null;
+      const nextMealState: DiningMealState = { ...mealState, slots: nextSlots, activeSlotIndex: null };
+      setMealState(nextMealState);
+      await saveDiningMealState(nextMealState);
+      audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
+
+      runTransfer(
+        IMG.herbsoup,
+        W * 0.5 - 18,
+        headerH + 165,
+        W * 0.42 - 18,
+        headerH + 330,
+        () => {
+          audioManager.playSoundEffect("bling", { maxDurationMs: 2000 });
+          runTransfer(
+            IMG.coin_copper,
+            W * 0.42 - 14,
+            headerH + 330,
+            W - 70,
+            insets.top + 68,
+            async () => {
+              await addCurrencyCopper(OLD_FARMER_SELL_PRICE_COPPER);
+              setServiceBusy(false);
+              showServiceDialog(
+                { speaker: "Old Farmer", portrait: "old_farmer", text: '"Delicious. Here are 8 Copper."' },
+                "service_exchange",
+              );
+            },
+          );
+        },
+      );
+      return;
+    }
+
+    if (tutorialStep === "service_exchange" && action === "exchange") {
+      showServiceDialog(
+        { speaker: "Rupert", portrait: "rupert", text: '"Some guests may offer an item instead of Copper. That is what Exchange is for."' },
+        "service_water",
+      );
+      return;
+    }
+
+    if (tutorialStep === "service_water" && action === "water") {
+      showServiceDialog(
+        { speaker: "Old Farmer", portrait: "old_farmer", text: '"Water? No, thank you. I came here for something to eat."' },
+        "service_talk",
+      );
+      return;
+    }
+
+    if (tutorialStep === "service_talk" && action === "talk") {
+      await saveGuestTutorialIntroStep("service_reaction");
+      setTutorialStep("service_reaction");
+      setTutorialLines(serviceReaction());
+      setTutorialLineIndex(0);
     }
   }
 
@@ -470,7 +637,21 @@ export default function DiningScreen() {
               })}
             </View>
 
-            <DiningGuestArea dayIndex={dayIdx} />
+            <DiningGuestArea
+              dayIndex={dayIdx}
+              forcedActiveGuestId={tutorialStep.startsWith("service_") && tutorialStep !== "service_complete" ? "old_farmer" : null}
+              enabledService={
+                serviceBusy ? null :
+                tutorialStep === "service_sell" ? "sell" :
+                tutorialStep === "service_exchange" ? "exchange" :
+                tutorialStep === "service_water" ? "water" :
+                tutorialStep === "service_talk" ? "talk" : null
+              }
+              sellPriceCopper={OLD_FARMER_SELL_PRICE_COPPER}
+              departingGuestId={departingGuestId}
+              hiddenGuestIds={tutorialStep === "service_complete" ? ["old_farmer"] : []}
+              onService={handleGuestService}
+            />
           </>
         )}
       </ScrollView>
@@ -478,7 +659,7 @@ export default function DiningScreen() {
       <View style={[styles.locationBar, { paddingBottom: insets.bottom + 4 }]}>
         {LOCS.map((loc) => {
           const isCurrent = loc.id === "dining";
-          const guestDormitoryBlocked = tutorialStep === "ready_for_water" && loc.id === "dormitory";
+          const guestDormitoryBlocked = guestTutorialKeepsRupertInDining(tutorialStep) && loc.id === "dormitory";
           const locImg = IMG[`loc_${loc.id}` as keyof typeof IMG] as number | undefined;
           const active = loc.nav || isCurrent || guestDormitoryBlocked;
 
@@ -519,8 +700,30 @@ export default function DiningScreen() {
       <GuestTutorialDialog
         visible={!!dialogLine}
         line={dialogLine}
-        onContinue={advanceTutorialDialog}
+        onContinue={serviceDialogLine ? closeServiceDialog : advanceTutorialDialog}
       />
+
+      {transferImage && (
+        <RNAnimated.View
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: 36,
+            height: 36,
+            zIndex: 1200,
+            opacity: transferOpacity,
+            transform: [
+              { translateX: transferX },
+              { translateY: transferY },
+              { scale: transferScale },
+            ],
+          }}
+        >
+          <Image source={transferImage} style={{ width: 36, height: 36 }} resizeMode="contain" />
+        </RNAnimated.View>
+      )}
 
       <Modal visible={showMenu} transparent animationType="fade">
         <View style={styles.modalOverlay}>
