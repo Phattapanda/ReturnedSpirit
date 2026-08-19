@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   Image,
   StyleSheet,
   Text,
@@ -17,9 +18,15 @@ import {
   type GuestVisitView,
 } from "@/src/game/guest-system";
 
+export type GuestServiceAction = "sell" | "exchange" | "water" | "talk";
+
 type GuestCardProps = {
   guest: GuestVisitView;
   onSelect: (guestId: GuestId) => void;
+  onService?: (guest: GuestVisitView, action: GuestServiceAction) => void;
+  enabledService?: GuestServiceAction | null;
+  sellPriceCopper?: number | null;
+  departing?: boolean;
 };
 
 const COIN_COPPER = require("../../assets/images/coin_copper.png");
@@ -45,81 +52,136 @@ const GUEST_PORTRAITS: Record<string, ReturnType<typeof require>> = {
  * guest-detail view can expose it from the portrait. Dialog presentation is kept
  * separate so future half-body dialog art does not constrain this card layout.
  */
-export function GuestCard({ guest, onSelect }: GuestCardProps) {
+export function GuestCard({
+  guest,
+  onSelect,
+  onService,
+  enabledService = null,
+  sellPriceCopper = null,
+  departing = false,
+}: GuestCardProps) {
   const { profile, selected } = guest;
   const portrait = GUEST_PORTRAITS[profile.portraitKey];
   const canTrade = profile.tradePool.length > 0;
+  const departureOpacity = useRef(new Animated.Value(1)).current;
+  const departureX = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!departing) return;
+    Animated.parallel([
+      Animated.timing(departureOpacity, { toValue: 0, duration: 700, useNativeDriver: true }),
+      Animated.timing(departureX, { toValue: 32, duration: 700, useNativeDriver: true }),
+    ]).start();
+  }, [departing, departureOpacity, departureX]);
+
+  const serviceEnabled = (action: GuestServiceAction) => !!onService && enabledService === action;
 
   return (
-    <TouchableOpacity
-      style={[styles.card, selected && styles.cardSelected]}
-      onPress={() => onSelect(profile.id)}
-      activeOpacity={0.88}
-    >
-      <View style={styles.guestTopRow}>
-        <View style={styles.portraitWrap}>
-          {portrait ? (
-            <Image source={portrait} style={styles.portraitImage} resizeMode="cover" resizeMethod="resize" />
-          ) : (
-            <Ionicons name="person-outline" size={40} color="rgba(196,148,58,0.76)" />
-          )}
-        </View>
+    <Animated.View style={{ opacity: departureOpacity, transform: [{ translateX: departureX }] }}>
+      <TouchableOpacity
+        style={[styles.card, selected && styles.cardSelected]}
+        onPress={() => onSelect(profile.id)}
+        activeOpacity={0.88}
+      >
+        <View style={styles.guestTopRow}>
+          <View style={styles.portraitWrap}>
+            {portrait ? (
+              <Image source={portrait} style={styles.portraitImage} resizeMode="cover" resizeMethod="resize" />
+            ) : (
+              <Ionicons name="person-outline" size={40} color="rgba(196,148,58,0.76)" />
+            )}
+          </View>
 
-        <View style={styles.guestTextArea}>
-          <Text style={styles.name}>{profile.name}</Text>
-          <Text style={styles.requestText}>“I could use something to eat.”</Text>
-        </View>
-      </View>
-
-      <View style={styles.divider} />
-
-      <View style={styles.serviceRow}>
-        <View style={styles.serviceButton} pointerEvents="none">
-          <Image source={SERVICE_SELL} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
-          <Text style={styles.serviceLabel}>Sell for</Text>
-          <View style={styles.serviceValueRow}>
-            <Text style={styles.serviceValueText}>X</Text>
-            <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" resizeMethod="resize" />
+          <View style={styles.guestTextArea}>
+            <Text style={styles.name}>{profile.name}</Text>
+            <Text style={styles.requestText}>“I could use something to eat.”</Text>
           </View>
         </View>
 
-        {canTrade && (
-          <View style={styles.serviceButton} pointerEvents="none">
-            <View style={styles.tradeItemWrap}>
-              <Image source={TRADE_POTATO} style={styles.tradeItemImage} resizeMode="contain" resizeMethod="resize" />
-              {/* Stack badge will be added when roll → concrete item quantity is defined. */}
+        <View style={styles.divider} />
+
+        <View style={styles.serviceRow}>
+          <TouchableOpacity
+            style={[styles.serviceButton, !serviceEnabled("sell") && styles.serviceButtonDisabled]}
+            disabled={!serviceEnabled("sell")}
+            onPress={() => onService?.(guest, "sell")}
+            activeOpacity={0.8}
+          >
+            <Image source={SERVICE_SELL} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
+            <Text style={styles.serviceLabel}>Sell for</Text>
+            <View style={styles.serviceValueRow}>
+              <Text style={styles.serviceValueText}>{sellPriceCopper ?? "X"}</Text>
+              <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" resizeMethod="resize" />
             </View>
-            <Text style={styles.serviceLabel}>Trade</Text>
-          </View>
-        )}
+          </TouchableOpacity>
 
-        <View style={styles.serviceButton} pointerEvents="none">
-          <Image source={SERVICE_WATER} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
-          <Text style={styles.serviceLabel}>Offer water</Text>
-          <View style={styles.serviceValueRow}>
-            <Text style={styles.serviceValueText}>for 1</Text>
-            <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" resizeMethod="resize" />
-          </View>
-        </View>
+          {canTrade && (
+            <TouchableOpacity
+              style={[styles.serviceButton, !serviceEnabled("exchange") && styles.serviceButtonDisabled]}
+              disabled={!serviceEnabled("exchange")}
+              onPress={() => onService?.(guest, "exchange")}
+              activeOpacity={0.8}
+            >
+              <View style={styles.tradeItemWrap}>
+                <Image source={TRADE_POTATO} style={styles.tradeItemImage} resizeMode="contain" resizeMethod="resize" />
+                {/* Visual offer placeholder only until roll → concrete item quantity is defined. */}
+              </View>
+              <Text style={styles.serviceLabel}>Exchange</Text>
+            </TouchableOpacity>
+          )}
 
-        <View style={styles.serviceButton} pointerEvents="none">
-          <Image source={SERVICE_TALK} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
-          <Text style={styles.serviceLabel}>Talk</Text>
+          <TouchableOpacity
+            style={[styles.serviceButton, !serviceEnabled("water") && styles.serviceButtonDisabled]}
+            disabled={!serviceEnabled("water")}
+            onPress={() => onService?.(guest, "water")}
+            activeOpacity={0.8}
+          >
+            <Image source={SERVICE_WATER} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
+            <Text style={styles.serviceLabel}>Offer water</Text>
+            <View style={styles.serviceValueRow}>
+              <Text style={styles.serviceValueText}>for 1</Text>
+              <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" resizeMethod="resize" />
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.serviceButton, !serviceEnabled("talk") && styles.serviceButtonDisabled]}
+            disabled={!serviceEnabled("talk")}
+            onPress={() => onService?.(guest, "talk")}
+            activeOpacity={0.8}
+          >
+            <Image source={SERVICE_TALK} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
+            <Text style={styles.serviceLabel}>Talk</Text>
+          </TouchableOpacity>
         </View>
-      </View>
-    </TouchableOpacity>
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 
 type DiningGuestAreaProps = {
   dayIndex: number;
+  forcedActiveGuestId?: GuestId | null;
+  enabledService?: GuestServiceAction | null;
+  sellPriceCopper?: number | null;
+  departingGuestId?: GuestId | null;
+  hiddenGuestIds?: readonly GuestId[];
+  onService?: (guest: GuestVisitView, action: GuestServiceAction) => void;
 };
 
 /**
  * Dining-facing guest list foundation. It owns only presentation/selection state;
  * guest scheduling, favor, and once-per-visit trade rolls live in guest-system.ts.
  */
-export default function DiningGuestArea({ dayIndex }: DiningGuestAreaProps) {
+export default function DiningGuestArea({
+  dayIndex,
+  forcedActiveGuestId = null,
+  enabledService = null,
+  sellPriceCopper = null,
+  departingGuestId = null,
+  hiddenGuestIds = [],
+  onService,
+}: DiningGuestAreaProps) {
   const [guests, setGuests] = useState<GuestVisitView[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -154,6 +216,15 @@ export default function DiningGuestArea({ dayIndex }: DiningGuestAreaProps) {
     })));
   }
 
+  useEffect(() => {
+    if (!forcedActiveGuestId || loading) return;
+    setActiveGuest(forcedActiveGuestId).catch(() => {});
+    setGuests((current) => current.map((guest) => ({
+      ...guest,
+      selected: guest.profile.id === forcedActiveGuestId,
+    })));
+  }, [forcedActiveGuestId, loading]);
+
   if (loading) {
     return (
       <View style={styles.emptyCard}>
@@ -171,10 +242,20 @@ export default function DiningGuestArea({ dayIndex }: DiningGuestAreaProps) {
     );
   }
 
+  const visibleGuests = guests.filter((guest) => !hiddenGuestIds.includes(guest.profile.id));
+
   return (
     <View style={styles.guestList}>
-      {guests.map((guest) => (
-        <GuestCard key={guest.profile.id} guest={guest} onSelect={handleSelect} />
+      {visibleGuests.map((guest) => (
+        <GuestCard
+          key={guest.profile.id}
+          guest={guest}
+          onSelect={handleSelect}
+          onService={onService}
+          enabledService={guest.selected ? enabledService : null}
+          sellPriceCopper={guest.profile.id === "old_farmer" ? sellPriceCopper : null}
+          departing={departingGuestId === guest.profile.id}
+        />
       ))}
     </View>
   );
@@ -271,6 +352,9 @@ const styles = StyleSheet.create({
     borderColor: "rgba(90,65,30,0.45)",
     backgroundColor: "rgba(25,14,4,0.90)",
     gap: 3,
+  },
+  serviceButtonDisabled: {
+    opacity: 0.38,
   },
   serviceImage: {
     width: 28,
