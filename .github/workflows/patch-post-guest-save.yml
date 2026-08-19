@@ -1,0 +1,45 @@
+name: Wire post guest tutorial state into saves
+
+on:
+  push:
+    branches:
+      - feat/post-guest-tutorial-upgrades
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/post-guest-tutorial-upgrades
+      - name: Apply save-manager patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('frontend/src/game/save-manager.ts')
+          s=p.read_text()
+          old='''import {\n  DEFAULT_GUEST_TUTORIAL_INTRO_STEP,\n  GUEST_TUTORIAL_INTRO_KEY,\n} from "@/src/game/guest-tutorial";'''
+          new='''import {\n  DEFAULT_GUEST_TUTORIAL_INTRO_STEP,\n  GUEST_TUTORIAL_INTRO_KEY,\n} from "@/src/game/guest-tutorial";\nimport {\n  DEFAULT_POST_GUEST_TUTORIAL_STATE,\n  POST_GUEST_TUTORIAL_STATE_KEY,\n} from "@/src/game/post-guest-tutorial";'''
+          if s.count(old)!=1: raise SystemExit(f'import matches {s.count(old)}')
+          s=s.replace(old,new,1)
+          old='''  GUEST_TUTORIAL_INTRO_KEY,\n  // Kitchen tutorial flags'''
+          new='''  GUEST_TUTORIAL_INTRO_KEY,\n  POST_GUEST_TUTORIAL_STATE_KEY,\n  // Kitchen tutorial flags'''
+          if s.count(old)!=1: raise SystemExit(f'key matches {s.count(old)}')
+          s=s.replace(old,new,1)
+          old='''        [DINING_MEAL_STATE_KEY, JSON.stringify(DEFAULT_DINING_MEAL_STATE)],\n        [GUEST_TUTORIAL_INTRO_KEY, DEFAULT_GUEST_TUTORIAL_INTRO_STEP],'''
+          new='''        [DINING_MEAL_STATE_KEY, JSON.stringify(DEFAULT_DINING_MEAL_STATE)],\n        [GUEST_TUTORIAL_INTRO_KEY, DEFAULT_GUEST_TUTORIAL_INTRO_STEP],\n        [POST_GUEST_TUTORIAL_STATE_KEY, JSON.stringify(DEFAULT_POST_GUEST_TUTORIAL_STATE)],'''
+          if s.count(old)!=1: raise SystemExit(f'new game matches {s.count(old)}')
+          p.write_text(s.replace(old,new,1))
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/game/save-manager.ts
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Persist post guest tutorial upgrade state"
+          git push origin HEAD:feat/post-guest-tutorial-upgrades
