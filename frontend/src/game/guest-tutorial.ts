@@ -9,7 +9,14 @@ export type GuestTutorialIntroStep =
   | "dining_intro"
   | "farmer_intro"
   | "meal_reveal"
-  | "ready_for_water";
+  | "ready_for_water"
+  | "service_sell"
+  | "service_exchange"
+  | "service_water"
+  | "service_talk"
+  | "service_reaction"
+  | "service_departing"
+  | "service_complete";
 
 export const DEFAULT_GUEST_TUTORIAL_INTRO_STEP: GuestTutorialIntroStep = "not_started";
 
@@ -21,6 +28,13 @@ const VALID_STEPS = new Set<GuestTutorialIntroStep>([
   "farmer_intro",
   "meal_reveal",
   "ready_for_water",
+  "service_sell",
+  "service_exchange",
+  "service_water",
+  "service_talk",
+  "service_reaction",
+  "service_departing",
+  "service_complete",
 ]);
 
 export function normalizeGuestTutorialIntroStep(raw: string | null): GuestTutorialIntroStep {
@@ -50,6 +64,24 @@ export function guestTutorialHasReached(
     "farmer_intro",
     "meal_reveal",
     "ready_for_water",
+    "service_sell",
+    "service_exchange",
+    "service_water",
+    "service_talk",
+    "service_reaction",
+    "service_departing",
+    "service_complete",
   ];
   return order.indexOf(current) >= order.indexOf(target);
+}
+
+/** Rupert remains with the guest until the first service tutorial has fully ended. */
+export function guestTutorialKeepsRupertInDining(step: GuestTutorialIntroStep): boolean {
+  return step === "ready_for_water" ||
+    step === "service_sell" ||
+    step === "service_exchange" ||
+    step === "service_water" ||
+    step === "service_talk" ||
+    step === "service_reaction" ||
+    step === "service_departing";
 }
