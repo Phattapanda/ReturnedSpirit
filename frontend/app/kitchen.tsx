@@ -2056,7 +2056,9 @@ export default function KitchenScreen() {
     AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(emptyTable)).catch(() => {});
     setTutState("COOKING_UNPACK_WAIT");
     tsRef.current = "COOKING_UNPACK_WAIT";
-    setBagPulseActive(true);
+    // The Player Bag pulse belongs only to the original bag-receiving tutorial.
+    // Cooking may ask the player to open it, but must not reintroduce that pulse.
+    setBagPulseActive(false);
     bagOpenedOnceDuringCooking.current = false;
     cookingShareDoneRef.current = false;
     cookingEatDoneRef.current = false;
