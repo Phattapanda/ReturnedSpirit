@@ -1,51 +1,21 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import KitchenScreenBase from "@/src/KitchenScreenBase";
 import { KitchenRuntimeContext } from "@/src/game/kitchen-runtime-context";
 
-const CARROT_TABLE_ASSET = require("../assets/images/carrot.png");
-
-function ensureCarrotTableAssetFallback() {
-  if (Object.prototype.hasOwnProperty.call(Object.prototype, "carrot")) return;
-  Object.defineProperty(Object.prototype, "carrot", {
-    value: CARROT_TABLE_ASSET,
-    enumerable: false,
-    configurable: true,
-    writable: false,
-  });
-}
-
-function removeCarrotTableAssetFallback() {
-  if (!Object.prototype.hasOwnProperty.call(Object.prototype, "carrot")) return;
-  if ((Object.prototype as { carrot?: unknown }).carrot !== CARROT_TABLE_ASSET) return;
-  delete (Object.prototype as { carrot?: unknown }).carrot;
-}
-
 /**
  * Thin Kitchen runtime wrapper.
  *
- * The proven Kitchen screen stays unchanged in src/KitchenScreenBase. The
- * wrapper only refreshes that screen after Carrot Bag unpacking and supplies the
- * carrot image to its existing item-image lookup while this route is mounted.
+ * Item rendering now lives explicitly in KitchenScreenBase. The wrapper keeps
+ * the lightweight runtime hooks used by PlayerBag-compatible interactions.
  */
 export default function KitchenScreen() {
   const insets = useSafeAreaInsets();
   const [instanceKey, setInstanceKey] = useState(0);
   const [thought, setThought] = useState<string | null>(null);
   const thoughtTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Install before the child renders. The effect repeats installation after a
-  // development Strict-Mode cleanup/setup cycle and removes only our own value.
-  ensureCarrotTableAssetFallback();
-  useEffect(() => {
-    ensureCarrotTableAssetFallback();
-    return () => {
-      if (thoughtTimer.current) clearTimeout(thoughtTimer.current);
-      removeCarrotTableAssetFallback();
-    };
-  }, []);
 
   function refreshKitchen() {
     setInstanceKey((current) => current + 1);
