@@ -299,6 +299,7 @@ export default function KitchenScreen() {
   const [gardenActive, setGardenActive] = useState(false);
   const playerNameRef = useRef("Adventurer");
   const [rupertPortrait, setRupertPortrait] = useState<"normal" | "sad" | "laugh">("normal");
+  const [rupertInDining, setRupertInDining] = useState(false);
   const focusCountRef = useRef(0);
   // ── Bag & Stats
   const [playerBag, setPlayerBag] = useState<PlayerBagData>(DEFAULT_BAG);
@@ -641,6 +642,7 @@ export default function KitchenScreen() {
       if (cookingDone !== "true") return;
       const step = await loadGuestTutorialIntroStep();
       if (!active || tsRef.current !== "IDLE") return;
+      setRupertInDining(step === "ready_for_water");
       if (step === "not_started" || step === "knock") {
         void startGuestTutorialIntro();
       } else if (step === "dining_prompt") {
@@ -869,6 +871,9 @@ export default function KitchenScreen() {
           const cur = tsRef.current;
           if (cur !== "IDLE") return; // Don't interfere with active tutorial/dialog
 
+          const guestStep = await loadGuestTutorialIntroStep();
+          setRupertInDining(guestStep === "ready_for_water");
+
           // Refresh stats (may have changed in dormitory after sleep)
           const rawSta = await AsyncStorage.getItem(SK.STAMINA);
           if (rawSta) {
@@ -919,30 +924,28 @@ export default function KitchenScreen() {
 
             // Check if returning from Tuesday garden ready for crafting
             let craftingReady = await AsyncStorage.getItem(SK.CRAFTING_READY);
+            const cookingAlreadyDone = await AsyncStorage.getItem(SK.COOKING_DONE);
             // Fallback: auto-detect readiness directly from inventory
             // (handles Android back button, stale garden state, any navigation path)
-            if (craftingReady !== "true") {
-              const cookingAlreadyDone = await AsyncStorage.getItem(SK.COOKING_DONE);
-              if (cookingAlreadyDone !== "true") {
-                const rawHarv = await AsyncStorage.getItem("@garden:has_harvested_tutorial_herbs");
-                const rawWat  = await AsyncStorage.getItem("@garden:has_fetched_tutorial_water");
-                if (rawHarv === "true" && rawWat === "true") {
-                  const freshRawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
-                  if (freshRawBag) {
-                    try {
-                      const freshBag: PlayerBagData = JSON.parse(freshRawBag);
-                      const hasHB = freshBag.slots.some(s => s?.id === "herbbag");
-                      const hasBW = freshBag.slots.some(s => s?.id === "bucketwater");
-                      if (hasHB && hasBW) {
-                        await AsyncStorage.setItem(SK.CRAFTING_READY, "true");
-                        craftingReady = "true";
-                      }
-                    } catch { /* ignore */ }
-                  }
+            if (craftingReady !== "true" && cookingAlreadyDone !== "true") {
+              const rawHarv = await AsyncStorage.getItem("@garden:has_harvested_tutorial_herbs");
+              const rawWat  = await AsyncStorage.getItem("@garden:has_fetched_tutorial_water");
+              if (rawHarv === "true" && rawWat === "true") {
+                const freshRawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
+                if (freshRawBag) {
+                  try {
+                    const freshBag: PlayerBagData = JSON.parse(freshRawBag);
+                    const hasHB = freshBag.slots.some(s => s?.id === "herbbag");
+                    const hasBW = freshBag.slots.some(s => s?.id === "bucketwater");
+                    if (hasHB && hasBW) {
+                      await AsyncStorage.setItem(SK.CRAFTING_READY, "true");
+                      craftingReady = "true";
+                    }
+                  } catch { /* ignore */ }
                 }
               }
             }
-            if (craftingReady === "true" && tsRef.current !== "CRAFTING_TUTORIAL_READY") {
+            if (craftingReady === "true" && cookingAlreadyDone !== "true" && tsRef.current !== "CRAFTING_TUTORIAL_READY") {
               setTutState("CRAFTING_TUTORIAL_READY");
               setTimeout(() => {
                 showBubble(
@@ -2011,10 +2014,9 @@ export default function KitchenScreen() {
     const cur = tsRef.current;
     const onTable = slot <= 11;
 
-    // Herb Bag keeps its tutorial unpack behavior while ingredients are being prepared.
-    // After crafting it behaves like a normal inspectable item instead of changing the tutorial.
-    if (onTable && item.id === "herbbag" &&
-        (cur === "COOKING_UNPACK_WAIT" || cur === "COOKING_CRAFT_READY")) {
+    // Herb Bag stays a usable container after the tutorial: first tap selects it,
+    // every following tap unpacks one herb while normal Kitchen interaction is allowed.
+    if (onTable && item.id === "herbbag" && isKitchenItemInteractionState(cur)) {
       const remaining = item.containedQuantity ?? 0;
       if (selectedHerbbagSlot === null || selectedHerbbagSlot !== slot) {
         setSelectedHerbbagSlot(slot);
@@ -2911,8 +2913,7 @@ export default function KitchenScreen() {
     const isSelectedHerbbag = selectedHerbbagSlot === slotIdx && item.id === "herbbag";
     const isSelectedHerbs   = selectedHerbsSlot === slotIdx && item.id === "herbs";
     const isSelectedSoup    = selectedSoupSlot === slotIdx && item.id === "herbsoup";
-    const showHerbbagTapHint = (ts === "COOKING_UNPACK_WAIT" || ts === "COOKING_CRAFT_READY") &&
-      item.id === "herbbag" && isSelectedHerbbag;
+    const showHerbbagTapHint = isKitchenItemInteractionState(ts) && item.id === "herbbag" && isSelectedHerbbag;
 
     // Herb Soup keeps its dedicated share/eat tutorial behavior after crafting.
     if (ts === "COOKING_SHARE_EAT" && item.id === "herbsoup") {
@@ -3092,8 +3093,10 @@ export default function KitchenScreen() {
           <TouchableOpacity ref={playerPortraitRef} style={styles.circleWrap} onPress={() => setStatusOpen(true)} activeOpacity={0.8}>
             <Image source={avatarSrc(playerAvatarId, staminaCurrent)} style={[styles.circleImg, styles.playerPortraitImage]} resizeMode="cover" resizeMethod="resize" />
           </TouchableOpacity>
-          <View ref={rupertPortraitRef} style={styles.circleWrap}>
-            <Image source={rupertSrc(rupertPortrait)} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />
+          <View ref={rupertPortraitRef} style={[styles.circleWrap, rupertInDining && styles.rupertAway]} pointerEvents="none">
+            {!rupertInDining && (
+              <Image source={rupertSrc(rupertPortrait)} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />
+            )}
           </View>
           <View ref={bagIconRef} collapsable={false} style={styles.bagDropTarget}>
             <BagIconButton
@@ -3795,6 +3798,7 @@ const styles = StyleSheet.create({
   circleWrapLocked: { borderColor: "#3A3A3A", backgroundColor: "#1A1A1A", alignItems: "center", justifyContent: "center" },
   circleImg: { width: "100%", height: "100%" },
   playerPortraitImage: { transform: [{ scale: 1.06 }] },
+  rupertAway: { opacity: 0, borderColor: "transparent", backgroundColor: "transparent" },
   bagDropTarget: { width: 96, height: 96, borderRadius: 48, position: "relative" },
   bagDropHighlight: {
     ...StyleSheet.absoluteFillObject,
