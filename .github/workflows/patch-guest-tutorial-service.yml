@@ -1,0 +1,238 @@
+name: Apply guest tutorial service flow
+
+on:
+  push:
+    branches:
+      - feat/guest-tutorial-service
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/guest-tutorial-service
+          fetch-depth: 0
+
+      - name: Apply focused Point 10 patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          paths = {
+            'tutorial': Path('frontend/src/game/guest-tutorial.ts'),
+            'guestcard': Path('frontend/src/components/GuestCard.tsx'),
+            'dining': Path('frontend/app/dining.tsx'),
+            'kitchen': Path('frontend/app/kitchen.tsx'),
+            'garden': Path('frontend/app/garden.tsx'),
+          }
+          texts = {k: p.read_text() for k,p in paths.items()}
+
+          def rep(name, old, new, label):
+            c = texts[name].count(old)
+            if c != 1:
+              raise SystemExit(f'{label}: expected 1 match, found {c}')
+            texts[name] = texts[name].replace(old, new, 1)
+
+          # ── guest-tutorial.ts: extend persistent Point 10 steps + shared Rupert helper.
+          rep('tutorial',
+'''  | "meal_reveal"\n  | "ready_for_water";''',
+'''  | "meal_reveal"\n  | "ready_for_water"\n  | "service_sell"\n  | "service_exchange"\n  | "service_water"\n  | "service_talk"\n  | "service_reaction"\n  | "service_departing"\n  | "service_complete";''',
+'extend guest tutorial type')
+
+          rep('tutorial',
+'''  "meal_reveal",\n  "ready_for_water",\n]);''',
+'''  "meal_reveal",\n  "ready_for_water",\n  "service_sell",\n  "service_exchange",\n  "service_water",\n  "service_talk",\n  "service_reaction",\n  "service_departing",\n  "service_complete",\n]);''',
+'extend valid guest tutorial steps')
+
+          rep('tutorial',
+'''    "meal_reveal",\n    "ready_for_water",\n  ];''',
+'''    "meal_reveal",\n    "ready_for_water",\n    "service_sell",\n    "service_exchange",\n    "service_water",\n    "service_talk",\n    "service_reaction",\n    "service_departing",\n    "service_complete",\n  ];''',
+'extend guest tutorial ordering')
+
+          texts['tutorial'] += '''\n\n/** Rupert remains with the guest until the first service tutorial has fully ended. */\nexport function guestTutorialKeepsRupertInDining(step: GuestTutorialIntroStep): boolean {\n  return step === "ready_for_water" ||\n    step === "service_sell" ||\n    step === "service_exchange" ||\n    step === "service_water" ||\n    step === "service_talk" ||\n    step === "service_reaction" ||\n    step === "service_departing";\n}\n'''
+
+          # ── Kitchen/Garden: keep Part 9 restrictions active through the whole service flow.
+          rep('kitchen',
+'''import { loadGuestTutorialIntroStep, saveGuestTutorialIntroStep } from "@/src/game/guest-tutorial";''',
+'''import {\n  guestTutorialKeepsRupertInDining,\n  loadGuestTutorialIntroStep,\n  saveGuestTutorialIntroStep,\n} from "@/src/game/guest-tutorial";''',
+'Kitchen guest tutorial import')
+          rep('kitchen',
+'''      setRupertInDining(step === "ready_for_water");''',
+'''      setRupertInDining(guestTutorialKeepsRupertInDining(step));''',
+'Kitchen Rupert dining state')
+
+          rep('garden',
+'''import { loadGuestTutorialIntroStep } from "@/src/game/guest-tutorial";''',
+'''import { guestTutorialKeepsRupertInDining, loadGuestTutorialIntroStep } from "@/src/game/guest-tutorial";''',
+'Garden guest tutorial import')
+          rep('garden',
+'''        setRupertInDining(guestTutorialStep === "ready_for_water");''',
+'''        setRupertInDining(guestTutorialKeepsRupertInDining(guestTutorialStep));''',
+'Garden Rupert dining state')
+
+          # ── GuestCard: make service tiles real buttons and support forced active/departing guest.
+          rep('guestcard',
+'''  ActivityIndicator,\n  Image,\n  StyleSheet,''',
+'''  ActivityIndicator,\n  Animated,\n  Image,\n  StyleSheet,''',
+'GuestCard Animated import')
+          rep('guestcard',
+'''import React, { useEffect, useState } from "react";''',
+'''import React, { useEffect, useRef, useState } from "react";''',
+'GuestCard useRef import')
+
+          rep('guestcard',
+'''type GuestCardProps = {\n  guest: GuestVisitView;\n  onSelect: (guestId: GuestId) => void;\n};''',
+'''export type GuestServiceAction = "sell" | "exchange" | "water" | "talk";\n\ntype GuestCardProps = {\n  guest: GuestVisitView;\n  onSelect: (guestId: GuestId) => void;\n  onService?: (guest: GuestVisitView, action: GuestServiceAction) => void;\n  enabledService?: GuestServiceAction | null;\n  sellPriceCopper?: number | null;\n  departing?: boolean;\n};''',
+'GuestCard props')
+
+          rep('guestcard',
+'''export function GuestCard({ guest, onSelect }: GuestCardProps) {\n  const { profile, selected } = guest;\n  const portrait = GUEST_PORTRAITS[profile.portraitKey];\n  const canTrade = profile.tradePool.length > 0;\n\n  return (\n    <TouchableOpacity''',
+'''export function GuestCard({\n  guest, onSelect, onService, enabledService = null, sellPriceCopper = null, departing = false,\n}: GuestCardProps) {\n  const { profile, selected } = guest;\n  const portrait = GUEST_PORTRAITS[profile.portraitKey];\n  const canTrade = profile.tradePool.length > 0;\n  const departureOpacity = useRef(new Animated.Value(1)).current;\n  const departureX = useRef(new Animated.Value(0)).current;\n\n  useEffect(() => {\n    if (!departing) return;\n    Animated.parallel([\n      Animated.timing(departureOpacity, { toValue: 0, duration: 700, useNativeDriver: true }),\n      Animated.timing(departureX, { toValue: 32, duration: 700, useNativeDriver: true }),\n    ]).start();\n  }, [departing, departureOpacity, departureX]);\n\n  const serviceEnabled = (action: GuestServiceAction) => !!onService && enabledService === action;\n\n  return (\n    <Animated.View style={{ opacity: departureOpacity, transform: [{ translateX: departureX }] }}>\n    <TouchableOpacity''',
+'GuestCard component setup')
+
+          rep('guestcard',
+'''      <View style={styles.serviceRow}>\n        <View style={styles.serviceButton} pointerEvents="none">\n          <Image source={SERVICE_SELL} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />\n          <Text style={styles.serviceLabel}>Sell for</Text>\n          <View style={styles.serviceValueRow}>\n            <Text style={styles.serviceValueText}>X</Text>\n            <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" resizeMethod="resize" />\n          </View>\n        </View>\n\n        {canTrade && (\n          <View style={styles.serviceButton} pointerEvents="none">\n            <View style={styles.tradeItemWrap}>\n              <Image source={TRADE_POTATO} style={styles.tradeItemImage} resizeMode="contain" resizeMethod="resize" />\n              {/* Stack badge will be added when roll → concrete item quantity is defined. */}\n            </View>\n            <Text style={styles.serviceLabel}>Trade</Text>\n          </View>\n        )}\n\n        <View style={styles.serviceButton} pointerEvents="none">\n          <Image source={SERVICE_WATER} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />\n          <Text style={styles.serviceLabel}>Offer water</Text>\n          <View style={styles.serviceValueRow}>\n            <Text style={styles.serviceValueText}>for 1</Text>\n            <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" resizeMethod="resize" />\n          </View>\n        </View>\n\n        <View style={styles.serviceButton} pointerEvents="none">\n          <Image source={SERVICE_TALK} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />\n          <Text style={styles.serviceLabel}>Talk</Text>\n        </View>\n      </View>\n    </TouchableOpacity>''',
+'''      <View style={styles.serviceRow}>\n        <TouchableOpacity\n          style={[styles.serviceButton, !serviceEnabled("sell") && styles.serviceButtonDisabled]}\n          disabled={!serviceEnabled("sell")}\n          onPress={() => onService?.(guest, "sell")}\n          activeOpacity={0.8}\n        >\n          <Image source={SERVICE_SELL} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />\n          <Text style={styles.serviceLabel}>Sell for</Text>\n          <View style={styles.serviceValueRow}>\n            <Text style={styles.serviceValueText}>{sellPriceCopper ?? "X"}</Text>\n            <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" resizeMethod="resize" />\n          </View>\n        </TouchableOpacity>\n\n        {canTrade && (\n          <TouchableOpacity\n            style={[styles.serviceButton, !serviceEnabled("exchange") && styles.serviceButtonDisabled]}\n            disabled={!serviceEnabled("exchange")}\n            onPress={() => onService?.(guest, "exchange")}\n            activeOpacity={0.8}\n          >\n            <View style={styles.tradeItemWrap}>\n              <Image source={TRADE_POTATO} style={styles.tradeItemImage} resizeMode="contain" resizeMethod="resize" />\n              {/* Visual offer placeholder only until roll → concrete item quantity is defined. */}\n            </View>\n            <Text style={styles.serviceLabel}>Exchange</Text>\n          </TouchableOpacity>\n        )}\n\n        <TouchableOpacity\n          style={[styles.serviceButton, !serviceEnabled("water") && styles.serviceButtonDisabled]}\n          disabled={!serviceEnabled("water")}\n          onPress={() => onService?.(guest, "water")}\n          activeOpacity={0.8}\n        >\n          <Image source={SERVICE_WATER} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />\n          <Text style={styles.serviceLabel}>Offer water</Text>\n          <View style={styles.serviceValueRow}>\n            <Text style={styles.serviceValueText}>for 1</Text>\n            <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" resizeMethod="resize" />\n          </View>\n        </TouchableOpacity>\n\n        <TouchableOpacity\n          style={[styles.serviceButton, !serviceEnabled("talk") && styles.serviceButtonDisabled]}\n          disabled={!serviceEnabled("talk")}\n          onPress={() => onService?.(guest, "talk")}\n          activeOpacity={0.8}\n        >\n          <Image source={SERVICE_TALK} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />\n          <Text style={styles.serviceLabel}>Talk</Text>\n        </TouchableOpacity>\n      </View>\n    </TouchableOpacity>\n    </Animated.View>''',
+'GuestCard service buttons')
+
+          rep('guestcard',
+'''type DiningGuestAreaProps = {\n  dayIndex: number;\n};''',
+'''type DiningGuestAreaProps = {\n  dayIndex: number;\n  forcedActiveGuestId?: GuestId | null;\n  enabledService?: GuestServiceAction | null;\n  sellPriceCopper?: number | null;\n  departingGuestId?: GuestId | null;\n  hiddenGuestIds?: readonly GuestId[];\n  onService?: (guest: GuestVisitView, action: GuestServiceAction) => void;\n};''',
+'DiningGuestArea props')
+
+          rep('guestcard',
+'''export default function DiningGuestArea({ dayIndex }: DiningGuestAreaProps) {''',
+'''export default function DiningGuestArea({\n  dayIndex,\n  forcedActiveGuestId = null,\n  enabledService = null,\n  sellPriceCopper = null,\n  departingGuestId = null,\n  hiddenGuestIds = [],\n  onService,\n}: DiningGuestAreaProps) {''',
+'DiningGuestArea signature')
+
+          rep('guestcard',
+'''  async function handleSelect(guestId: GuestId) {\n    await setActiveGuest(guestId);\n    setGuests((current) => current.map((guest) => ({\n      ...guest,\n      selected: guest.profile.id === guestId,\n    })));\n  }\n\n  if (loading) {''',
+'''  async function handleSelect(guestId: GuestId) {\n    await setActiveGuest(guestId);\n    setGuests((current) => current.map((guest) => ({\n      ...guest,\n      selected: guest.profile.id === guestId,\n    })));\n  }\n\n  useEffect(() => {\n    if (!forcedActiveGuestId || loading) return;\n    setActiveGuest(forcedActiveGuestId).catch(() => {});\n    setGuests((current) => current.map((guest) => ({\n      ...guest,\n      selected: guest.profile.id === forcedActiveGuestId,\n    })));\n  }, [forcedActiveGuestId, loading]);\n\n  if (loading) {''',
+'forced active guest effect')
+
+          rep('guestcard',
+'''  return (\n    <View style={styles.guestList}>\n      {guests.map((guest) => (\n        <GuestCard key={guest.profile.id} guest={guest} onSelect={handleSelect} />\n      ))}\n    </View>\n  );''',
+'''  const visibleGuests = guests.filter((guest) => !hiddenGuestIds.includes(guest.profile.id));\n\n  return (\n    <View style={styles.guestList}>\n      {visibleGuests.map((guest) => (\n        <GuestCard\n          key={guest.profile.id}\n          guest={guest}\n          onSelect={handleSelect}\n          onService={onService}\n          enabledService={guest.selected ? enabledService : null}\n          sellPriceCopper={guest.profile.id === "old_farmer" ? sellPriceCopper : null}\n          departing={departingGuestId === guest.profile.id}\n        />\n      ))}\n    </View>\n  );''',
+'DiningGuestArea rendering')
+
+          rep('guestcard',
+'''  serviceImage: {\n    width: 28,\n    height: 28,\n  },''',
+'''  serviceButtonDisabled: {\n    opacity: 0.38,\n  },\n  serviceImage: {\n    width: 28,\n    height: 28,\n  },''',
+'GuestCard disabled service style')
+
+          # ── Dining: Point 10 sequence + handover animations.
+          rep('dining',
+'''  Image,\n  StyleSheet,\n} from "react-native";''',
+'''  Animated as RNAnimated,\n  Image,\n  StyleSheet,\n  useWindowDimensions,\n} from "react-native";''',
+'Dining RN Animated import')
+          rep('dining',
+'''import DiningGuestArea from "@/src/components/GuestCard";''',
+'''import DiningGuestArea, { type GuestServiceAction } from "@/src/components/GuestCard";''',
+'Dining GuestServiceAction import')
+          rep('dining',
+'''  guestTutorialHasReached,\n  loadGuestTutorialIntroStep,''',
+'''  guestTutorialHasReached,\n  guestTutorialKeepsRupertInDining,\n  loadGuestTutorialIntroStep,''',
+'Dining guest helper import')
+          rep('dining',
+'''import { DEFAULT_BAG, PLAYER_BAG_KEY, type PlayerBagData } from "@/src/game/item-system";''',
+'''import { DEFAULT_BAG, PLAYER_BAG_KEY, type PlayerBagData } from "@/src/game/item-system";\nimport { addCurrencyCopper } from "@/src/game/currency-system";\nimport { setActiveGuest, type GuestVisitView } from "@/src/game/guest-system";''',
+'Dining currency and guest imports')
+
+          rep('dining',
+'''  old_farmer:    require("../assets/images/old_farmer.png"),''',
+'''  old_farmer:    require("../assets/images/old_farmer.png"),\n  coin_copper:   require("../assets/images/coin_copper.png"),''',
+'Dining copper image')
+
+          rep('dining',
+'''const DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;''',
+'''const DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;\nconst OLD_FARMER_SELL_PRICE_COPPER = 8;''',
+'Dining sell price')
+
+          rep('dining',
+'''function rupertServingExplanation(playerName: string): TutorialLine[] {''',
+'''function serviceReaction(): TutorialLine[] {\n  return [\n    { speaker: "Old Farmer", portrait: "old_farmer", text: '"That hit the spot. I\'ll come back soon."' },\n    { speaker: "Rupert", portrait: "rupert_laugh", text: '"Not bad for your first guest."' },\n  ];\n}\n\nfunction rupertServingExplanation(playerName: string): TutorialLine[] {''',
+'Dining service reaction dialogue')
+
+          rep('dining',
+'''  const insets = useSafeAreaInsets();\n  const audioManager = useAudioManager();''',
+'''  const insets = useSafeAreaInsets();\n  const { width: W } = useWindowDimensions();\n  const audioManager = useAudioManager();''',
+'Dining window dimensions')
+
+          rep('dining',
+'''  const [tutorialLines, setTutorialLines] = useState<TutorialLine[]>([]);\n  const [tutorialLineIndex, setTutorialLineIndex] = useState(0);''',
+'''  const [tutorialLines, setTutorialLines] = useState<TutorialLine[]>([]);\n  const [tutorialLineIndex, setTutorialLineIndex] = useState(0);\n  const [serviceDialogLine, setServiceDialogLine] = useState<TutorialLine | null>(null);\n  const serviceDialogNextStep = useRef<GuestTutorialIntroStep | null>(null);\n  const [serviceBusy, setServiceBusy] = useState(false);\n  const [departingGuestId, setDepartingGuestId] = useState<"old_farmer" | null>(null);\n\n  const [transferImage, setTransferImage] = useState<ReturnType<typeof require> | null>(null);\n  const transferX = useRef(new RNAnimated.Value(0)).current;\n  const transferY = useRef(new RNAnimated.Value(0)).current;\n  const transferScale = useRef(new RNAnimated.Value(1)).current;\n  const transferOpacity = useRef(new RNAnimated.Value(0)).current;''',
+'Dining Point10 states')
+
+          rep('dining',
+'''        } else {\n          setTutorialStep(loadedTutorialStep);\n        }''',
+'''        } else if (loadedTutorialStep === "service_reaction") {\n          setTutorialStep("service_reaction");\n          setTutorialLines(serviceReaction());\n          setTutorialLineIndex(0);\n        } else if (loadedTutorialStep === "service_departing") {\n          setTutorialStep("service_departing");\n          setDepartingGuestId("old_farmer");\n          setTimeout(async () => {\n            await setActiveGuest(null);\n            await saveGuestTutorialIntroStep("service_complete");\n            if (active) {\n              setTutorialStep("service_complete");\n              setDepartingGuestId(null);\n            }\n          }, 720);\n        } else {\n          setTutorialStep(loadedTutorialStep);\n        }''',
+'Dining load service steps')
+
+          rep('dining',
+'''  function showPlayerThought(text: string) {\n    if (thoughtTimer.current) clearTimeout(thoughtTimer.current);\n    setPlayerThought(text);\n    thoughtTimer.current = setTimeout(() => setPlayerThought(null), 2600);\n  }''',
+'''  function showPlayerThought(text: string) {\n    if (thoughtTimer.current) clearTimeout(thoughtTimer.current);\n    setPlayerThought(text);\n    thoughtTimer.current = setTimeout(() => setPlayerThought(null), 2600);\n  }\n\n  function runTransfer(\n    image: ReturnType<typeof require>,\n    fromX: number, fromY: number, toX: number, toY: number,\n    onDone: () => void,\n  ) {\n    setTransferImage(image);\n    transferX.setValue(fromX);\n    transferY.setValue(fromY);\n    transferScale.setValue(1);\n    transferOpacity.setValue(1);\n    RNAnimated.parallel([\n      RNAnimated.timing(transferX, { toValue: toX, duration: 700, useNativeDriver: true }),\n      RNAnimated.timing(transferY, { toValue: toY, duration: 700, useNativeDriver: true }),\n      RNAnimated.timing(transferScale, { toValue: 0.35, duration: 700, useNativeDriver: true }),\n    ]).start(() => {\n      transferOpacity.setValue(0);\n      setTransferImage(null);\n      onDone();\n    });\n  }\n\n  function showServiceDialog(line: TutorialLine, nextStep: GuestTutorialIntroStep) {\n    serviceDialogNextStep.current = nextStep;\n    setServiceDialogLine(line);\n  }\n\n  async function closeServiceDialog() {\n    const next = serviceDialogNextStep.current;\n    serviceDialogNextStep.current = null;\n    setServiceDialogLine(null);\n    if (!next) return;\n    await saveGuestTutorialIntroStep(next);\n    setTutorialStep(next);\n    if (next === "service_reaction") {\n      setTutorialLines(serviceReaction());\n      setTutorialLineIndex(0);\n    }\n  }''',
+'Dining transfer helpers')
+
+          rep('dining',
+'''    if (tutorialStep === "meal_reveal") {\n      await saveGuestTutorialIntroStep("ready_for_water");\n      setTutorialStep("ready_for_water");\n      setTutorialLines([]);\n      setTutorialLineIndex(0);\n    }\n  }''',
+'''    if (tutorialStep === "meal_reveal") {\n      await saveGuestTutorialIntroStep("ready_for_water");\n      setTutorialStep("ready_for_water");\n      setTutorialLines([]);\n      setTutorialLineIndex(0);\n      return;\n    }\n\n    if (tutorialStep === "service_reaction") {\n      await saveGuestTutorialIntroStep("service_departing");\n      setTutorialStep("service_departing");\n      setTutorialLines([]);\n      setTutorialLineIndex(0);\n      setDepartingGuestId("old_farmer");\n      setTimeout(async () => {\n        await setActiveGuest(null);\n        await saveGuestTutorialIntroStep("service_complete");\n        setTutorialStep("service_complete");\n        setDepartingGuestId(null);\n      }, 720);\n    }\n  }''',
+'Dining reaction completion')
+
+          rep('dining',
+'''  const currentTutorialLine = tutorialLines[tutorialLineIndex] ?? null;\n  const dialogLine: GuestTutorialDialogLine | null = currentTutorialLine ? {''',
+'''  const currentTutorialLine = serviceDialogLine ?? tutorialLines[tutorialLineIndex] ?? null;\n  const dialogLine: GuestTutorialDialogLine | null = currentTutorialLine ? {''',
+'Dining service dialog composition')
+
+          rep('dining',
+'''  const showRupertInDining = tutorialStep === "meal_reveal" || tutorialStep === "ready_for_water";''',
+'''  const showRupertInDining = tutorialStep === "meal_reveal" || guestTutorialKeepsRupertInDining(tutorialStep);''',
+'Dining Rupert presence')
+
+          rep('dining',
+'''    setPlayerBag(plan.bag);\n    setMealState(plan.mealState);\n    audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });\n\n    try {''',
+'''    setPlayerBag(plan.bag);\n    setMealState(plan.mealState);\n    audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });\n\n    if (tutorialStep === "ready_for_water" && plan.mealState.slots[plan.targetSlotIndex]?.id === "herbsoup") {\n      await setActiveGuest("old_farmer");\n      await saveGuestTutorialIntroStep("service_sell");\n      setTutorialStep("service_sell");\n    }\n\n    try {''',
+'Dining auto activate Farmer on soup serve')
+
+          rep('dining',
+'''  async function handleMealSlotTap(slotIndex: number) {''',
+'''  async function handleGuestService(guest: GuestVisitView, action: GuestServiceAction) {\n    if (serviceBusy || guest.profile.id !== "old_farmer") return;\n\n    if (tutorialStep === "service_sell" && action === "sell") {\n      const activeIndex = mealState.activeSlotIndex;\n      const activeMeal = activeIndex !== null ? mealState.slots[activeIndex] : null;\n      if (activeIndex === null || activeMeal?.id !== "herbsoup") {\n        showPlayerThought("I need to select the Herb Soup first.");\n        return;\n      }\n\n      setServiceBusy(true);\n      const nextSlots = [...mealState.slots];\n      nextSlots[activeIndex] = null;\n      const nextMealState: DiningMealState = { ...mealState, slots: nextSlots, activeSlotIndex: null };\n      setMealState(nextMealState);\n      await saveDiningMealState(nextMealState);\n      audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });\n\n      runTransfer(\n        IMG.herbsoup,\n        W * 0.5 - 18, headerH + 165,\n        W * 0.42 - 18, headerH + 330,\n        () => {\n          audioManager.playSoundEffect("bling", { maxDurationMs: 2000 });\n          runTransfer(\n            IMG.coin_copper,\n            W * 0.42 - 14, headerH + 330,\n            W - 70, insets.top + 68,\n            async () => {\n              await addCurrencyCopper(OLD_FARMER_SELL_PRICE_COPPER);\n              setServiceBusy(false);\n              showServiceDialog(\n                { speaker: "Old Farmer", portrait: "old_farmer", text: '"Delicious. Here are 8 Copper."' },\n                "service_exchange",\n              );\n            },\n          );\n        },\n      );\n      return;\n    }\n\n    if (tutorialStep === "service_exchange" && action === "exchange") {\n      showServiceDialog(\n        { speaker: "Rupert", portrait: "rupert", text: '"Some guests may offer an item instead of Copper. That is what Exchange is for."' },\n        "service_water",\n      );\n      return;\n    }\n\n    if (tutorialStep === "service_water" && action === "water") {\n      showServiceDialog(\n        { speaker: "Old Farmer", portrait: "old_farmer", text: '"Water? No, thank you. I came here for something to eat."' },\n        "service_talk",\n      );\n      return;\n    }\n\n    if (tutorialStep === "service_talk" && action === "talk") {\n      await saveGuestTutorialIntroStep("service_reaction");\n      setTutorialStep("service_reaction");\n      setTutorialLines(serviceReaction());\n      setTutorialLineIndex(0);\n    }\n  }\n\n  async function handleMealSlotTap(slotIndex: number) {''',
+'Dining service handlers')
+
+          rep('dining',
+'''            <DiningGuestArea dayIndex={dayIdx} />''',
+'''            <DiningGuestArea\n              dayIndex={dayIdx}\n              forcedActiveGuestId={tutorialStep.startsWith("service_") && tutorialStep !== "service_complete" ? "old_farmer" : null}\n              enabledService={\n                serviceBusy ? null :\n                tutorialStep === "service_sell" ? "sell" :\n                tutorialStep === "service_exchange" ? "exchange" :\n                tutorialStep === "service_water" ? "water" :\n                tutorialStep === "service_talk" ? "talk" : null\n              }\n              sellPriceCopper={OLD_FARMER_SELL_PRICE_COPPER}\n              departingGuestId={departingGuestId}\n              hiddenGuestIds={tutorialStep === "service_complete" ? ["old_farmer"] : []}\n              onService={handleGuestService}\n            />''',
+'Dining GuestArea service wiring')
+
+          rep('dining',
+'''          const guestDormitoryBlocked = tutorialStep === "ready_for_water" && loc.id === "dormitory";''',
+'''          const guestDormitoryBlocked = guestTutorialKeepsRupertInDining(tutorialStep) && loc.id === "dormitory";''',
+'Dining Part9 restriction duration')
+
+          rep('dining',
+'''      <GuestTutorialDialog\n        visible={!!dialogLine}\n        line={dialogLine}\n        onContinue={advanceTutorialDialog}\n      />''',
+'''      <GuestTutorialDialog\n        visible={!!dialogLine}\n        line={dialogLine}\n        onContinue={serviceDialogLine ? closeServiceDialog : advanceTutorialDialog}\n      />\n\n      {transferImage && (\n        <RNAnimated.View\n          pointerEvents="none"\n          style={{\n            position: "absolute",\n            left: 0,\n            top: 0,\n            width: 36,\n            height: 36,\n            zIndex: 1200,\n            opacity: transferOpacity,\n            transform: [\n              { translateX: transferX },\n              { translateY: transferY },\n              { scale: transferScale },\n            ],\n          }}\n        >\n          <Image source={transferImage} style={{ width: 36, height: 36 }} resizeMode="contain" />\n        </RNAnimated.View>\n      )}''',
+'Dining transfer overlay')
+
+          # Write only after every exact match succeeds.
+          for key, path in paths.items():
+            path.write_text(texts[key])
+          PY
+
+      - name: Commit Point 10 implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/game/guest-tutorial.ts frontend/src/components/GuestCard.tsx frontend/app/dining.tsx frontend/app/kitchen.tsx frontend/app/garden.tsx
+          if git diff --cached --quiet; then
+            echo "No patch required."
+            exit 0
+          fi
+          git commit -m "Add guest service tutorial flow"
+          git push origin HEAD:feat/guest-tutorial-service
