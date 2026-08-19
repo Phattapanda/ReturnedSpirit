@@ -1182,6 +1182,12 @@ export default function GardenScreen() {
   // ─────────────────────────────────────────────────────────────────────────
   function handleCropTap() {
     if (!plotInteractive) return;
+
+    if (plotData.status !== "empty" && rupertAwayFromGarden) {
+      showPlayerBubble('"I shouldn\'t waste any seeds."');
+      return;
+    }
+
     if (plotData.status === "empty") {
       // Empty plot → show seed selection
       // Carrot Seed is introduced in Point 11, but its crop duration/yield are

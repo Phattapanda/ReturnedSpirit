@@ -155,17 +155,7 @@ export default function PlayerBag({
       return;
     }
 
-    // Carrot Bag mirrors the Herb Bag's select-then-unpack rhythm. The Bag stays
-    // open so repeated taps can unpack individual carrots one at a time.
-    if (context === "kitchen" && item.id === "carrotbag") {
-      if (selectedCarrotBagSlot !== slotIdx) {
-        setSelectedCarrotBagSlot(slotIdx);
-        return;
-      }
-      await unpackOneCarrot(slotIdx, item);
-      return;
-    }
-
+    // Carrot Bag transfers to the Kitchen Table like Herb Bag; unpacking happens there.
     setSelectedCarrotBagSlot(null);
     if (context === "garden" || context === "none") {
       setDiscardTarget({ slotIdx, item });

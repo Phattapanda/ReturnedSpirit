@@ -192,6 +192,8 @@ const IMG = {
 // Item image map for kitchen table items (non-soup items unpacked from bag)
 const ITEM_IMAGES: Record<string, ReturnType<typeof require>> = {
   herbbag:     require("../assets/images/herbbag.png"),
+  carrotbag:   require("../assets/images/carrotbag.png"),
+  carrot:      require("../assets/images/carrot.png"),
   herbsoup:    require("../assets/images/herbsoup.png"),
   bucket:      require("../assets/images/bucket.png"),
   bucketwater: require("../assets/images/bucketwater.png"),
@@ -361,6 +363,7 @@ export default function KitchenScreen() {
   const craftingLocked = useRef(false);
   const cookingTutorialCompletedRef = useRef(false);
   const [selectedHerbbagSlot, setSelectedHerbbagSlot] = useState<number | null>(null);
+  const [selectedCarrotbagSlot, setSelectedCarrotbagSlot] = useState<number | null>(null);
   const [selectedHerbsSlot, setSelectedHerbsSlot] = useState<number | null>(null);
   const [selectedSoupSlot, setSelectedSoupSlot] = useState<number | null>(null);
   const [bagPulseActive, setBagPulseActive] = useState(false);
@@ -2155,6 +2158,7 @@ export default function KitchenScreen() {
       const remaining = item.containedQuantity ?? 0;
       if (selectedHerbbagSlot === null || selectedHerbbagSlot !== slot) {
         setSelectedHerbbagSlot(slot);
+        setSelectedCarrotbagSlot(null);
         setSelectedHerbsSlot(null);
         setSelectedSoupSlot(null);
         showCookingTooltip("Herb Bag", "Contains: " + remaining + (remaining === 1 ? " herb" : " herbs"));
@@ -2163,6 +2167,27 @@ export default function KitchenScreen() {
         const afterQty = remaining - 1;
         if (afterQty > 0) {
           showCookingTooltip("Herb Bag", "Contains: " + afterQty + (afterQty === 1 ? " herb" : " herbs"));
+        } else {
+          setTooltipVisible(false);
+        }
+      }
+      return;
+    }
+
+    // Carrot Bag mirrors Herb Bag exactly: select first, then unpack one carrot per tap.
+    if (onTable && item.id === "carrotbag" && isKitchenItemInteractionState(cur)) {
+      const remaining = item.containedQuantity ?? 0;
+      if (selectedCarrotbagSlot === null || selectedCarrotbagSlot !== slot) {
+        setSelectedCarrotbagSlot(slot);
+        setSelectedHerbbagSlot(null);
+        setSelectedHerbsSlot(null);
+        setSelectedSoupSlot(null);
+        showCookingTooltip("Carrot Bag", "Contains: " + remaining + (remaining === 1 ? " carrot" : " carrots"));
+      } else {
+        unpackOneCarrot(slot, item);
+        const afterQty = remaining - 1;
+        if (afterQty > 0) {
+          showCookingTooltip("Carrot Bag", "Contains: " + afterQty + (afterQty === 1 ? " carrot" : " carrots"));
         } else {
           setTooltipVisible(false);
         }
@@ -2181,6 +2206,7 @@ export default function KitchenScreen() {
       if (selectedHerbsSlot === null || selectedHerbsSlot !== slot) {
         setSelectedHerbsSlot(slot);
         setSelectedHerbbagSlot(null);
+        setSelectedCarrotbagSlot(null);
         setSelectedSoupSlot(null);
         showCookingTooltip(ITEM_CATALOG["herbs"].name, ITEM_CATALOG["herbs"].description);
       } else {
@@ -2283,6 +2309,7 @@ export default function KitchenScreen() {
     // Tap-selection is transient. Once an item moves, no later occupant of that
     // physical slot may inherit the old yellow/green selection frame.
     setSelectedHerbbagSlot(null);
+    setSelectedCarrotbagSlot(null);
     setSelectedHerbsSlot(null);
     setSelectedSoupSlot(null);
     setTooltipVisible(false);
@@ -2618,6 +2645,49 @@ export default function KitchenScreen() {
     setTableItems(newTable);
     AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(newTable)).catch(() => {});
     checkCookingProgress(newTable);
+  }
+
+  /** Unpack one carrot from carrotbag on the table. */
+  function unpackOneCarrot(carrotbagSlot: number, carrotbag: BagItem) {
+    const qty = carrotbag.containedQuantity ?? 0;
+    if (qty <= 0) { showPlayerBubble('"The bag is empty."'); return; }
+
+    const newTable = tableItems.slice();
+    const newQty = qty - 1;
+    if (newQty <= 0) {
+      newTable[carrotbagSlot] = null;
+      setSelectedCarrotbagSlot(null);
+    } else {
+      newTable[carrotbagSlot] = { ...carrotbag, containedQuantity: newQty };
+    }
+
+    const TABLE_STACK = 20;
+    let placed = false;
+    for (let i = 0; i < 12; i++) {
+      if (i === carrotbagSlot) continue;
+      const t = newTable[i];
+      if (t && t.id === "carrot" && t.quantity < TABLE_STACK) {
+        newTable[i] = { ...t, quantity: t.quantity + 1 };
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      for (let i = 0; i < 12; i++) {
+        if (i === carrotbagSlot) continue;
+        if (!newTable[i]) {
+          newTable[i] = { id: "carrot", itemType: "carrot", name: "Carrot", quantity: 1, attributes: ["ingredient"] };
+          placed = true;
+          break;
+        }
+      }
+    }
+    if (!placed) { showPlayerBubble('"No free space available."'); return; }
+
+    tableItemsRef.current = newTable;
+    audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
+    setTableItems(newTable);
+    AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(newTable)).catch(() => {});
   }
 
   /** Return an ingredient slot item back to the table. */
@@ -3061,10 +3131,12 @@ export default function KitchenScreen() {
     if (!item) return null;
     const imgSrc = ITEM_IMAGES[item.id] ?? null;
 
-    const isSelectedHerbbag = selectedHerbbagSlot === slotIdx && item.id === "herbbag";
-    const isSelectedHerbs   = selectedHerbsSlot === slotIdx && item.id === "herbs";
-    const isSelectedSoup    = selectedSoupSlot === slotIdx && item.id === "herbsoup";
+    const isSelectedHerbbag   = selectedHerbbagSlot === slotIdx && item.id === "herbbag";
+    const isSelectedCarrotbag = selectedCarrotbagSlot === slotIdx && item.id === "carrotbag";
+    const isSelectedHerbs     = selectedHerbsSlot === slotIdx && item.id === "herbs";
+    const isSelectedSoup      = selectedSoupSlot === slotIdx && item.id === "herbsoup";
     const showHerbbagTapHint = isKitchenItemInteractionState(ts) && item.id === "herbbag" && isSelectedHerbbag;
+    const showCarrotbagTapHint = isKitchenItemInteractionState(ts) && item.id === "carrotbag" && isSelectedCarrotbag;
 
     // Herb Soup keeps its dedicated share/eat tutorial behavior after crafting.
     if (ts === "COOKING_SHARE_EAT" && item.id === "herbsoup") {
@@ -3102,8 +3174,9 @@ export default function KitchenScreen() {
           <View
             style={[
               styles.soupSlotTouch,
-              isSelectedHerbbag && { borderWidth: 2, borderColor: "#E8B84B", borderRadius: 6 },
-              isSelectedHerbs   && { borderWidth: 2, borderColor: "#7EC87E", borderRadius: 6 },
+              isSelectedHerbbag   && { borderWidth: 2, borderColor: "#E8B84B", borderRadius: 6 },
+              isSelectedCarrotbag && { borderWidth: 2, borderColor: "#E8B84B", borderRadius: 6 },
+              isSelectedHerbs     && { borderWidth: 2, borderColor: "#7EC87E", borderRadius: 6 },
               isSelectedSoup    && { borderWidth: 2, borderColor: "#7EC87E", borderRadius: 6 },
             ]}
           >
@@ -3114,6 +3187,11 @@ export default function KitchenScreen() {
               <Text style={styles.tableItemQty}>{item.quantity}</Text>
             )}
             {!isBeingDragged && showHerbbagTapHint && (
+              <View style={{ position: "absolute", bottom: 2, right: 2, backgroundColor: "#E8B84B", borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1 }}>
+                <Text style={{ color: "#2C1810", fontSize: 8, fontWeight: "700" }}>TAP</Text>
+              </View>
+            )}
+            {!isBeingDragged && showCarrotbagTapHint && (
               <View style={{ position: "absolute", bottom: 2, right: 2, backgroundColor: "#E8B84B", borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1 }}>
                 <Text style={{ color: "#2C1810", fontSize: 8, fontWeight: "700" }}>TAP</Text>
               </View>
