@@ -51,7 +51,12 @@ import {
 } from "@/src/game/player-stats";
 import type { ActivityId } from "@/src/game/activity-config";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
-import { guestTutorialKeepsRupertInDining, loadGuestTutorialIntroStep } from "@/src/game/guest-tutorial";
+import {
+  guestTutorialKeepsRupertInDining,
+  guestTutorialRupertHasLeftGarden,
+  loadGuestTutorialIntroStep,
+} from "@/src/game/guest-tutorial";
+import { loadPostGuestTutorialState } from "@/src/game/post-guest-tutorial";
 import { ensureAssetReady } from "@/src/assets/AssetManager";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
@@ -202,6 +207,30 @@ const DEFAULT_INVENTORY: InventoryItem[] = [
   { id: "standard_fertilizer", itemType: "fertilizer",  name: "Standard Fertilizer",  quantity: 5 },
 ];
 
+const SECOND_PLOT_EMPTY: GardenPlotData = {
+  id: "garden_plot_02",
+  plotType: "small",
+  upgradeLevel: 1,
+  status: "empty",
+  cropType: null,
+  cropAsset: null,
+  seedItemId: null,
+  totalGrowthDays: 0,
+  completedGrowthDays: 0,
+  remainingGrowthDays: 0,
+  progressPercent: 0,
+  wateredToday: false,
+  weedsPulledToday: false,
+  fertilizedToday: false,
+  fertilizerTypeUsedToday: null,
+  consecutiveUnwateredDays: 0,
+  baseYield: 0,
+  accumulatedWeedYieldBonus: 0,
+  accumulatedFertilizerYieldBonus: 0,
+  readyToHarvest: false,
+  withered: false,
+};
+
 const TUTORIAL_PLOT_INITIAL: GardenPlotData = {
   id: "garden_plot_01",
   plotType: "small",
@@ -277,7 +306,11 @@ export default function GardenScreen() {
 
   // ── Portraits
   const [rupertPortrait, setRupertPortrait] = useState<"normal" | "sad" | "laugh">("normal");
+  // Guest-service restrictions end at service_complete, but Rupert never returns
+  // to the Garden portrait slot after leaving to greet the first guest.
   const [rupertInDining, setRupertInDining] = useState(false);
+  const [rupertAwayFromGarden, setRupertAwayFromGarden] = useState(true);
+  const [secondPlotUnlocked, setSecondPlotUnlocked] = useState(false);
 
   // ── Tutorial state machine
   const [gts, setGts] = useState<GTState>("LOADING");
@@ -476,6 +509,9 @@ export default function GardenScreen() {
       try {
         const guestTutorialStep = await loadGuestTutorialIntroStep();
         setRupertInDining(guestTutorialKeepsRupertInDining(guestTutorialStep));
+        setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(guestTutorialStep));
+        const postGuestState = await loadPostGuestTutorialState();
+        setSecondPlotUnlocked(postGuestState.secondPlotUnlocked);
 
         // Load logbook (shared with kitchen.tsx)
         const lb = await loadLogbook();
@@ -565,8 +601,18 @@ export default function GardenScreen() {
           const hasBucket = await AsyncStorage.getItem(GSK.HAS_BUCKET);
           const activityBar = await AsyncStorage.getItem(GSK.ACTIVITY_BAR);
           const hasWater = await AsyncStorage.getItem(GSK.HAS_WATER);
+          const cookingDone = await AsyncStorage.getItem("@kitchen:cooking_tutorial_done");
 
-          if (activityBar === "true") {
+          // Once the Cooking Tutorial is finished, every old Tuesday Garden gate is over.
+          // Keep unlocked UI, but restore the room as ordinary free-play instead of
+          // demanding another Bucket of Water on every later visit.
+          if (cookingDone === "true") {
+            setActivityBarVisible(activityBar === "true");
+            if (bagUnlocked === "true") {
+              setPlayerBag(prev => ({ ...prev, unlocked: true }));
+            }
+            setGardenState("IDLE");
+          } else if (activityBar === "true") {
             setActivityBarVisible(true);
             // Restore bag unlock
             if (bagUnlocked === "true") {
@@ -1865,10 +1911,10 @@ export default function GardenScreen() {
           </TouchableOpacity>
           <View
             ref={rupertPortraitRef}
-            style={[styles.circleWrap, rupertInDining && styles.rupertAway]}
+            style={[styles.circleWrap, rupertAwayFromGarden && styles.rupertAway]}
             pointerEvents="none"
           >
-            {!rupertInDining && (
+            {!rupertAwayFromGarden && (
               <Image source={rupertSrc(rupertPortrait)} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />
             )}
           </View>
@@ -1902,6 +1948,22 @@ export default function GardenScreen() {
             onLockedAction={() => showPlayerBubble('"That won\'t achieve anything."')}
           />
         </Animated.View>
+
+        {secondPlotUnlocked && (
+          <View style={styles.secondPlotWrap}>
+            <Text style={styles.secondPlotLabel}>2nd Plot</Text>
+            <GardenPlot
+              data={SECOND_PLOT_EMPTY}
+              interactive={false}
+              onWater={() => {}}
+              onPullWeeds={() => {}}
+              onFertilize={() => {}}
+              onHarvest={() => {}}
+              onCropTap={() => {}}
+              actionCosts={{ water: waterCost, pullWeeds: pullWeedsCost, fertilize: fertilizeCost }}
+            />
+          </View>
+        )}
 
         {/* Post-tutorial hint */}
         {(gts === "IDLE" || gts === "GARDEN_TUTORIAL_COMPLETE") && (
@@ -2398,6 +2460,18 @@ const styles = StyleSheet.create({
   locBtnLocked: { backgroundColor: "rgba(255,255,255,0.02)", borderColor: "rgba(255,255,255,0.07)" },
   locBtnImg: { width: 42, height: 42 },
   locBtnImgLocked: { opacity: 0.20 },
+
+  secondPlotWrap: {
+    marginHorizontal: 16,
+    marginTop: 12,
+  },
+  secondPlotLabel: {
+    color: "#C4943A",
+    fontSize: 13,
+    fontFamily: "Oldenburg",
+    letterSpacing: 0.8,
+    marginBottom: 6,
+  },
 
   idleHint: {
     color: "rgba(196,148,58,0.45)",
