@@ -1,0 +1,98 @@
+name: Apply carrot crop foundation
+
+on:
+  push:
+    branches:
+      - feat/post-guest-tutorial-upgrades
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/post-guest-tutorial-upgrades
+          fetch-depth: 0
+      - name: Apply focused carrot foundation patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          files = {
+            'plot': Path('frontend/src/components/GardenPlot.tsx'),
+            'items': Path('frontend/src/game/item-system.ts'),
+            'dorm': Path('frontend/app/dormitory.tsx'),
+            'save': Path('frontend/src/game/save-manager.ts'),
+          }
+          text = {k:p.read_text() for k,p in files.items()}
+
+          def rep(k, old, new, label):
+            count = text[k].count(old)
+            if count != 1:
+              raise SystemExit(f'{label}: expected 1 match, found {count}')
+            text[k] = text[k].replace(old, new, 1)
+
+          rep('plot',
+'''  herbseed:      require("../../assets/images/herbseed.png"),\n  herbs:         require("../../assets/images/herbs.png"),\n};''',
+'''  herbseed:      require("../../assets/images/herbseed.png"),\n  herbs:         require("../../assets/images/herbs.png"),\n  carrotseed:    require("../../assets/images/carrotseed.png"),\n  carrotyoung:   require("../../assets/images/carrotyoung.png"),\n  carrotbed:     require("../../assets/images/carrotbed.png"),\n};''',
+'GardenPlot carrot assets')
+
+          rep('plot',
+'''  herb: {\n    seedStageAsset:    "herbseed",\n    growingStageAsset: "herbbed_young",\n    readyStageAsset:   "herbbed",\n  },\n};''',
+'''  herb: {\n    seedStageAsset:    "herbseed",\n    growingStageAsset: "herbbed_young",\n    readyStageAsset:   "herbbed",\n  },\n  carrot: {\n    seedStageAsset:    "carrotseed",\n    growingStageAsset: "carrotyoung",\n    readyStageAsset:   "carrotbed",\n  },\n};''',
+'GardenPlot carrot stages')
+
+          rep('plot',
+'''  // ── Empty plot: no actions available except tapping crop area to plant\n  const isEmpty = data.status === "empty";''',
+'''  const yieldName = data.cropType === "carrot" ? "carrots" : "herbs";\n\n  // ── Empty plot: no actions available except tapping crop area to plant\n  const isEmpty = data.status === "empty";''',
+'GardenPlot yield name')
+
+          rep('plot',
+'''              Est. yield: {data.baseYield + data.accumulatedWeedYieldBonus + data.accumulatedFertilizerYieldBonus} herbs''',
+'''              Est. yield: {data.baseYield + data.accumulatedWeedYieldBonus + data.accumulatedFertilizerYieldBonus} {yieldName}''',
+'GardenPlot yield label')
+
+          rep('items',
+'''  herbbag:     { name: "Herb Bag",         description: "A small bag filled with harvested herbs.", attributes: [] },\n  herbsoup:    {''',
+'''  herbbag:     { name: "Herb Bag",         description: "A small bag filled with harvested herbs.", attributes: [] },\n  carrotbag:   { name: "Carrot Bag",       description: "A small bag filled with harvested carrots.", attributes: [] },\n  herbsoup:    {''',
+'Item catalog carrotbag')
+
+          rep('items',
+'''  herbs:       { name: "Herbs",            description: "Fresh herbs picked from the garden.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },\n  bucket:      { name: "Empty Bucket",''',
+'''  herbs:       { name: "Herbs",            description: "Fresh herbs picked from the garden.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },\n  carrot:      { name: "Carrot",           description: "A fresh carrot harvested from the garden.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },\n  bucket:      { name: "Empty Bucket",''',
+'Item catalog carrot')
+
+          rep('items',
+'''  herbseed:    { name: "Herb Seed",        description: "Seeds for growing herbs.", attributes: [] },\n  // Resources''',
+'''  herbseed:    { name: "Herb Seed",        description: "Seeds for growing herbs.", attributes: [] },\n  carrotseed:  { name: "Carrot Seed",     description: "Seeds for growing carrots.", attributes: [] },\n  // Resources''',
+'Item catalog carrotseed')
+
+          rep('dorm',
+'''  PLOT_DATA:             "@garden:plot_01_data",\n  UNLOCKED_LOCS:''',
+'''  PLOT_DATA:             "@garden:plot_01_data",\n  PLOT_02_DATA:          "@garden:plot_02_data",\n  UNLOCKED_LOCS:''',
+'Dormitory second plot key')
+
+          rep('dorm',
+'''      // ── 2. Process garden plot growth\n      const rawPlot = await AsyncStorage.getItem(DSK.PLOT_DATA);\n      if (rawPlot) {\n        try {\n          const plot = JSON.parse(rawPlot) as GardenPlotData;\n          const updated = processPlotDayChange(plot);\n          await AsyncStorage.setItem(DSK.PLOT_DATA, JSON.stringify(updated));\n        } catch { /* non-critical */ }\n      }''',
+'''      // ── 2. Process every persistent garden plot\n      for (const plotKey of [DSK.PLOT_DATA, DSK.PLOT_02_DATA]) {\n        const rawPlot = await AsyncStorage.getItem(plotKey);\n        if (!rawPlot) continue;\n        try {\n          const plot = JSON.parse(rawPlot) as GardenPlotData;\n          const updated = processPlotDayChange(plot);\n          await AsyncStorage.setItem(plotKey, JSON.stringify(updated));\n        } catch { /* non-critical */ }\n      }''',
+'Dormitory process both plots')
+
+          rep('save',
+'''  "@garden:plot_01_data",\n  "@garden:inventory",''',
+'''  "@garden:plot_01_data",\n  "@garden:plot_02_data",\n  "@garden:inventory",''',
+'Save second plot')
+
+          for k,p in files.items(): p.write_text(text[k])
+          PY
+      - name: Commit carrot foundation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/components/GardenPlot.tsx frontend/src/game/item-system.ts frontend/app/dormitory.tsx frontend/src/game/save-manager.ts
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Add carrot crop foundation"
+          git push origin HEAD:feat/post-guest-tutorial-upgrades
