@@ -62,7 +62,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1.5,
     borderTopColor: "rgba(196,148,58,0.55)",
     paddingHorizontal: 18,
-    paddingTop: 54,
+    paddingTop: 46,
     alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: -6 },
