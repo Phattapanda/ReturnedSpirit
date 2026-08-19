@@ -85,3 +85,11 @@ export function guestTutorialKeepsRupertInDining(step: GuestTutorialIntroStep): 
     step === "service_reaction" ||
     step === "service_departing";
 }
+
+/**
+ * Once Rupert leaves Garden to greet the first guest, that middle portrait slot is
+ * permanently reserved for future Garden staff/support rather than Rupert.
+ */
+export function guestTutorialRupertHasLeftGarden(step: GuestTutorialIntroStep): boolean {
+  return guestTutorialHasReached(step, "ready_for_water");
+}
