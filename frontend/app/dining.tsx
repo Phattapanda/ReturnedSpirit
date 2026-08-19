@@ -61,6 +61,7 @@ const IMG = {
   dining_dawn:   require("../assets/images/dining_dawn.png"),
   herbsoup:      require("../assets/images/herbsoup.png"),
   rupert:        require("../assets/images/rupert.png"),
+  rupertsad:     require("../assets/images/rupertsad.png"),
   rupertlaugh:   require("../assets/images/rupertlaugh.png"),
   old_farmer:    require("../assets/images/old_farmer.png"),
   loc_kitchen:   require("../assets/images/gotokitchen.png"),
@@ -86,7 +87,7 @@ const LOCS = [
   { id: "explore",   nav: false },
 ] as const;
 
-type TutorialPortrait = "rupert" | "rupert_laugh" | "old_farmer" | "player";
+type TutorialPortrait = "rupert" | "rupert_sad" | "rupert_laugh" | "old_farmer" | "player";
 type TutorialLine = {
   speaker: string;
   text: string;
@@ -109,11 +110,19 @@ function farmerIntroduction(playerName: string): TutorialLine[] {
   ];
 }
 
-const RUPERT_SERVING_EXPLANATION: TutorialLine[] = [
-  { speaker: "Rupert", portrait: "rupert", text: '"We already ate all of the soup."' },
-  { speaker: "Rupert", portrait: "rupert", text: '"You would need to carry the bucket from the kitchen back to the garden in the bag to fetch fresh water."' },
-  { speaker: "Rupert", portrait: "rupert", text: '"The bag is also a safe way to transport the herb soup to the dining hall."' },
-];
+function rupertServingExplanation(playerName: string): TutorialLine[] {
+  return [
+    { speaker: "Rupert", portrait: "rupert", text: '"We already ate all of the soup."' },
+    { speaker: "Rupert", portrait: "rupert_laugh", text: '"Sit down, I will be quick and make a new batch of soup for my favorite guest."' },
+    { speaker: "Rupert", portrait: "rupert_sad", text: '"Ouch, my back."' },
+    { speaker: playerName, portrait: "player", text: '"Please, sit down, too. I will prepare the soup."' },
+    { speaker: "Rupert", portrait: "rupert_sad", text: '"Are you sure?"' },
+    { speaker: playerName, portrait: "player", text: '"Yes, I learned the process and I told you, I want to work here."' },
+    { speaker: "Rupert", portrait: "rupert", text: '"Thank you."' },
+    { speaker: "Rupert", portrait: "rupert", text: '"You would need to carry the bucket from the kitchen back to the garden in the bag to fetch fresh water."' },
+    { speaker: "Rupert", portrait: "rupert", text: '"The bag is also a safe way to transport the herb soup to the dining hall."' },
+  ];
+}
 
 export default function DiningScreen() {
   const router = useRouter();
@@ -185,7 +194,7 @@ export default function DiningScreen() {
           setTutorialLineIndex(0);
         } else if (loadedTutorialStep === "meal_reveal") {
           setTutorialStep("meal_reveal");
-          setTutorialLines(RUPERT_SERVING_EXPLANATION);
+          setTutorialLines(rupertServingExplanation(resolvedName));
           setTutorialLineIndex(0);
         } else {
           setTutorialStep(loadedTutorialStep);
@@ -220,7 +229,7 @@ export default function DiningScreen() {
     if (tutorialStep === "farmer_intro") {
       await saveGuestTutorialIntroStep("meal_reveal");
       setTutorialStep("meal_reveal");
-      setTutorialLines(RUPERT_SERVING_EXPLANATION);
+      setTutorialLines(rupertServingExplanation(playerName));
       setTutorialLineIndex(0);
       return;
     }
@@ -236,6 +245,7 @@ export default function DiningScreen() {
   function tutorialPortraitSource(portrait: TutorialPortrait): ReturnType<typeof require> {
     if (portrait === "player") return getPlayerAvatarForStamina(playerAvatarId, staminaCurrent);
     if (portrait === "old_farmer") return IMG.old_farmer;
+    if (portrait === "rupert_sad") return IMG.rupertsad;
     if (portrait === "rupert_laugh") return IMG.rupertlaugh;
     return IMG.rupert;
   }
@@ -253,6 +263,7 @@ export default function DiningScreen() {
     !tutorialInDining ||
     tutorialStep === "meal_reveal" ||
     tutorialStep === "ready_for_water";
+  const showRupertInDining = tutorialStep === "meal_reveal" || tutorialStep === "ready_for_water";
   const useDawnBackground = tutorialInDining || timeOfDay === "morning";
 
   async function handleBagToMealSlot(bagSlotIndex: number) {
@@ -408,7 +419,11 @@ export default function DiningScreen() {
             />
           </TouchableOpacity>
 
-          <View style={[styles.circleWrap, styles.rupertReserve]} pointerEvents="none" />
+          <View style={[styles.circleWrap, !showRupertInDining && styles.rupertReserve]} pointerEvents="none">
+            {showRupertInDining && (
+              <Image source={IMG.rupert} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />
+            )}
+          </View>
 
           <BagIconButton
             unlocked={playerBag.unlocked}
