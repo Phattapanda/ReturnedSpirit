@@ -325,6 +325,7 @@ export default function KitchenScreen() {
   const [craftTool, setCraftTool] = useState<BagItem | null>(null);
   const [craftResult, setCraftResult] = useState<BagItem | null>(null);
   const craftingLocked = useRef(false);
+  const cookingTutorialCompletedRef = useRef(false);
   const [selectedHerbbagSlot, setSelectedHerbbagSlot] = useState<number | null>(null);
   const [selectedHerbsSlot, setSelectedHerbsSlot] = useState<number | null>(null);
   const [selectedSoupSlot, setSelectedSoupSlot] = useState<number | null>(null);
@@ -639,6 +640,7 @@ export default function KitchenScreen() {
     let active = true;
     (async () => {
       const cookingDone = await AsyncStorage.getItem(SK.COOKING_DONE);
+      cookingTutorialCompletedRef.current = cookingDone === "true";
       if (cookingDone !== "true") return;
       const step = await loadGuestTutorialIntroStep();
       if (!active || tsRef.current !== "IDLE") return;
@@ -740,6 +742,7 @@ export default function KitchenScreen() {
               // Check if cooking tutorial should start (initial load after app restart)
               const initCraftingReady = await AsyncStorage.getItem(SK.CRAFTING_READY);
               const initCookingDone   = await AsyncStorage.getItem(SK.COOKING_DONE);
+              cookingTutorialCompletedRef.current = initCookingDone === "true";
               let initReadyToCook = initCraftingReady === "true" && initCookingDone !== "true";
               if (!initReadyToCook && initCookingDone !== "true") {
                 const rawHarv2 = await AsyncStorage.getItem("@garden:has_harvested_tutorial_herbs");
@@ -925,6 +928,7 @@ export default function KitchenScreen() {
             // Check if returning from Tuesday garden ready for crafting
             let craftingReady = await AsyncStorage.getItem(SK.CRAFTING_READY);
             const cookingAlreadyDone = await AsyncStorage.getItem(SK.COOKING_DONE);
+            cookingTutorialCompletedRef.current = cookingAlreadyDone === "true";
             // Fallback: auto-detect readiness directly from inventory
             // (handles Android back button, stale garden state, any navigation path)
             if (craftingReady !== "true" && cookingAlreadyDone !== "true") {
@@ -1996,6 +2000,11 @@ export default function KitchenScreen() {
       state === "COOKING_DONE";
   }
 
+  function canUseRecipeSlots(state: TState) {
+    return state === "COOKING_CRAFT_READY" ||
+      (cookingTutorialCompletedRef.current && (state === "IDLE" || state === "COOKING_DONE"));
+  }
+
   function getCookingItemAtSlot(slot: number): BagItem | null {
     if (slot <= 11) return tableItemsRef.current[slot] ?? null;
     if (slot <= 14) return craftIngSlotsRef.current[slot - 12] ?? null;
@@ -2114,8 +2123,8 @@ export default function KitchenScreen() {
 
     let next: number | null = null;
 
-    // Ingredient and Tool targets are only fully open while the recipe tutorial is active.
-    if (cur === "COOKING_CRAFT_READY") {
+    // Ingredient slots stay available for normal cooking after the tutorial.
+    if (canUseRecipeSlots(cur)) {
       for (let i = 0; i < 3; i++) {
         if (12 + i === srcSlot) continue;
         if (lcs[i] && inRect(itemX, itemY, lcs[i]!)) { next = 12 + i; break; }
@@ -2295,7 +2304,7 @@ export default function KitchenScreen() {
     if (plan.remainderQty > 0) {
       showPlayerBubble('"That is all I can fit."');
     }
-    if (tsRef.current === "COOKING_CRAFT_READY") {
+    if (canUseRecipeSlots(tsRef.current)) {
       setTimeout(updateCraftResultPreview, 50);
     }
   }
@@ -2325,8 +2334,8 @@ export default function KitchenScreen() {
     const lts = layouts.current.tableSlots;
     let destSlot = -1;
 
-    // Only the active recipe phase opens Ingredient slots as destinations.
-    if (cur === "COOKING_CRAFT_READY") {
+    // Ingredient slots remain valid destinations after the tutorial for normal cooking.
+    if (canUseRecipeSlots(cur)) {
       for (let i = 0; i < 3; i++) {
         if (lcs[i] && inRect(absX, absY, lcs[i]!)) { destSlot = 12 + i; break; }
       }
@@ -2404,7 +2413,7 @@ export default function KitchenScreen() {
     AsyncStorage.setItem(SK.CRAFT_TOOL_SLOT, JSON.stringify(newTool)).catch(() => {});
 
     audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
-    if (cur === "COOKING_CRAFT_READY") setTimeout(updateCraftResultPreview, 50);
+    if (canUseRecipeSlots(cur)) setTimeout(updateCraftResultPreview, 50);
     if (cur === "COOKING_UNPACK_WAIT") checkCookingProgress(newTable);
   }
 
@@ -2543,6 +2552,7 @@ export default function KitchenScreen() {
     if (craftingLocked.current) return;
     if (!craftResult) return;
     craftingLocked.current = true;
+    const tutorialCraft = !cookingTutorialCompletedRef.current;
 
     // Defensive execution-time validation so a stale preview can never consume
     // unrelated items or craft a recipe that is no longer exact.
@@ -2625,8 +2635,15 @@ export default function KitchenScreen() {
     AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(newTable)).catch(() => {});
     AsyncStorage.setItem(SK.CRAFT_INGREDIENTS, JSON.stringify(newIng)).catch(() => {});
     AsyncStorage.setItem(SK.CRAFT_TOOL_SLOT, JSON.stringify(craftTool)).catch(() => {});
-    AsyncStorage.setItem(SK.COOKING_STEP, "3").catch(() => {});
 
+    if (!tutorialCraft) {
+      setTutState("IDLE");
+      tsRef.current = "IDLE";
+      setTimeout(() => { craftingLocked.current = false; }, 350);
+      return;
+    }
+
+    AsyncStorage.setItem(SK.COOKING_STEP, "3").catch(() => {});
     setTutState("COOKING_CRAFT_DONE");
     tsRef.current = "COOKING_CRAFT_DONE";
     setTimeout(() => showDialog(D_CRAFT_SUCCESS, () => {
@@ -2755,6 +2772,7 @@ export default function KitchenScreen() {
     setSoupSlot(null); soupSlotRef.current = null;
     setTutState("COOKING_DONE");
     tsRef.current = "COOKING_DONE";
+    cookingTutorialCompletedRef.current = true;
     AsyncStorage.setItem(SK.COOKING_DONE, "true").catch(() => {});
     AsyncStorage.setItem(SK.COOKING_STEP, "4").catch(() => {});
     showBubble(
