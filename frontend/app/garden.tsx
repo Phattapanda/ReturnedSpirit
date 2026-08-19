@@ -1184,9 +1184,17 @@ export default function GardenScreen() {
     if (!plotInteractive) return;
     if (plotData.status === "empty") {
       // Empty plot → show seed selection
-      const availableSeeds = inventory.filter(i => i.itemType === "seed" && i.quantity > 0);
+      // Carrot Seed is introduced in Point 11, but its crop duration/yield are
+      // intentionally not defined yet. Never fall through to the current Herb-only
+      // planting initializer and accidentally turn a Carrot Seed into an herb crop.
+      const availableSeeds = inventory.filter(
+        i => i.itemType === "seed" && i.quantity > 0 && i.id !== "carrotseed",
+      );
       if (availableSeeds.length === 0) {
-        showPlayerBubble('"I have no seeds."');
+        const hasCarrotSeed = inventory.some(i => i.id === "carrotseed" && i.quantity > 0);
+        showPlayerBubble(hasCarrotSeed
+          ? '"I should keep the carrot seed for the new plot."'
+          : '"I have no seeds."');
         return;
       }
       // Auto-select first available seed
