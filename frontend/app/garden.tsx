@@ -51,7 +51,7 @@ import {
 } from "@/src/game/player-stats";
 import type { ActivityId } from "@/src/game/activity-config";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
-import { loadGuestTutorialIntroStep } from "@/src/game/guest-tutorial";
+import { guestTutorialKeepsRupertInDining, loadGuestTutorialIntroStep } from "@/src/game/guest-tutorial";
 import { ensureAssetReady } from "@/src/assets/AssetManager";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
@@ -475,7 +475,7 @@ export default function GardenScreen() {
     (async () => {
       try {
         const guestTutorialStep = await loadGuestTutorialIntroStep();
-        setRupertInDining(guestTutorialStep === "ready_for_water");
+        setRupertInDining(guestTutorialKeepsRupertInDining(guestTutorialStep));
 
         // Load logbook (shared with kitchen.tsx)
         const lb = await loadLogbook();

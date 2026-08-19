@@ -41,7 +41,11 @@ import { planKitchenItemToBag } from "@/src/game/kitchen-bag-transfer";
 import { PLAYER_STATS_KEY, DEFAULT_PLAYER_STATS, type PlayerStats } from "@/src/game/player-stats";
 import { loadLogbook, type LogEntry, LOGBOOK_KEY } from "@/src/game/logbook";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
-import { loadGuestTutorialIntroStep, saveGuestTutorialIntroStep } from "@/src/game/guest-tutorial";
+import {
+  guestTutorialKeepsRupertInDining,
+  loadGuestTutorialIntroStep,
+  saveGuestTutorialIntroStep,
+} from "@/src/game/guest-tutorial";
 import { ensureAssetReady } from "@/src/assets/AssetManager";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
@@ -644,7 +648,7 @@ export default function KitchenScreen() {
       if (cookingDone !== "true") return;
       const step = await loadGuestTutorialIntroStep();
       if (!active || tsRef.current !== "IDLE") return;
-      setRupertInDining(step === "ready_for_water");
+      setRupertInDining(guestTutorialKeepsRupertInDining(step));
       if (step === "not_started" || step === "knock") {
         void startGuestTutorialIntro();
       } else if (step === "dining_prompt") {
