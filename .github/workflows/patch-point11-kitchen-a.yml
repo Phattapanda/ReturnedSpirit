@@ -1,0 +1,48 @@
+name: Patch Kitchen Point 11 state foundations
+
+on:
+  push:
+    branches:
+      - feat/post-guest-tutorial-upgrades
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/post-guest-tutorial-upgrades
+      - name: Patch imports dialog and state
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('frontend/app/kitchen.tsx')
+          s=p.read_text()
+          def rep(old,new,label):
+            global s
+            c=s.count(old)
+            if c!=1: raise SystemExit(f'{label}: {c}')
+            s=s.replace(old,new,1)
+
+          rep('import { ensureAssetReady } from "@/src/assets/AssetManager";', '''import { ensureAssetReady } from "@/src/assets/AssetManager";\nimport {\n  DEFAULT_POST_GUEST_TUTORIAL_STATE,\n  SECOND_PLOT_STONE_COST,\n  SECOND_PLOT_WOOD_COST,\n  grantFarmerCarrotSeedOnce,\n  loadPostGuestTutorialState,\n  markUpgradeIntroSeen,\n  purchaseSecondPlotUpgrade,\n  type PostGuestTutorialState,\n} from "@/src/game/post-guest-tutorial";\nimport {\n  SHARED_RESOURCE_DEFAULTS,\n  SHARED_RESOURCES_KEY,\n  type SharedResources,\n} from "@/src/game/shared-resources";''', 'imports')
+
+          rep('''const D_POST_CONSUMPTION: DLine[] = [''', '''const D_UPGRADE_INTRO: DLine[] = [\n  { id: "d_upgrade.0", speaker: "Rupert", portrait: "laugh", text: '\"You handled your first guest well.\"' },\n  { id: "d_upgrade.1", speaker: "Rupert", portrait: "normal", text: '\"From now on, tap me whenever you want to improve the tavern or its grounds.\"' },\n  { id: "d_upgrade.2", speaker: "Rupert", portrait: "normal", text: '\"A second garden plot is a simple start. It needs 4 Wood and 4 Stone.\"' },\n];\n\nconst D_POST_CONSUMPTION: DLine[] = [''', 'dialog')
+
+          rep('''  const [showMenu, setShowMenu] = useState(false);\n  const [showRecipes, setShowRecipes] = useState(false);''', '''  const [showMenu, setShowMenu] = useState(false);\n  const [showRecipes, setShowRecipes] = useState(false);\n  const [showUpgrades, setShowUpgrades] = useState(false);\n  const [upgradeBusy, setUpgradeBusy] = useState(false);\n  const [upgradeMessage, setUpgradeMessage] = useState<string | null>(null);''', 'modal state')
+
+          rep('''  const [rupertPortrait, setRupertPortrait] = useState<"normal" | "sad" | "laugh">("normal");\n  const [rupertInDining, setRupertInDining] = useState(false);\n  const focusCountRef = useRef(0);''', '''  const [rupertPortrait, setRupertPortrait] = useState<"normal" | "sad" | "laugh">("normal");\n  const [rupertInDining, setRupertInDining] = useState(true);\n  const [postGuestState, setPostGuestState] = useState<PostGuestTutorialState>(DEFAULT_POST_GUEST_TUTORIAL_STATE);\n  const [sharedResources, setSharedResources] = useState<SharedResources>({ ...SHARED_RESOURCE_DEFAULTS });\n  const postGuestIntroStartedRef = useRef(false);\n  const focusCountRef = useRef(0);''', 'game state')
+
+          p.write_text(s)
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/app/kitchen.tsx
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Prepare Kitchen post guest upgrade state"
+          git push origin HEAD:feat/post-guest-tutorial-upgrades
