@@ -1,0 +1,37 @@
+name: Stop repeat Kitchen bag tutorial pulse
+
+on:
+  push:
+    branches:
+      - feat/post-guest-tutorial-upgrades
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/post-guest-tutorial-upgrades
+      - name: Apply focused pulse fix
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('frontend/app/kitchen.tsx')
+          s=p.read_text()
+          old='''    setTutState("COOKING_UNPACK_WAIT");\n    tsRef.current = "COOKING_UNPACK_WAIT";\n    setBagPulseActive(true);\n    bagOpenedOnceDuringCooking.current = false;'''
+          new='''    setTutState("COOKING_UNPACK_WAIT");\n    tsRef.current = "COOKING_UNPACK_WAIT";\n    // The Player Bag pulse belongs only to the original bag-receiving tutorial.\n    // Cooking may ask the player to open it, but must not reintroduce that pulse.\n    setBagPulseActive(false);\n    bagOpenedOnceDuringCooking.current = false;'''
+          if s.count(old)!=1: raise SystemExit(f'matches: {s.count(old)}')
+          p.write_text(s.replace(old,new,1))
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/app/kitchen.tsx
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Stop repeat Player Bag pulse in Cooking tutorial"
+          git push origin HEAD:feat/post-guest-tutorial-upgrades
