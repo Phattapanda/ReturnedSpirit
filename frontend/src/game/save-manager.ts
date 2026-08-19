@@ -75,6 +75,7 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   "@garden:tutorial_complete",
   "@garden:tutorial_state",
   "@garden:plot_01_data",
+  "@garden:plot_02_data",
   "@garden:inventory",
   "@garden:selected_fertilizer",
   "@garden:inventory_bag_unlocked",
