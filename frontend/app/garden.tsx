@@ -51,6 +51,7 @@ import {
 } from "@/src/game/player-stats";
 import type { ActivityId } from "@/src/game/activity-config";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
+import { loadGuestTutorialIntroStep } from "@/src/game/guest-tutorial";
 import { ensureAssetReady } from "@/src/assets/AssetManager";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
@@ -276,6 +277,7 @@ export default function GardenScreen() {
 
   // ── Portraits
   const [rupertPortrait, setRupertPortrait] = useState<"normal" | "sad" | "laugh">("normal");
+  const [rupertInDining, setRupertInDining] = useState(false);
 
   // ── Tutorial state machine
   const [gts, setGts] = useState<GTState>("LOADING");
@@ -472,6 +474,9 @@ export default function GardenScreen() {
   useEffect(() => {
     (async () => {
       try {
+        const guestTutorialStep = await loadGuestTutorialIntroStep();
+        setRupertInDining(guestTutorialStep === "ready_for_water");
+
         // Load logbook (shared with kitchen.tsx)
         const lb = await loadLogbook();
         setLogbook(lb);
@@ -1842,9 +1847,12 @@ export default function GardenScreen() {
           </TouchableOpacity>
           <View
             ref={rupertPortraitRef}
-            style={styles.circleWrap}
+            style={[styles.circleWrap, rupertInDining && styles.rupertAway]}
+            pointerEvents="none"
           >
-            <Image source={rupertSrc(rupertPortrait)} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />
+            {!rupertInDining && (
+              <Image source={rupertSrc(rupertPortrait)} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />
+            )}
           </View>
           {/* Bag icon or locked slot */}
           {playerBag.unlocked ? (
@@ -2343,6 +2351,7 @@ const styles = StyleSheet.create({
   circleWrapLocked: { borderColor: "#3A3A3A", backgroundColor: "#1A1A1A", alignItems: "center", justifyContent: "center" },
   circleImg: { width: "100%", height: "100%" },
   playerPortraitImage: { transform: [{ scale: 1.06 }] },
+  rupertAway: { opacity: 0, borderColor: "transparent", backgroundColor: "transparent" },
 
   // Location bar
   locationBar: {
