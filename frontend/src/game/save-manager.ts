@@ -28,6 +28,10 @@ import {
   DEFAULT_GUEST_TUTORIAL_INTRO_STEP,
   GUEST_TUTORIAL_INTRO_KEY,
 } from "@/src/game/guest-tutorial";
+import {
+  DEFAULT_POST_GUEST_TUTORIAL_STATE,
+  POST_GUEST_TUTORIAL_STATE_KEY,
+} from "@/src/game/post-guest-tutorial";
 
 /** All gameplay keys that form a complete save snapshot (NO meta keys like active_slot / game_slots). */
 export const ALL_SNAPSHOT_KEYS: string[] = [
@@ -49,6 +53,7 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   GUEST_STATE_KEY,
   DINING_MEAL_STATE_KEY,
   GUEST_TUTORIAL_INTRO_KEY,
+  POST_GUEST_TUTORIAL_STATE_KEY,
   // Kitchen tutorial flags
   "@tutorial:kitchen_done",
   "@kitchen:has_seen_post_garden_dialog",
@@ -123,6 +128,7 @@ export async function createSnapshot(
         [GUEST_STATE_KEY, JSON.stringify(DEFAULT_GUEST_STATE)],
         [DINING_MEAL_STATE_KEY, JSON.stringify(DEFAULT_DINING_MEAL_STATE)],
         [GUEST_TUTORIAL_INTRO_KEY, DEFAULT_GUEST_TUTORIAL_INTRO_STEP],
+        [POST_GUEST_TUTORIAL_STATE_KEY, JSON.stringify(DEFAULT_POST_GUEST_TUTORIAL_STATE)],
       ]);
     }
 
