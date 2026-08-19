@@ -42,6 +42,11 @@ import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, type PlayerStats } from "@/src/
 import { DEFAULT_BAG, PLAYER_BAG_KEY, type PlayerBagData } from "@/src/game/item-system";
 import { addCurrencyCopper } from "@/src/game/currency-system";
 import { setActiveGuest, type GuestVisitView } from "@/src/game/guest-system";
+import {
+  grantFarmerCarrotSeedOnce,
+  loadPostGuestTutorialState,
+  markSecondPlotThoughtSeen,
+} from "@/src/game/post-guest-tutorial";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
 import {
   PLAYER_AVATAR_KEY,
@@ -70,6 +75,7 @@ const IMG = {
   rupertlaugh:   require("../assets/images/rupertlaugh.png"),
   old_farmer:    require("../assets/images/old_farmer.png"),
   coin_copper:   require("../assets/images/coin_copper.png"),
+  carrotseed:    require("../assets/images/carrotseed.png"),
   loc_kitchen:   require("../assets/images/gotokitchen.png"),
   loc_garden:    require("../assets/images/gotogarden.png"),
   loc_dining:    require("../assets/images/gotodining.png"),
@@ -120,6 +126,7 @@ function farmerIntroduction(playerName: string): TutorialLine[] {
 function serviceReaction(): TutorialLine[] {
   return [
     { speaker: "Old Farmer", portrait: "old_farmer", text: '"That hit the spot. I\'ll come back soon."' },
+    { speaker: "Old Farmer", portrait: "old_farmer", text: '"Before I go, take this carrot seed. Maybe you can find some space for it."' },
     { speaker: "Rupert", portrait: "rupert_laugh", text: '"Not bad for your first guest."' },
   ];
 }
@@ -226,16 +233,32 @@ export default function DiningScreen() {
           setTutorialLines(serviceReaction());
           setTutorialLineIndex(0);
         } else if (loadedTutorialStep === "service_departing") {
+          await grantFarmerCarrotSeedOnce();
           setTutorialStep("service_departing");
           setDepartingGuestId("old_farmer");
           setTimeout(async () => {
             await setActiveGuest(null);
             await saveGuestTutorialIntroStep("service_complete");
+            const postState = await loadPostGuestTutorialState();
             if (active) {
               setTutorialStep("service_complete");
               setDepartingGuestId(null);
+              if (!postState.secondPlotThoughtSeen) {
+                setTimeout(() => showPlayerThought("I could use a second garden bed for the carrot seed."), 250);
+                await markSecondPlotThoughtSeen();
+              }
             }
           }, 720);
+        } else if (loadedTutorialStep === "service_complete") {
+          // Save migration: Part 10 may already have been completed before the
+          // Farmer gift existed. Grant it once without forcing a replay.
+          await grantFarmerCarrotSeedOnce();
+          const postState = await loadPostGuestTutorialState();
+          setTutorialStep("service_complete");
+          if (!postState.secondPlotThoughtSeen) {
+            setTimeout(() => showPlayerThought("I could use a second garden bed for the carrot seed."), 450);
+            await markSecondPlotThoughtSeen();
+          }
         } else {
           setTutorialStep(loadedTutorialStep);
         }
@@ -321,6 +344,7 @@ export default function DiningScreen() {
     }
 
     if (tutorialStep === "service_reaction") {
+      await grantFarmerCarrotSeedOnce();
       await saveGuestTutorialIntroStep("service_departing");
       setTutorialStep("service_departing");
       setTutorialLines([]);
@@ -331,6 +355,11 @@ export default function DiningScreen() {
         await saveGuestTutorialIntroStep("service_complete");
         setTutorialStep("service_complete");
         setDepartingGuestId(null);
+        const postState = await loadPostGuestTutorialState();
+        if (!postState.secondPlotThoughtSeen) {
+          showPlayerThought("I could use a second garden bed for the carrot seed.");
+          await markSecondPlotThoughtSeen();
+        }
       }, 720);
     }
   }
