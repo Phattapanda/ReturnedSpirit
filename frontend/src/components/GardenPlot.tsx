@@ -22,7 +22,7 @@ export type GardenPlotData = {
   plotType: "small" | "medium" | "large";
   upgradeLevel: number;
   status: GardenPlotStatus;
-  cropType: string | null;       // Crop type identifier: "herb", etc.
+  cropType: string | null;       // Crop type identifier: "herb", "carrot", etc.
   cropAsset: string | null;      // Legacy field – kept for save-compat; display uses getCropStageAsset
   seedItemId: string | null;
   totalGrowthDays: number;
@@ -62,6 +62,9 @@ const CROP_ASSETS: Record<string, ReturnType<typeof require>> = {
   herbbed_young: require("../../assets/images/herbbed_young.png"),
   herbseed:      require("../../assets/images/herbseed.png"),
   herbs:         require("../../assets/images/herbs.png"),
+  carrotseed:    require("../../assets/images/carrotseed.png"),
+  carrotyoung:   require("../../assets/images/carrotyoung.png"),
+  carrotbed:     require("../../assets/images/carrotbed.png"),
 };
 
 const ACTION_IMG = {
@@ -77,7 +80,7 @@ type CropStageConfig = {
   seedStageAsset: string;     // progress === 0
   growingStageAsset: string;  // 0 < progress < 100
   readyStageAsset: string;    // progress === 100 / status "ready"
-  // witheredStageAsset: not yet provided; falls back to readyStageAsset placeholder
+  // witheredStageAsset: not yet provided; falls back to growingStageAsset
 };
 
 const CROP_STAGE_CONFIGS: Record<string, CropStageConfig> = {
@@ -86,11 +89,16 @@ const CROP_STAGE_CONFIGS: Record<string, CropStageConfig> = {
     growingStageAsset: "herbbed_young",
     readyStageAsset:   "herbbed",
   },
+  carrot: {
+    seedStageAsset:    "carrotseed",
+    growingStageAsset: "carrotyoung",
+    readyStageAsset:   "carrotbed",
+  },
 };
 
 /**
  * Central crop → display-asset resolver.
- * Never hardcode asset names in screens; always call this function.
+ * Carrots intentionally use the same young image on calendar days 2 and 3.
  */
 export function getCropStageAsset(
   cropType: string | null,
@@ -103,7 +111,6 @@ export function getCropStageAsset(
   if (!cfg) return null;
 
   if (status === "withered") {
-    // Withered asset not yet available – fall back to growing stage to avoid showing "ready"
     return CROP_ASSETS[cfg.growingStageAsset];
   }
   if (status === "ready" || progressPercent >= 100) {
@@ -128,7 +135,6 @@ export default function GardenPlot({
   onLockedAction,
   actionCosts = { water: 2, pullWeeds: 8, fertilize: 3 },
 }: GardenPlotProps) {
-  // Animated color: 0 = red (not watered), 1 = green (watered)
   const progColor = useSharedValue(data.wateredToday ? 1 : 0);
 
   useEffect(() => {
@@ -144,7 +150,6 @@ export default function GardenPlot({
     ),
   }));
 
-  // ── Derived display values
   const cropImg = getCropStageAsset(data.cropType, data.progressPercent, data.status);
 
   const progressLabel = data.withered
@@ -167,29 +172,22 @@ export default function GardenPlot({
     ? "Empty"
     : "Growing";
 
-  // ── Empty plot: no actions available except tapping crop area to plant
+  const yieldName = data.cropType === "carrot" ? "carrots" : "herbs";
   const isEmpty = data.status === "empty";
 
-  // ── Button disabled states
-  // When readyToHarvest: only harvest is active; water/weeds/fertilize are visually locked
-  // but still tappable (to show "That won't achieve anything." bubble via onLockedAction)
   const harvestLocked = data.readyToHarvest;
-  // True disabled: no interaction possible at all
   const waterDisabled     = !interactive || data.withered || isEmpty;
   const weedsDisabled     = !interactive || isEmpty;
   const fertilizeDisabled = !interactive || data.withered || isEmpty;
-  // Visual locked (greyed out, but still tappable when harvestLocked)
   const waterLocked     = harvestLocked && !isEmpty && !data.withered;
   const weedsLocked     = harvestLocked && !isEmpty;
   const fertilizeLocked = harvestLocked && !isEmpty && !data.withered;
-  const harvestDisabled   = !interactive;
-  const harvestNotReady   = !data.readyToHarvest;
+  const harvestDisabled = !interactive;
+  const harvestNotReady = !data.readyToHarvest;
 
   return (
     <View style={styles.card}>
-      {/* ── Top: crop image + info ── */}
       <View style={styles.topRow}>
-        {/* Crop image / empty bed */}
         <TouchableOpacity
           style={styles.cropWrap}
           onPress={interactive ? onCropTap : undefined}
@@ -207,12 +205,10 @@ export default function GardenPlot({
           )}
         </TouchableOpacity>
 
-        {/* Info column */}
         <View style={styles.infoCol}>
           <Text style={styles.statusLabel}>{statusLabel}</Text>
           {progressLabel ? <Text style={styles.progressLabel}>{progressLabel}</Text> : null}
 
-          {/* Progress track */}
           {!isEmpty && (
             <>
               <View style={styles.progressTrack}>
@@ -228,10 +224,9 @@ export default function GardenPlot({
             </>
           )}
 
-          {/* Yield preview */}
           {!data.withered && !isEmpty && (
             <Text style={styles.yieldHint}>
-              Est. yield: {data.baseYield + data.accumulatedWeedYieldBonus + data.accumulatedFertilizerYieldBonus} herbs
+              Est. yield: {data.baseYield + data.accumulatedWeedYieldBonus + data.accumulatedFertilizerYieldBonus} {yieldName}
             </Text>
           )}
         </View>
@@ -239,9 +234,7 @@ export default function GardenPlot({
 
       <View style={styles.divider} />
 
-      {/* ── Action buttons ── */}
       <View style={styles.actionsRow}>
-        {/* Water – visually locked when readyToHarvest, but still tappable to show message */}
         <ActionBtn
           img={ACTION_IMG.watering}
           label="Water"
@@ -252,7 +245,6 @@ export default function GardenPlot({
           onPress={waterLocked ? (onLockedAction ?? onWater) : onWater}
         />
 
-        {/* Pull Weeds */}
         <ActionBtn
           img={ACTION_IMG.pullweeds}
           label="Weeds"
@@ -263,7 +255,6 @@ export default function GardenPlot({
           onPress={weedsLocked ? (onLockedAction ?? onPullWeeds) : onPullWeeds}
         />
 
-        {/* Fertilize */}
         <ActionBtn
           img={ACTION_IMG.fertilizer}
           label="Fertilize"
@@ -274,7 +265,6 @@ export default function GardenPlot({
           onPress={fertilizeLocked ? (onLockedAction ?? onFertilize) : onFertilize}
         />
 
-        {/* Harvest – always tappable when interactive, even if not ready */}
         <ActionBtn
           img={ACTION_IMG.harvest}
           label="Harvest"
