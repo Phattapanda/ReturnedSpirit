@@ -2324,6 +2324,13 @@ export default function KitchenScreen() {
     if (!isKitchenItemInteractionState(cur)) return;
     if (cur === "COOKING_UNPACK_WAIT" && srcSlot > 11) return;
 
+    const draggedItem = getCookingItemAtSlot(srcSlot);
+    const playerRect = layouts.current.player;
+    if (rupertInDining && draggedItem?.id === "herbsoup" && playerRect && inRect(absX, absY, playerRect)) {
+      showPlayerBubble('"I need to cook herb soup for the guest."');
+      return;
+    }
+
     const bagRect = layouts.current.bag;
     if (playerBagRef.current.unlocked && bagRect && inExpandedRect(absX, absY, bagRect)) {
       void returnCookingItemToBag(srcSlot);
@@ -3349,10 +3356,12 @@ export default function KitchenScreen() {
                 router.push("/garden");
               };
             } else if (isDormBtn && dormitoryUnlocked) {
-              locOnPress = () => {
-                audioManager.playSoundEffect('walking-on-wood', { maxDurationMs: 5000 });
-                router.push("/dormitory");
-              };
+              locOnPress = rupertInDining
+                ? () => showPlayerBubble('"I need to cook herb soup for the guest."')
+                : () => {
+                    audioManager.playSoundEffect('walking-on-wood', { maxDurationMs: 5000 });
+                    router.push("/dormitory");
+                  };
             } else if (isDiningBtn && DEV_DINING_TEST_ACCESS) {
               locOnPress = () => {
                 audioManager.playSoundEffect('footstep', { maxDurationMs: 4000 });

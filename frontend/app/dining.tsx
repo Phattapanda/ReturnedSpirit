@@ -478,8 +478,9 @@ export default function DiningScreen() {
       <View style={[styles.locationBar, { paddingBottom: insets.bottom + 4 }]}>
         {LOCS.map((loc) => {
           const isCurrent = loc.id === "dining";
+          const guestDormitoryBlocked = tutorialStep === "ready_for_water" && loc.id === "dormitory";
           const locImg = IMG[`loc_${loc.id}` as keyof typeof IMG] as number | undefined;
-          const active = loc.nav || isCurrent;
+          const active = loc.nav || isCurrent || guestDormitoryBlocked;
 
           const content = locImg ? (
             <Image
@@ -492,15 +493,21 @@ export default function DiningScreen() {
             <Ionicons name="help-outline" size={22} color={active ? "#F5E6C8" : "#3A3535"} />
           );
 
+          const locationAction = loc.nav
+            ? goToKitchen
+            : guestDormitoryBlocked
+              ? () => showPlayerThought("I need to cook herb soup for the guest.")
+              : undefined;
+
           return (
             <TouchableOpacity
               key={loc.id}
               style={[
                 styles.locBtn,
-                isCurrent ? styles.locBtnCurrent : (loc.nav ? styles.locBtnActive : styles.locBtnLocked),
+                isCurrent ? styles.locBtnCurrent : (active ? styles.locBtnActive : styles.locBtnLocked),
               ]}
-              disabled={!loc.nav || !!dialogLine}
-              onPress={loc.nav ? goToKitchen : undefined}
+              disabled={!locationAction || !!dialogLine}
+              onPress={locationAction}
               activeOpacity={0.8}
             >
               {content}

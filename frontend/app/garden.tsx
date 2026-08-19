@@ -1343,7 +1343,11 @@ export default function GardenScreen() {
   // Activity Bar: handle activity tap
   // ─────────────────────────────────────────────────────────────────────────
   function handleActivity(id: ActivityId) {
-    if (id === "well")         handleWellAction();
+    if (rupertInDining && id !== "well") {
+      showPlayerBubble('"I need to cook herb soup for the guest."');
+      return;
+    }
+    if (id === "well")              handleWellAction();
     else if (id === "collectWood")  handleCollectWood();
     else if (id === "collectStone") handleCollectStone();
     else if (id === "workout")      handleWorkout();
@@ -1556,6 +1560,15 @@ export default function GardenScreen() {
   // ─────────────────────────────────────────────────────────────────────────
   function handleKitchenTap() {
     if (bubble) { dismissBubbleNoCallback(); }
+
+    // Point 9 guest meal quest: the old Tuesday tutorial gates must no longer
+    // trap the player in Garden. The empty bucket may still be back in Kitchen.
+    if (rupertInDining) {
+      audioManager.playSoundEffect('footstep', { maxDurationMs: 4000 });
+      router.replace("/kitchen");
+      return;
+    }
+
     // Leave-lock: only during GARDEN_PLOT_INTERACTIVE (before minimum task complete)
     if (gtsRef.current === "GARDEN_PLOT_INTERACTIVE") {
       showPlayerBubble('"I still have something to do here."');
@@ -1943,11 +1956,27 @@ export default function GardenScreen() {
           { id: "dormitory", img: IMG.loc_dormitory },
           { id: "mail",      img: IMG.loc_mail      },
           { id: "explore",   img: IMG.loc_explore   },
-        ] as const).map((loc) => (
-          <TouchableOpacity key={loc.id} style={[styles.locBtn, styles.locBtnLocked]} disabled activeOpacity={0.8}>
-            <Image source={loc.img} style={[styles.locBtnImg, styles.locBtnImgLocked]} resizeMode="contain" resizeMethod="resize" />
-          </TouchableOpacity>
-        ))}
+        ] as const).map((loc) => {
+          const guestDormitoryBlocked = rupertInDining && loc.id === "dormitory";
+          return (
+            <TouchableOpacity
+              key={loc.id}
+              style={[styles.locBtn, guestDormitoryBlocked ? styles.locBtnActive : styles.locBtnLocked]}
+              disabled={!guestDormitoryBlocked}
+              onPress={guestDormitoryBlocked
+                ? () => showPlayerBubble('"I need to cook herb soup for the guest."')
+                : undefined}
+              activeOpacity={0.8}
+            >
+              <Image
+                source={loc.img}
+                style={[styles.locBtnImg, !guestDormitoryBlocked && styles.locBtnImgLocked]}
+                resizeMode="contain"
+                resizeMethod="resize"
+              />
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {/* ── Loading overlay ── */}
