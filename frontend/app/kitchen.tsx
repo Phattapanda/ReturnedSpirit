@@ -48,6 +48,21 @@ import {
 } from "@/src/game/guest-tutorial";
 import { ensureAssetReady } from "@/src/assets/AssetManager";
 import {
+  DEFAULT_POST_GUEST_TUTORIAL_STATE,
+  SECOND_PLOT_STONE_COST,
+  SECOND_PLOT_WOOD_COST,
+  grantFarmerCarrotSeedOnce,
+  loadPostGuestTutorialState,
+  markUpgradeIntroSeen,
+  purchaseSecondPlotUpgrade,
+  type PostGuestTutorialState,
+} from "@/src/game/post-guest-tutorial";
+import {
+  SHARED_RESOURCE_DEFAULTS,
+  SHARED_RESOURCES_KEY,
+  type SharedResources,
+} from "@/src/game/shared-resources";
+import {
   DEFAULT_PLAYER_AVATAR_ID,
   PLAYER_AVATAR_KEY,
   getPlayerAvatarForStamina,
@@ -201,6 +216,12 @@ function inExpandedRect(x: number, y: number, r: LRect, pad = 14): boolean {
 
 // ─── Dialog data (modal story only) ───────────────────────────────────────────
 
+const D_UPGRADE_INTRO: DLine[] = [
+  { id: "d_upgrade.0", speaker: "Rupert", portrait: "laugh", text: '"You handled your first guest well."' },
+  { id: "d_upgrade.1", speaker: "Rupert", portrait: "normal", text: '"From now on, tap me whenever you want to improve the tavern or its grounds."' },
+  { id: "d_upgrade.2", speaker: "Rupert", portrait: "normal", text: '"A second garden plot is a simple start. It needs 4 Wood and 4 Stone."' },
+];
+
 const D_POST_CONSUMPTION: DLine[] = [
   { id: "d_post.0", speaker: "Old Innkeeper", portrait: "laugh",  text: '"Well, you do look a little healthier now."' },
   { id: "d_post.1", speaker: "Old Innkeeper", portrait: "sad",    text: '"Please forgive me. I wish I could offer you something better."' },
@@ -290,6 +311,9 @@ export default function KitchenScreen() {
   // ── Menu modals
   const [showMenu, setShowMenu] = useState(false);
   const [showRecipes, setShowRecipes] = useState(false);
+  const [showUpgrades, setShowUpgrades] = useState(false);
+  const [upgradeBusy, setUpgradeBusy] = useState(false);
+  const [upgradeMessage, setUpgradeMessage] = useState<string | null>(null);
   const [barWidth, setBarWidth] = useState(0);
 
   // ── Game state
@@ -303,7 +327,12 @@ export default function KitchenScreen() {
   const [gardenActive, setGardenActive] = useState(false);
   const playerNameRef = useRef("Adventurer");
   const [rupertPortrait, setRupertPortrait] = useState<"normal" | "sad" | "laugh">("normal");
-  const [rupertInDining, setRupertInDining] = useState(false);
+  // Start hidden until persisted placement is resolved. This prevents a one-frame
+  // Rupert flash when Kitchen regains focus during the guest-service sequence.
+  const [rupertInDining, setRupertInDining] = useState(true);
+  const [postGuestState, setPostGuestState] = useState<PostGuestTutorialState>(DEFAULT_POST_GUEST_TUTORIAL_STATE);
+  const [sharedResources, setSharedResources] = useState<SharedResources>({ ...SHARED_RESOURCE_DEFAULTS });
+  const postGuestIntroStartedRef = useRef(false);
   const focusCountRef = useRef(0);
   // ── Bag & Stats
   const [playerBag, setPlayerBag] = useState<PlayerBagData>(DEFAULT_BAG);
@@ -645,10 +674,16 @@ export default function KitchenScreen() {
     (async () => {
       const cookingDone = await AsyncStorage.getItem(SK.COOKING_DONE);
       cookingTutorialCompletedRef.current = cookingDone === "true";
-      if (cookingDone !== "true") return;
+      if (cookingDone !== "true") {
+        if (active) setRupertInDining(false);
+        return;
+      }
       const step = await loadGuestTutorialIntroStep();
       if (!active || tsRef.current !== "IDLE") return;
       setRupertInDining(guestTutorialKeepsRupertInDining(step));
+      if (step === "service_complete") {
+        void maybeStartPostGuestUpgradeIntro(300);
+      }
       if (step === "not_started" || step === "knock") {
         void startGuestTutorialIntro();
       } else if (step === "dining_prompt") {
@@ -685,6 +720,14 @@ export default function KitchenScreen() {
         if (demoSeen === "true") soupDemoSeenRef.current = true;
 
         const done = await AsyncStorage.getItem(SK.TUTORIAL_DONE);
+        const initialCookingDone = await AsyncStorage.getItem(SK.COOKING_DONE);
+        cookingTutorialCompletedRef.current = initialCookingDone === "true";
+        if (initialCookingDone === "true") {
+          const initialGuestStep = await loadGuestTutorialIntroStep();
+          setRupertInDining(guestTutorialKeepsRupertInDining(initialGuestStep));
+        } else {
+          setRupertInDining(false);
+        }
         const name = await AsyncStorage.getItem(SK.PLAYER_NAME);
         const storedName = name?.trim() || "Adventurer";
         playerNameRef.current = storedName;
@@ -835,6 +878,72 @@ export default function KitchenScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  async function refreshPostGuestResources() {
+    const state = await loadPostGuestTutorialState();
+    setPostGuestState(state);
+    const rawResources = await AsyncStorage.getItem(SHARED_RESOURCES_KEY);
+    if (rawResources) {
+      try { setSharedResources({ ...SHARED_RESOURCE_DEFAULTS, ...JSON.parse(rawResources) }); }
+      catch { setSharedResources({ ...SHARED_RESOURCE_DEFAULTS }); }
+    } else {
+      setSharedResources({ ...SHARED_RESOURCE_DEFAULTS });
+    }
+    return state;
+  }
+
+  async function maybeStartPostGuestUpgradeIntro(delayMs = 300): Promise<boolean> {
+    if (tsRef.current !== "IDLE" || postGuestIntroStartedRef.current) return false;
+    const guestStep = await loadGuestTutorialIntroStep();
+    if (guestStep !== "service_complete") return false;
+
+    // Migration-safe: an already completed Part 10 save still receives the gift once.
+    await grantFarmerCarrotSeedOnce();
+    const state = await refreshPostGuestResources();
+    if (state.upgradeIntroSeen) return false;
+
+    postGuestIntroStartedRef.current = true;
+    setTimeout(() => {
+      if (tsRef.current !== "IDLE") {
+        postGuestIntroStartedRef.current = false;
+        return;
+      }
+      showDialog(D_UPGRADE_INTRO, async () => {
+        const next = await markUpgradeIntroSeen();
+        setPostGuestState(next);
+        postGuestIntroStartedRef.current = false;
+      });
+    }, delayMs);
+    return true;
+  }
+
+  async function handleRupertUpgradeTap() {
+    if (rupertInDining || !postGuestState.upgradeIntroSeen || dlgActive) return;
+    await refreshPostGuestResources();
+    setUpgradeMessage(null);
+    setShowUpgrades(true);
+  }
+
+  async function handleSecondPlotUpgrade() {
+    if (upgradeBusy || postGuestState.secondPlotUnlocked) return;
+    setUpgradeBusy(true);
+    setUpgradeMessage(null);
+    try {
+      const result = await purchaseSecondPlotUpgrade();
+      setPostGuestState(result.state);
+      setSharedResources(result.resources);
+      if (!result.ok) {
+        setUpgradeMessage("Need 4 Wood and 4 Stone.");
+      } else if (result.alreadyUnlocked) {
+        setUpgradeMessage("Already unlocked.");
+      } else {
+        setUpgradeMessage("2nd Plot unlocked.");
+        audioManager.playSoundEffect("bling", { maxDurationMs: 2000 });
+      }
+    } finally {
+      setUpgradeBusy(false);
+    }
+  }
+
   /** Start the Day-2 Kitchen prompt once the Kitchen is in a stable IDLE state. */
   async function maybeStartTuesdayMorningTutorial(delayMs = 600): Promise<boolean> {
     if (tsRef.current !== "IDLE") return false;
@@ -879,7 +988,7 @@ export default function KitchenScreen() {
           if (cur !== "IDLE") return; // Don't interfere with active tutorial/dialog
 
           const guestStep = await loadGuestTutorialIntroStep();
-          setRupertInDining(guestStep === "ready_for_water");
+          setRupertInDining(guestTutorialKeepsRupertInDining(guestStep));
 
           // Refresh stats (may have changed in dormitory after sleep)
           const rawSta = await AsyncStorage.getItem(SK.STAMINA);
@@ -909,6 +1018,10 @@ export default function KitchenScreen() {
           // Check dormitory unlock (might have changed)
           const dormUnlocked = await AsyncStorage.getItem(SK.DORMITORY_UNLOCKED);
           if (dormUnlocked === "true") setDormitoryUnlocked(true);
+
+          if (guestStep === "service_complete") {
+            if (await maybeStartPostGuestUpgradeIntro(250)) return;
+          }
 
           // Tuesday morning prompt also runs on the initial Kitchen mount via the same helper.
           if (await maybeStartTuesdayMorningTutorial(600)) return;
@@ -3122,11 +3235,17 @@ export default function KitchenScreen() {
           <TouchableOpacity ref={playerPortraitRef} style={styles.circleWrap} onPress={() => setStatusOpen(true)} activeOpacity={0.8}>
             <Image source={avatarSrc(playerAvatarId, staminaCurrent)} style={[styles.circleImg, styles.playerPortraitImage]} resizeMode="cover" resizeMethod="resize" />
           </TouchableOpacity>
-          <View ref={rupertPortraitRef} style={[styles.circleWrap, rupertInDining && styles.rupertAway]} pointerEvents="none">
+          <TouchableOpacity
+            ref={rupertPortraitRef as any}
+            style={[styles.circleWrap, rupertInDining && styles.rupertAway]}
+            disabled={rupertInDining || !postGuestState.upgradeIntroSeen || dlgActive}
+            onPress={handleRupertUpgradeTap}
+            activeOpacity={postGuestState.upgradeIntroSeen ? 0.78 : 1}
+          >
             {!rupertInDining && (
               <Image source={rupertSrc(rupertPortrait)} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />
             )}
-          </View>
+          </TouchableOpacity>
           <View ref={bagIconRef} collapsable={false} style={styles.bagDropTarget}>
             <BagIconButton
               unlocked={playerBag.unlocked}
@@ -3649,6 +3768,48 @@ export default function KitchenScreen() {
         </View>
       </Modal>
 
+      {/* ── Rupert Upgrades Modal */}
+      <Modal visible={showUpgrades} transparent animationType="fade" onRequestClose={() => setShowUpgrades(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.upgradePanel}>
+            <View style={styles.upgradeTitleRow}>
+              <Image source={IMG.rupert} style={styles.upgradeRupert} resizeMode="cover" resizeMethod="resize" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.panelTitle}>Rupert · Upgrades</Text>
+                <Text style={styles.upgradeSubtitle}>Tavern & grounds</Text>
+              </View>
+            </View>
+            <View style={styles.divider} />
+
+            <View style={styles.upgradeCard}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.upgradeName}>2nd Plot</Text>
+                <Text style={styles.upgradeCost}>4 Wood + 4 Stone</Text>
+                <Text style={styles.upgradeOwned}>
+                  You have {sharedResources.wood} Wood · {sharedResources.stone} Stone
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.upgradeBuildBtn, postGuestState.secondPlotUnlocked && styles.upgradeBuildBtnDone]}
+                disabled={upgradeBusy || postGuestState.secondPlotUnlocked}
+                onPress={handleSecondPlotUpgrade}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.upgradeBuildText}>
+                  {postGuestState.secondPlotUnlocked ? "Unlocked" : upgradeBusy ? "..." : "Build"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {upgradeMessage && <Text style={styles.upgradeMessage}>{upgradeMessage}</Text>}
+
+            <TouchableOpacity style={styles.closeBtn} onPress={() => setShowUpgrades(false)} activeOpacity={0.8}>
+              <Text style={styles.closeBtnText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* ── Recipes Modal */}
       <Modal visible={showRecipes} transparent animationType="slide">
         <View style={styles.modalOverlay}>
@@ -4004,6 +4165,31 @@ const styles = StyleSheet.create({
   divider: { height: 1, backgroundColor: "rgba(196,148,58,0.22)", marginVertical: 10 },
   menuRow: { flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 13, paddingHorizontal: 6, borderRadius: 10 },
   menuRowText: { color: "#F0E8D5", fontSize: 15, fontFamily: "Oldenburg", letterSpacing: 0.4 },
+  upgradePanel: {
+    width: "88%", backgroundColor: "#160B03", borderRadius: 20, padding: 20,
+    borderWidth: 1.5, borderColor: "rgba(196,148,58,0.38)",
+    shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.6, shadowRadius: 16, elevation: 24,
+  },
+  upgradeTitleRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  upgradeRupert: { width: 52, height: 52, borderRadius: 26, borderWidth: 1.5, borderColor: "#C4943A" },
+  upgradeSubtitle: { color: "rgba(240,232,213,0.48)", fontSize: 11, fontFamily: "Oldenburg", textAlign: "center", marginTop: 2 },
+  upgradeCard: {
+    flexDirection: "row", alignItems: "center", gap: 12,
+    backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 12, padding: 14,
+    borderWidth: 1, borderColor: "rgba(196,148,58,0.24)",
+  },
+  upgradeName: { color: "#C4943A", fontSize: 14, fontFamily: "Oldenburg", marginBottom: 5 },
+  upgradeCost: { color: "#F0E8D5", fontSize: 12, fontFamily: "Oldenburg" },
+  upgradeOwned: { color: "rgba(240,232,213,0.52)", fontSize: 10, fontFamily: "Oldenburg", marginTop: 5 },
+  upgradeBuildBtn: {
+    minWidth: 82, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10,
+    backgroundColor: "rgba(196,148,58,0.20)", borderWidth: 1, borderColor: "rgba(196,148,58,0.48)",
+    alignItems: "center",
+  },
+  upgradeBuildBtnDone: { opacity: 0.55 },
+  upgradeBuildText: { color: "#F5E6C8", fontSize: 12, fontFamily: "Oldenburg" },
+  upgradeMessage: { color: "#C4943A", fontSize: 11, fontFamily: "Oldenburg", textAlign: "center", marginTop: 10 },
+
   recipePanel: {
     width: "85%", backgroundColor: "#160B03", borderRadius: 20, padding: 24,
     borderWidth: 1.5, borderColor: "rgba(196,148,58,0.38)", alignItems: "center",
