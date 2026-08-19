@@ -354,7 +354,7 @@ export default function DiningScreen() {
   const tutorialInDining = guestTutorialHasReached(tutorialStep, "dining_intro");
   const showDiningServiceUi = !tutorialInDining || guestTutorialHasReached(tutorialStep, "meal_reveal");
   const showRupertInDining = tutorialStep === "meal_reveal" || guestTutorialKeepsRupertInDining(tutorialStep);
-  const useDawnBackground = tutorialInDining || timeOfDay === "morning";
+  const useDawnBackground = (tutorialInDining && tutorialStep !== "service_complete") || timeOfDay === "morning";
 
   async function handleBagToMealSlot(bagSlotIndex: number) {
     const plan = planBagItemToMealSlot(playerBag, bagSlotIndex, mealState);
