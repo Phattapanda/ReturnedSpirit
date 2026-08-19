@@ -7,6 +7,22 @@ import { KitchenRuntimeContext } from "@/src/game/kitchen-runtime-context";
 
 const CARROT_TABLE_ASSET = require("../assets/images/carrot.png");
 
+function ensureCarrotTableAssetFallback() {
+  if (Object.prototype.hasOwnProperty.call(Object.prototype, "carrot")) return;
+  Object.defineProperty(Object.prototype, "carrot", {
+    value: CARROT_TABLE_ASSET,
+    enumerable: false,
+    configurable: true,
+    writable: false,
+  });
+}
+
+function removeCarrotTableAssetFallback() {
+  if (!Object.prototype.hasOwnProperty.call(Object.prototype, "carrot")) return;
+  if ((Object.prototype as { carrot?: unknown }).carrot !== CARROT_TABLE_ASSET) return;
+  delete (Object.prototype as { carrot?: unknown }).carrot;
+}
+
 /**
  * Thin Kitchen runtime wrapper.
  *
@@ -19,27 +35,15 @@ export default function KitchenScreen() {
   const [instanceKey, setInstanceKey] = useState(0);
   const [thought, setThought] = useState<string | null>(null);
   const thoughtTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const installedCarrotAsset = useRef(false);
 
-  // KitchenScreenBase predates the carrot item and owns its image lookup locally.
-  // Add one non-enumerable fallback only while Kitchen is mounted, so all proven
-  // drag/crafting code can stay byte-for-byte unchanged.
-  if (!Object.prototype.hasOwnProperty.call(Object.prototype, "carrot")) {
-    Object.defineProperty(Object.prototype, "carrot", {
-      value: CARROT_TABLE_ASSET,
-      enumerable: false,
-      configurable: true,
-      writable: false,
-    });
-    installedCarrotAsset.current = true;
-  }
-
+  // Install before the child renders. The effect repeats installation after a
+  // development Strict-Mode cleanup/setup cycle and removes only our own value.
+  ensureCarrotTableAssetFallback();
   useEffect(() => {
+    ensureCarrotTableAssetFallback();
     return () => {
       if (thoughtTimer.current) clearTimeout(thoughtTimer.current);
-      if (installedCarrotAsset.current && Object.prototype.hasOwnProperty.call(Object.prototype, "carrot")) {
-        delete (Object.prototype as { carrot?: unknown }).carrot;
-      }
+      removeCarrotTableAssetFallback();
     };
   }, []);
 
