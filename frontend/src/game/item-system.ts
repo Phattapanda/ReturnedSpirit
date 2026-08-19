@@ -255,6 +255,7 @@ export type ItemCatalogEntry = {
  */
 export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
   herbbag:     { name: "Herb Bag",         description: "A small bag filled with harvested herbs.", attributes: [] },
+  carrotbag:   { name: "Carrot Bag",       description: "A small bag filled with harvested carrots.", attributes: [] },
   herbsoup:    {
     name: "Herb Soup",
     description: "A warm soup made from fresh herbs. Restores 20 Stamina.",
@@ -262,9 +263,11 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
     mealTags: [MEAL_TAG.SOUP, MEAL_TAG.VEGETARIAN, MEAL_TAG.HERBS, MEAL_TAG.HEALTHY, MEAL_TAG.WARM],
   },
   herbs:       { name: "Herbs",            description: "Fresh herbs picked from the garden.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  carrot:      { name: "Carrot",           description: "A fresh carrot harvested from the garden.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   bucket:      { name: "Empty Bucket",     description: "A sturdy wooden bucket. It needs to be filled.", attributes: [ITEM_ATTRIBUTE.VESSEL] },
   bucketwater: { name: "Bucket of Water", description: "A bucket filled with fresh water from the well.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   herbseed:    { name: "Herb Seed",        description: "Seeds for growing herbs.", attributes: [] },
+  carrotseed:  { name: "Carrot Seed",      description: "Seeds for growing carrots.", attributes: [] },
   // Resources
   wood:        { name: "Wood",             description: "Cut timber. Useful for repairs and construction.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   stone:       { name: "Stone",            description: "A piece of solid rock. Used for building and crafting.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
