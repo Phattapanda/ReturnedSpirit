@@ -1,0 +1,53 @@
+name: Apply Point 10 Rupert state wiring
+
+on:
+  push:
+    branches:
+      - feat/guest-tutorial-service
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/guest-tutorial-service
+      - name: Patch Kitchen and Garden
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          k = Path('frontend/app/kitchen.tsx')
+          s = k.read_text()
+          old = 'import { loadGuestTutorialIntroStep, saveGuestTutorialIntroStep } from "@/src/game/guest-tutorial";'
+          new = '''import {\n  guestTutorialKeepsRupertInDining,\n  loadGuestTutorialIntroStep,\n  saveGuestTutorialIntroStep,\n} from "@/src/game/guest-tutorial";'''
+          if s.count(old) != 1: raise SystemExit(f'kitchen import: {s.count(old)}')
+          s = s.replace(old, new, 1)
+          old = '      setRupertInDining(step === "ready_for_water");'
+          new = '      setRupertInDining(guestTutorialKeepsRupertInDining(step));'
+          if s.count(old) != 1: raise SystemExit(f'kitchen state: {s.count(old)}')
+          k.write_text(s.replace(old, new, 1))
+
+          g = Path('frontend/app/garden.tsx')
+          s = g.read_text()
+          old = 'import { loadGuestTutorialIntroStep } from "@/src/game/guest-tutorial";'
+          new = 'import { guestTutorialKeepsRupertInDining, loadGuestTutorialIntroStep } from "@/src/game/guest-tutorial";'
+          if s.count(old) != 1: raise SystemExit(f'garden import: {s.count(old)}')
+          s = s.replace(old, new, 1)
+          old = '        setRupertInDining(guestTutorialStep === "ready_for_water");'
+          new = '        setRupertInDining(guestTutorialKeepsRupertInDining(guestTutorialStep));'
+          if s.count(old) != 1: raise SystemExit(f'garden state: {s.count(old)}')
+          g.write_text(s.replace(old, new, 1))
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/app/kitchen.tsx frontend/app/garden.tsx
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Keep Rupert in Dining through service tutorial"
+          git push origin HEAD:feat/guest-tutorial-service
