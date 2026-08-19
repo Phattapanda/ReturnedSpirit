@@ -1,0 +1,46 @@
+name: Patch Kitchen Rupert upgrade UI
+
+on:
+  push:
+    branches:
+      - feat/post-guest-tutorial-upgrades
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/post-guest-tutorial-upgrades
+      - name: Patch UI
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('frontend/app/kitchen.tsx')
+          s=p.read_text()
+          def rep(old,new,label):
+            global s
+            c=s.count(old)
+            if c!=1: raise SystemExit(f'{label}: {c}')
+            s=s.replace(old,new,1)
+
+          rep('''          <View ref={rupertPortraitRef} style={[styles.circleWrap, rupertInDining && styles.rupertAway]} pointerEvents="none">\n            {!rupertInDining && (\n              <Image source={rupertSrc(rupertPortrait)} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />\n            )}\n          </View>''', '''          <TouchableOpacity\n            ref={rupertPortraitRef as any}\n            style={[styles.circleWrap, rupertInDining && styles.rupertAway]}\n            disabled={rupertInDining || !postGuestState.upgradeIntroSeen || dlgActive}\n            onPress={handleRupertUpgradeTap}\n            activeOpacity={postGuestState.upgradeIntroSeen ? 0.78 : 1}\n          >\n            {!rupertInDining && (\n              <Image source={rupertSrc(rupertPortrait)} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />\n            )}\n          </TouchableOpacity>''', 'Rupert portrait button')
+
+          rep('''      {/* ── Recipes Modal */}\n      <Modal visible={showRecipes} transparent animationType="slide">''', '''      {/* ── Rupert Upgrades Modal */}\n      <Modal visible={showUpgrades} transparent animationType="fade" onRequestClose={() => setShowUpgrades(false)}>\n        <View style={styles.modalOverlay}>\n          <View style={styles.upgradePanel}>\n            <View style={styles.upgradeTitleRow}>\n              <Image source={IMG.rupert} style={styles.upgradeRupert} resizeMode="cover" resizeMethod="resize" />\n              <View style={{ flex: 1 }}>\n                <Text style={styles.panelTitle}>Rupert · Upgrades</Text>\n                <Text style={styles.upgradeSubtitle}>Tavern & grounds</Text>\n              </View>\n            </View>\n            <View style={styles.divider} />\n\n            <View style={styles.upgradeCard}>\n              <View style={{ flex: 1 }}>\n                <Text style={styles.upgradeName}>2nd Plot</Text>\n                <Text style={styles.upgradeCost}>4 Wood + 4 Stone</Text>\n                <Text style={styles.upgradeOwned}>\n                  You have {sharedResources.wood} Wood · {sharedResources.stone} Stone\n                </Text>\n              </View>\n              <TouchableOpacity\n                style={[styles.upgradeBuildBtn, postGuestState.secondPlotUnlocked && styles.upgradeBuildBtnDone]}\n                disabled={upgradeBusy || postGuestState.secondPlotUnlocked}\n                onPress={handleSecondPlotUpgrade}\n                activeOpacity={0.8}\n              >\n                <Text style={styles.upgradeBuildText}>\n                  {postGuestState.secondPlotUnlocked ? "Unlocked" : upgradeBusy ? "..." : "Build"}\n                </Text>\n              </TouchableOpacity>\n            </View>\n\n            {upgradeMessage && <Text style={styles.upgradeMessage}>{upgradeMessage}</Text>}\n\n            <TouchableOpacity style={styles.closeBtn} onPress={() => setShowUpgrades(false)} activeOpacity={0.8}>\n              <Text style={styles.closeBtnText}>Close</Text>\n            </TouchableOpacity>\n          </View>\n        </View>\n      </Modal>\n\n      {/* ── Recipes Modal */}\n      <Modal visible={showRecipes} transparent animationType="slide">''', 'upgrade modal')
+
+          rep('''  recipePanel: {\n    width: "85%", backgroundColor: "#160B03", borderRadius: 20, padding: 24,''', '''  upgradePanel: {\n    width: "88%", backgroundColor: "#160B03", borderRadius: 20, padding: 20,\n    borderWidth: 1.5, borderColor: "rgba(196,148,58,0.38)",\n    shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.6, shadowRadius: 16, elevation: 24,\n  },\n  upgradeTitleRow: { flexDirection: "row", alignItems: "center", gap: 12 },\n  upgradeRupert: { width: 52, height: 52, borderRadius: 26, borderWidth: 1.5, borderColor: "#C4943A" },\n  upgradeSubtitle: { color: "rgba(240,232,213,0.48)", fontSize: 11, fontFamily: "Oldenburg", textAlign: "center", marginTop: 2 },\n  upgradeCard: {\n    flexDirection: "row", alignItems: "center", gap: 12,\n    backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 12, padding: 14,\n    borderWidth: 1, borderColor: "rgba(196,148,58,0.24)",\n  },\n  upgradeName: { color: "#C4943A", fontSize: 14, fontFamily: "Oldenburg", marginBottom: 5 },\n  upgradeCost: { color: "#F0E8D5", fontSize: 12, fontFamily: "Oldenburg" },\n  upgradeOwned: { color: "rgba(240,232,213,0.52)", fontSize: 10, fontFamily: "Oldenburg", marginTop: 5 },\n  upgradeBuildBtn: {\n    minWidth: 82, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10,\n    backgroundColor: "rgba(196,148,58,0.20)", borderWidth: 1, borderColor: "rgba(196,148,58,0.48)",\n    alignItems: "center",\n  },\n  upgradeBuildBtnDone: { opacity: 0.55 },\n  upgradeBuildText: { color: "#F5E6C8", fontSize: 12, fontFamily: "Oldenburg" },\n  upgradeMessage: { color: "#C4943A", fontSize: 11, fontFamily: "Oldenburg", textAlign: "center", marginTop: 10 },\n\n  recipePanel: {\n    width: "85%", backgroundColor: "#160B03", borderRadius: 20, padding: 24,''', 'upgrade styles')
+
+          p.write_text(s)
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/app/kitchen.tsx
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Make Rupert tappable for upgrades"
+          git push origin HEAD:feat/post-guest-tutorial-upgrades
