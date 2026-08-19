@@ -516,6 +516,11 @@ export default function GardenScreen() {
         const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
         if (rawBag) { try { setPlayerBag(JSON.parse(rawBag)); } catch { /* default */ } }
 
+        // Bag pulse is a one-time tutorial cue. Once the bag was inspected after
+        // receiving it, every later Garden visit must restore that persisted state.
+        const inspectedBag = await AsyncStorage.getItem(BAG_INSPECTED_KEY);
+        setBagInspected(inspectedBag === "true");
+
         // Load day
         const rawDay = await AsyncStorage.getItem(GSK.DAY_INDEX);
         const di = rawDay !== null ? parseInt(rawDay, 10) : 0;
