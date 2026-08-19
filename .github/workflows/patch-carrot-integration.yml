@@ -1,0 +1,149 @@
+name: Apply carrot crop and Carrot Bag integration
+
+on:
+  push:
+    branches:
+      - feat/post-guest-tutorial-upgrades
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/post-guest-tutorial-upgrades
+          fetch-depth: 0
+
+      - name: Apply focused carrot integration
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          garden = Path('frontend/src/GardenScreenBase.tsx')
+          kitchen = Path('frontend/src/KitchenScreenBase.tsx')
+          player_bag = Path('frontend/src/components/PlayerBag.tsx')
+
+          gs = garden.read_text()
+          ks = kitchen.read_text()
+          ps = player_bag.read_text()
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 match, found {count}')
+              return text.replace(old, new, 1)
+
+          # ── Garden: after Rupert has permanently left the Garden, crop removal
+          # is a player decision warning rather than a Rupert tutorial dialogue.
+          gs = replace_once(
+              gs,
+              '''  function handleCropTap() {\n    if (!plotInteractive) return;\n    if (plotData.status === "empty") {''',
+              '''  function handleCropTap() {\n    if (!plotInteractive) return;\n\n    if (plotData.status !== "empty" && rupertAwayFromGarden) {\n      showPlayerBubble('"I shouldn\\'t waste any seeds."');\n      return;\n    }\n\n    if (plotData.status === "empty") {''',
+              'Garden post-Rupert tear-out thought',
+          )
+
+          # ── Kitchen assets: use explicit table assets instead of relying on the
+          # temporary wrapper fallback.
+          ks = replace_once(
+              ks,
+              '''const ITEM_IMAGES: Record<string, ReturnType<typeof require>> = {\n  herbbag:     require("../assets/images/herbbag.png"),\n  herbsoup:    require("../assets/images/herbsoup.png"),''',
+              '''const ITEM_IMAGES: Record<string, ReturnType<typeof require>> = {\n  herbbag:     require("../assets/images/herbbag.png"),\n  carrotbag:   require("../assets/images/carrotbag.png"),\n  carrot:      require("../assets/images/carrot.png"),\n  herbsoup:    require("../assets/images/herbsoup.png"),''',
+              'Kitchen carrot item assets',
+          )
+
+          ks = replace_once(
+              ks,
+              '''  const [selectedHerbbagSlot, setSelectedHerbbagSlot] = useState<number | null>(null);\n  const [selectedHerbsSlot, setSelectedHerbsSlot] = useState<number | null>(null);''',
+              '''  const [selectedHerbbagSlot, setSelectedHerbbagSlot] = useState<number | null>(null);\n  const [selectedCarrotbagSlot, setSelectedCarrotbagSlot] = useState<number | null>(null);\n  const [selectedHerbsSlot, setSelectedHerbsSlot] = useState<number | null>(null);''',
+              'Kitchen carrot bag selection state',
+          )
+
+          # Selection must follow the item, not the physical table slot.
+          ks = replace_once(
+              ks,
+              '''    setSelectedHerbbagSlot(null);\n    setSelectedHerbsSlot(null);\n    setSelectedSoupSlot(null);\n    setTooltipVisible(false);\n\n    cookingDraggedSlotRef.current = slotIdx;''',
+              '''    setSelectedHerbbagSlot(null);\n    setSelectedCarrotbagSlot(null);\n    setSelectedHerbsSlot(null);\n    setSelectedSoupSlot(null);\n    setTooltipVisible(false);\n\n    cookingDraggedSlotRef.current = slotIdx;''',
+              'Kitchen clear carrot selection on drag',
+          )
+
+          # Herb Bag selection also clears Carrot Bag selection.
+          ks = replace_once(
+              ks,
+              '''        setSelectedHerbbagSlot(slot);\n        setSelectedHerbsSlot(null);\n        setSelectedSoupSlot(null);''',
+              '''        setSelectedHerbbagSlot(slot);\n        setSelectedCarrotbagSlot(null);\n        setSelectedHerbsSlot(null);\n        setSelectedSoupSlot(null);''',
+              'Herb Bag clears Carrot Bag selection',
+          )
+
+          # Add the matching Carrot Bag select-then-unpack interaction immediately
+          # after the proven Herb Bag block.
+          herb_block_end = '''      }\n      return;\n    }\n\n    // Herb Soup follows the same select-then-split interaction as Herbs.'''
+          carrot_block = '''      }\n      return;\n    }\n\n    // Carrot Bag mirrors Herb Bag exactly: select first, then unpack one carrot per tap.\n    if (onTable && item.id === "carrotbag" && isKitchenItemInteractionState(cur)) {\n      const remaining = item.containedQuantity ?? 0;\n      if (selectedCarrotbagSlot === null || selectedCarrotbagSlot !== slot) {\n        setSelectedCarrotbagSlot(slot);\n        setSelectedHerbbagSlot(null);\n        setSelectedHerbsSlot(null);\n        setSelectedSoupSlot(null);\n        showCookingTooltip("Carrot Bag", "Contains: " + remaining + (remaining === 1 ? " carrot" : " carrots"));\n      } else {\n        unpackOneCarrot(slot, item);\n        const afterQty = remaining - 1;\n        if (afterQty > 0) {\n          showCookingTooltip("Carrot Bag", "Contains: " + afterQty + (afterQty === 1 ? " carrot" : " carrots"));\n        } else {\n          setTooltipVisible(false);\n        }\n      }\n      return;\n    }\n\n    // Herb Soup follows the same select-then-split interaction as Herbs.'''
+          ks = replace_once(ks, herb_block_end, carrot_block, 'Carrot Bag tap interaction')
+
+          # Selecting Herbs clears either container-bag selection.
+          ks = replace_once(
+              ks,
+              '''        setSelectedHerbsSlot(slot);\n        setSelectedHerbbagSlot(null);\n        setSelectedSoupSlot(null);''',
+              '''        setSelectedHerbsSlot(slot);\n        setSelectedHerbbagSlot(null);\n        setSelectedCarrotbagSlot(null);\n        setSelectedSoupSlot(null);''',
+              'Herbs clear Carrot Bag selection',
+          )
+
+          # Add one-carrot unpacking with the same stack/empty-slot behavior as Herb Bag.
+          unpack_anchor = '''    checkCookingProgress(newTable);\n  }\n\n  /** Return an ingredient slot item back to the table. */'''
+          unpack_carrot = '''    checkCookingProgress(newTable);\n  }\n\n  /** Unpack one carrot from carrotbag on the table. */\n  function unpackOneCarrot(carrotbagSlot: number, carrotbag: BagItem) {\n    const qty = carrotbag.containedQuantity ?? 0;\n    if (qty <= 0) { showPlayerBubble('"The bag is empty."'); return; }\n\n    const newTable = tableItems.slice();\n    const newQty = qty - 1;\n    if (newQty <= 0) {\n      newTable[carrotbagSlot] = null;\n      setSelectedCarrotbagSlot(null);\n    } else {\n      newTable[carrotbagSlot] = { ...carrotbag, containedQuantity: newQty };\n    }\n\n    const TABLE_STACK = 20;\n    let placed = false;\n    for (let i = 0; i < 12; i++) {\n      if (i === carrotbagSlot) continue;\n      const t = newTable[i];\n      if (t && t.id === "carrot" && t.quantity < TABLE_STACK) {\n        newTable[i] = { ...t, quantity: t.quantity + 1 };\n        placed = true;\n        break;\n      }\n    }\n    if (!placed) {\n      for (let i = 0; i < 12; i++) {\n        if (i === carrotbagSlot) continue;\n        if (!newTable[i]) {\n          newTable[i] = { id: "carrot", itemType: "carrot", name: "Carrot", quantity: 1, attributes: ["ingredient"] };\n          placed = true;\n          break;\n        }\n      }\n    }\n    if (!placed) { showPlayerBubble('"No free space available."'); return; }\n\n    tableItemsRef.current = newTable;\n    audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });\n    setTableItems(newTable);\n    AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(newTable)).catch(() => {});\n  }\n\n  /** Return an ingredient slot item back to the table. */'''
+          ks = replace_once(ks, unpack_anchor, unpack_carrot, 'Carrot Bag unpack function')
+
+          # Render selected Carrot Bag with the same yellow container selection/TAP cue.
+          ks = replace_once(
+              ks,
+              '''    const isSelectedHerbbag = selectedHerbbagSlot === slotIdx && item.id === "herbbag";\n    const isSelectedHerbs   = selectedHerbsSlot === slotIdx && item.id === "herbs";\n    const isSelectedSoup    = selectedSoupSlot === slotIdx && item.id === "herbsoup";\n    const showHerbbagTapHint = isKitchenItemInteractionState(ts) && item.id === "herbbag" && isSelectedHerbbag;''',
+              '''    const isSelectedHerbbag   = selectedHerbbagSlot === slotIdx && item.id === "herbbag";\n    const isSelectedCarrotbag = selectedCarrotbagSlot === slotIdx && item.id === "carrotbag";\n    const isSelectedHerbs     = selectedHerbsSlot === slotIdx && item.id === "herbs";\n    const isSelectedSoup      = selectedSoupSlot === slotIdx && item.id === "herbsoup";\n    const showHerbbagTapHint = isKitchenItemInteractionState(ts) && item.id === "herbbag" && isSelectedHerbbag;\n    const showCarrotbagTapHint = isKitchenItemInteractionState(ts) && item.id === "carrotbag" && isSelectedCarrotbag;''',
+              'Carrot Bag render selection vars',
+          )
+
+          ks = replace_once(
+              ks,
+              '''              isSelectedHerbbag && { borderWidth: 2, borderColor: "#E8B84B", borderRadius: 6 },\n              isSelectedHerbs   && { borderWidth: 2, borderColor: "#7EC87E", borderRadius: 6 },''',
+              '''              isSelectedHerbbag   && { borderWidth: 2, borderColor: "#E8B84B", borderRadius: 6 },\n              isSelectedCarrotbag && { borderWidth: 2, borderColor: "#E8B84B", borderRadius: 6 },\n              isSelectedHerbs     && { borderWidth: 2, borderColor: "#7EC87E", borderRadius: 6 },''',
+              'Carrot Bag selected border',
+          )
+
+          ks = replace_once(
+              ks,
+              '''            {!isBeingDragged && showHerbbagTapHint && (\n              <View style={{ position: "absolute", bottom: 2, right: 2, backgroundColor: "#E8B84B", borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1 }}>\n                <Text style={{ color: "#2C1810", fontSize: 8, fontWeight: "700" }}>TAP</Text>\n              </View>\n            )}\n            {!isBeingDragged && item.id === "herbs"''',
+              '''            {!isBeingDragged && showHerbbagTapHint && (\n              <View style={{ position: "absolute", bottom: 2, right: 2, backgroundColor: "#E8B84B", borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1 }}>\n                <Text style={{ color: "#2C1810", fontSize: 8, fontWeight: "700" }}>TAP</Text>\n              </View>\n            )}\n            {!isBeingDragged && showCarrotbagTapHint && (\n              <View style={{ position: "absolute", bottom: 2, right: 2, backgroundColor: "#E8B84B", borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1 }}>\n                <Text style={{ color: "#2C1810", fontSize: 8, fontWeight: "700" }}>TAP</Text>\n              </View>\n            )}\n            {!isBeingDragged && item.id === "herbs"''',
+              'Carrot Bag TAP hint',
+          )
+
+          # Player Bag must behave normally for carrotbag: one tap transfers the whole
+          # harvested bag to the Kitchen Table, just like herbbag. Unpacking happens there.
+          carrot_player_block = '''    // Carrot Bag mirrors the Herb Bag's select-then-unpack rhythm. The Bag stays\n    // open so repeated taps can unpack individual carrots one at a time.\n    if (context === "kitchen" && item.id === "carrotbag") {\n      if (selectedCarrotBagSlot !== slotIdx) {\n        setSelectedCarrotBagSlot(slotIdx);\n        return;\n      }\n      await unpackOneCarrot(slotIdx, item);\n      return;\n    }\n\n    setSelectedCarrotBagSlot(null);'''
+          ps = replace_once(
+              ps,
+              carrot_player_block,
+              '''    // Carrot Bag transfers to the Kitchen Table like Herb Bag; unpacking happens there.\n    setSelectedCarrotBagSlot(null);''',
+              'Player Bag carrot transfer behavior',
+          )
+
+          garden.write_text(gs)
+          kitchen.write_text(ks)
+          player_bag.write_text(ps)
+          PY
+
+      - name: Commit focused carrot integration
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/GardenScreenBase.tsx frontend/src/KitchenScreenBase.tsx frontend/src/components/PlayerBag.tsx
+          if git diff --cached --quiet; then
+            echo "No patch required."
+            exit 0
+          fi
+          git commit -m "Enable carrot planting and Carrot Bag unpacking"
+          git push origin HEAD:feat/post-guest-tutorial-upgrades
