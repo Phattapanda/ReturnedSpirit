@@ -53,6 +53,7 @@ import {
   SECOND_PLOT_WOOD_COST,
   grantFarmerCarrotSeedOnce,
   loadPostGuestTutorialState,
+  markSecondPlotThoughtSeen,
   markUpgradeIntroSeen,
   purchaseSecondPlotUpgrade,
   type PostGuestTutorialState,
@@ -898,7 +899,13 @@ export default function KitchenScreen() {
 
     // Migration-safe: an already completed Part 10 save still receives the gift once.
     await grantFarmerCarrotSeedOnce();
-    const state = await refreshPostGuestResources();
+    let state = await refreshPostGuestResources();
+    if (!state.secondPlotThoughtSeen) {
+      showPlayerBubble('"I could use a second garden bed for the carrot seed."');
+      state = await markSecondPlotThoughtSeen();
+      setPostGuestState(state);
+      delayMs = Math.max(delayMs, 2900);
+    }
     if (state.upgradeIntroSeen) return false;
 
     postGuestIntroStartedRef.current = true;

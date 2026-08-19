@@ -75,7 +75,10 @@ export async function grantFarmerCarrotSeedOnce(): Promise<PostGuestTutorialStat
   const state = await loadPostGuestTutorialState();
   if (state.farmerGiftClaimed) return state;
 
-  let inventory: GardenInventoryItem[] = [];
+  let inventory: GardenInventoryItem[] = [
+    { id: "herbseed", itemType: "seed", name: "Herb Seed", quantity: 5 },
+    { id: "standard_fertilizer", itemType: "fertilizer", name: "Standard Fertilizer", quantity: 5 },
+  ];
   try {
     const raw = await AsyncStorage.getItem(GARDEN_INVENTORY_KEY);
     if (raw) {
@@ -83,7 +86,10 @@ export async function grantFarmerCarrotSeedOnce(): Promise<PostGuestTutorialStat
       if (Array.isArray(parsed)) inventory = parsed;
     }
   } catch {
-    inventory = [];
+    inventory = [
+      { id: "herbseed", itemType: "seed", name: "Herb Seed", quantity: 5 },
+      { id: "standard_fertilizer", itemType: "fertilizer", name: "Standard Fertilizer", quantity: 5 },
+    ];
   }
 
   const carrotIndex = inventory.findIndex((item) => item?.id === "carrotseed" && item.itemType === "seed");
