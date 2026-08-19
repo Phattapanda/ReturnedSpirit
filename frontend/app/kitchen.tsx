@@ -219,8 +219,8 @@ function inExpandedRect(x: number, y: number, r: LRect, pad = 14): boolean {
 
 const D_UPGRADE_INTRO: DLine[] = [
   { id: "d_upgrade.0", speaker: "Rupert", portrait: "laugh", text: '"You handled your first guest well."' },
-  { id: "d_upgrade.1", speaker: "Rupert", portrait: "normal", text: '"From now on, tap me whenever you want to improve the tavern or its grounds."' },
-  { id: "d_upgrade.2", speaker: "Rupert", portrait: "normal", text: '"A second garden plot is a simple start. It needs 4 Wood and 4 Stone."' },
+  { id: "d_upgrade.1", speaker: "Rupert", portrait: "normal", text: '"You can always talk to me if you want to change something."' },
+  { id: "d_upgrade.2", speaker: "Rupert", portrait: "normal", text: '"If we have more mouths to feed, we need a second garden bed."' },
 ];
 
 const D_POST_CONSUMPTION: DLine[] = [
@@ -3785,7 +3785,7 @@ export default function KitchenScreen() {
               <Image source={IMG.rupert} style={styles.upgradeRupert} resizeMode="cover" resizeMethod="resize" />
               <View style={{ flex: 1 }}>
                 <Text style={styles.panelTitle}>Rupert · Upgrades</Text>
-                <Text style={styles.upgradeSubtitle}>Tavern & grounds</Text>
+                <Text style={styles.upgradeSubtitle}>Tavern & Garden</Text>
               </View>
             </View>
             <View style={styles.divider} />
