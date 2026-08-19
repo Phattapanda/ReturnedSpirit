@@ -11,14 +11,21 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withRepeat,
   withTiming,
 } from "react-native-reanimated";
-import type { PlayerBagData, BagItem } from "@/src/game/item-system";
-import { ITEM_CATALOG } from "@/src/game/item-system";
+import {
+  ITEM_CATALOG,
+  KITCHEN_TABLE_KEY,
+  PLAYER_BAG_KEY,
+  type PlayerBagData,
+  type BagItem,
+} from "@/src/game/item-system";
+import { useKitchenRuntime } from "@/src/game/kitchen-runtime-context";
 
 const ITEM_IMAGES: Record<string, ReturnType<typeof require>> = {
   herbbag:     require("../../assets/images/herbbag.png"),
@@ -57,13 +64,34 @@ export default function PlayerBag({
 }: Props) {
   const { width: W } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const { refreshKitchen, showPlayerThought: showKitchenThought } = useKitchenRuntime();
   const [infoItem, setInfoItem] = useState<BagItem | null>(null);
   const [discardTarget, setDiscardTarget] = useState<{ slotIdx: number; item: BagItem } | null>(null);
+  const [selectedCarrotBagSlot, setSelectedCarrotBagSlot] = useState<number | null>(null);
+  const [carrotBagOverride, setCarrotBagOverride] = useState<PlayerBagData | null>(null);
+  const carrotEditsPending = useRef(false);
   const longPressDidFire = useRef(false);
   const transferLocked = useRef(false);
 
+  useEffect(() => {
+    if (visible) {
+      setCarrotBagOverride(null);
+      setSelectedCarrotBagSlot(null);
+      carrotEditsPending.current = false;
+    }
+  }, [visible]);
+
+  const displayBag = carrotBagOverride ?? bag;
   const DISCARD_LOCK_UNTIL = 3;
   const discardLocked = dayIdx !== undefined && dayIdx <= DISCARD_LOCK_UNTIL;
+
+  function closeBag() {
+    onClose();
+    if (context === "kitchen" && carrotEditsPending.current) {
+      carrotEditsPending.current = false;
+      setTimeout(refreshKitchen, 0);
+    }
+  }
 
   function handleSlotPressIn() {
     longPressDidFire.current = false;
@@ -75,7 +103,48 @@ export default function PlayerBag({
     setInfoItem(item);
   }
 
-  function handleSlotPress(slotIdx: number, item: BagItem | null) {
+  async function unpackOneCarrot(slotIdx: number, item: BagItem) {
+    const contained = item.containedQuantity ?? 0;
+    if (contained <= 0) return;
+
+    try {
+      const rawTable = await AsyncStorage.getItem(KITCHEN_TABLE_KEY);
+      const table: (BagItem | null)[] = rawTable ? JSON.parse(rawTable) : Array(12).fill(null);
+      const nextTable = table.map((entry) => entry ? { ...entry } : null);
+
+      let target = nextTable.findIndex((entry) => entry?.id === "carrot" && entry.quantity < 20);
+      if (target < 0) target = nextTable.findIndex((entry) => entry === null);
+      if (target < 0) {
+        showKitchenThought('"No free space available."');
+        return;
+      }
+
+      const existing = nextTable[target];
+      nextTable[target] = existing
+        ? { ...existing, quantity: existing.quantity + 1 }
+        : { id: "carrot", itemType: "carrot", name: "Carrot", quantity: 1, attributes: ["ingredient"] };
+
+      const sourceBag = carrotBagOverride ?? bag;
+      const nextSlots = sourceBag.slots.map((entry) => entry ? { ...entry } : null);
+      const source = nextSlots[slotIdx];
+      if (!source || source.id !== "carrotbag") return;
+      const remaining = Math.max(0, (source.containedQuantity ?? 0) - 1);
+      nextSlots[slotIdx] = remaining > 0 ? { ...source, containedQuantity: remaining } : null;
+      const nextBag = { ...sourceBag, slots: nextSlots };
+
+      await AsyncStorage.multiSet([
+        [KITCHEN_TABLE_KEY, JSON.stringify(nextTable)],
+        [PLAYER_BAG_KEY, JSON.stringify(nextBag)],
+      ]);
+      carrotEditsPending.current = true;
+      setCarrotBagOverride(nextBag);
+      if (remaining <= 0) setSelectedCarrotBagSlot(null);
+    } catch {
+      showKitchenThought('"I can\'t unpack this right now."');
+    }
+  }
+
+  async function handleSlotPress(slotIdx: number, item: BagItem | null) {
     if (!item) return;
     if (longPressDidFire.current) {
       longPressDidFire.current = false;
@@ -85,6 +154,19 @@ export default function PlayerBag({
       setInfoItem(null);
       return;
     }
+
+    // Carrot Bag mirrors the Herb Bag's select-then-unpack rhythm. The Bag stays
+    // open so repeated taps can unpack individual carrots one at a time.
+    if (context === "kitchen" && item.id === "carrotbag") {
+      if (selectedCarrotBagSlot !== slotIdx) {
+        setSelectedCarrotBagSlot(slotIdx);
+        return;
+      }
+      await unpackOneCarrot(slotIdx, item);
+      return;
+    }
+
+    setSelectedCarrotBagSlot(null);
     if (context === "garden" || context === "none") {
       setDiscardTarget({ slotIdx, item });
       return;
@@ -111,25 +193,25 @@ export default function PlayerBag({
     onDiscardItem?.(slotIdx, item);
   }
 
-  const rows = bag.rows;
-  const cols = bag.columns;
+  const rows = displayBag.rows;
+  const cols = displayBag.columns;
   const SLOT_SIZE = Math.min(72, (W - 80) / cols);
 
   function handleOverlayPress() {
     if (discardTarget) { setDiscardTarget(null); return; }
     if (infoItem) { setInfoItem(null); return; }
-    onClose();
+    closeBag();
   }
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={closeBag}>
       <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={handleOverlayPress}>
         <TouchableOpacity activeOpacity={1} onPress={() => { if (infoItem) setInfoItem(null); }}>
           <View style={[styles.panel, { paddingBottom: insets.bottom + 8 }]}>
             <View style={styles.header}>
               <Text style={styles.title}>Shoulder Bag</Text>
               <TouchableOpacity
-                onPress={onClose}
+                onPress={closeBag}
                 style={styles.closeBtn}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
@@ -142,16 +224,17 @@ export default function PlayerBag({
                 <View key={r} style={styles.gridRow}>
                   {Array.from({ length: cols }, (_, c) => {
                     const slotIdx = r * cols + c;
-                    const item = slotIdx < bag.slots.length ? bag.slots[slotIdx] : null;
+                    const item = slotIdx < displayBag.slots.length ? displayBag.slots[slotIdx] : null;
                     return (
                       <BagSlot
                         key={slotIdx}
                         slotIdx={slotIdx}
                         item={item}
                         size={SLOT_SIZE}
+                        selected={item?.id === "carrotbag" && selectedCarrotBagSlot === slotIdx}
                         onPressIn={() => handleSlotPressIn()}
                         onLongPress={() => handleSlotLongPress(slotIdx, item)}
-                        onPress={() => handleSlotPress(slotIdx, item)}
+                        onPress={() => { void handleSlotPress(slotIdx, item); }}
                       />
                     );
                   })}
@@ -244,16 +327,17 @@ type SlotProps = {
   slotIdx: number;
   item: BagItem | null;
   size: number;
+  selected?: boolean;
   onPressIn: () => void;
   onLongPress: () => void;
   onPress: () => void;
 };
 
-function BagSlot({ item, size, onPressIn, onLongPress, onPress }: SlotProps) {
+function BagSlot({ item, size, selected, onPressIn, onLongPress, onPress }: SlotProps) {
   const imgSrc = item ? ITEM_IMAGES[item.id] : null;
   return (
     <Pressable
-      style={[styles.slot, { width: size, height: size }]}
+      style={[styles.slot, { width: size, height: size }, selected && styles.slotSelected]}
       onPressIn={onPressIn}
       onLongPress={onLongPress}
       onPress={onPress}
@@ -336,6 +420,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(30,15,3,0.92)", alignItems: "center", justifyContent: "center",
     overflow: "visible", position: "relative",
   },
+  slotSelected: { borderWidth: 2, borderColor: "#7EC87E" },
   slotImg: { width: "78%", height: "78%" },
   slotEmpty: { width: "100%", height: "100%", backgroundColor: "rgba(0,0,0,0)" },
   contentsCircle: {
