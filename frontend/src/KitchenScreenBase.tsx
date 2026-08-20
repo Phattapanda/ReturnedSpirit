@@ -2462,6 +2462,99 @@ export default function KitchenScreen() {
     }
   }
 
+  /** Consume exactly one Herb Soup serving during normal post-tutorial play. */
+  async function consumeHerbSoupNormally(srcSlot: number, absX: number, absY: number) {
+    if (inputLocked.current) return;
+    const item = getCookingItemAtSlot(srcSlot);
+    if (!item || item.id !== "herbsoup") return;
+
+    inputLocked.current = true;
+    const remainingQty = Math.max(0, item.quantity - 1);
+    const replacement: BagItem | null = remainingQty > 0 ? { ...item, quantity: remainingQty } : null;
+
+    const nextTable = tableItemsRef.current.slice();
+    const nextIngredients = craftIngSlotsRef.current.slice() as (BagItem | null)[];
+    let nextTool = craftToolRef.current;
+
+    if (srcSlot <= 11) nextTable[srcSlot] = replacement;
+    else if (srcSlot <= 14) nextIngredients[srcSlot - 12] = replacement;
+    else if (srcSlot === 15) nextTool = replacement;
+    else {
+      inputLocked.current = false;
+      return;
+    }
+
+    tableItemsRef.current = nextTable;
+    craftIngSlotsRef.current = nextIngredients;
+    craftToolRef.current = nextTool;
+    setTableItems(nextTable);
+    setCraftIngSlots(nextIngredients);
+    setCraftTool(nextTool);
+    setSelectedSoupSlot(null);
+    setTooltipVisible(false);
+
+    await Promise.all([
+      AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(nextTable)),
+      AsyncStorage.setItem(SK.CRAFT_INGREDIENTS, JSON.stringify(nextIngredients)),
+      AsyncStorage.setItem(SK.CRAFT_TOOL_SLOT, JSON.stringify(nextTool)),
+    ]).catch(() => {});
+
+    audioManager.playSoundEffect('eat', { maxDurationMs: 4000 });
+    setFlyingItemId("herbsoup");
+    const player = layouts.current.player;
+    const toX = player ? player.x + player.w / 2 : absX;
+    const toY = player ? player.y + player.h / 2 : absY;
+    soupX.value = absX;
+    soupY.value = absY;
+    soupScale.value = 1;
+    soupVis.value = 1;
+    soupX.value = withTiming(toX, { duration: CONSUME_MS });
+    soupY.value = withTiming(toY, { duration: CONSUME_MS });
+    soupScale.value = withTiming(0.1, { duration: CONSUME_MS });
+    soupVis.value = withTiming(0, { duration: CONSUME_MS }, (done) => {
+      if (done) runOnJS(onNormalSoupConsumed)();
+    });
+
+    const oldSta = staminaCurrent;
+    const newSta = Math.min(oldSta + 20, playerStats.maximumStamina);
+    setStaminaCurrent(newSta);
+    staminaSV.value = withTiming(newSta, { duration: STA_MS });
+    AsyncStorage.setItem(SK.STAMINA, String(newSta)).catch(() => {});
+
+    const gained = Math.max(0, newSta - oldSta);
+    if (gained > 0) {
+      plusY.value = 0;
+      plusOp.value = 0;
+      plusOp.value = withTiming(1, { duration: FLOAT_FADE_IN_MS });
+      plusY.value = withTiming(-FLOAT_RISE_PX, { duration: FLOAT_MS });
+      setTimeout(() => {
+        plusOp.value = withTiming(0, { duration: FLOAT_FADE_OUT_MS });
+      }, FLOAT_MS - FLOAT_FADE_OUT_MS);
+
+      const steps = 20;
+      const stepMs = STA_MS / steps;
+      let count = 0;
+      staminaCountTimer.current = setInterval(() => {
+        count++;
+        const value = Math.round(oldSta + ((newSta - oldSta) * count) / steps);
+        setStaminaDisplay(Math.min(value, newSta));
+        if (count >= steps) {
+          clearInterval(staminaCountTimer.current!);
+          setStaminaDisplay(newSta);
+        }
+      }, stepMs);
+    } else {
+      setStaminaDisplay(newSta);
+    }
+
+    if (canUseRecipeSlots(tsRef.current)) setTimeout(updateCraftResultPreview, 50);
+  }
+
+  function onNormalSoupConsumed() {
+    inputLocked.current = false;
+    setSoupDragging(false);
+  }
+
   /** Drop a generic Kitchen item. Source is supplied by the item's own GestureDetector. */
   function handleCookingItemDrop(srcSlot: number, absX: number, absY: number) {
     cookingDraggedSlotRef.current = -1;
@@ -2481,6 +2574,10 @@ export default function KitchenScreen() {
     const playerRect = layouts.current.player;
     if (rupertInDining && draggedItem?.id === "herbsoup" && playerRect && inRect(absX, absY, playerRect)) {
       showPlayerBubble('"I need to cook herb soup for the guest."');
+      return;
+    }
+    if (!rupertInDining && draggedItem?.id === "herbsoup" && playerRect && inRect(absX, absY, playerRect)) {
+      void consumeHerbSoupNormally(srcSlot, absX, absY);
       return;
     }
 

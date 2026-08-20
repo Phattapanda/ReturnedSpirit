@@ -43,6 +43,7 @@ import StatusModal from "@/src/components/StatusModal";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, type PlayerStats } from "@/src/game/player-stats";
 import { PLAYER_BAG_KEY, DEFAULT_BAG } from "@/src/game/item-system";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
+import { loadGuestTutorialIntroStep } from "@/src/game/guest-tutorial";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
   PLAYER_AVATAR_KEY,
@@ -336,6 +337,7 @@ export default function DormitoryScreen() {
         const rawDay = await AsyncStorage.getItem(DSK.DAY_INDEX);
         const di = rawDay !== null ? parseInt(rawDay, 10) : 0;
         setDayIdx(di);
+        const guestTutorialStep = await loadGuestTutorialIntroStep();
 
         // Daily stamina spend (cross-screen, written by garden.tsx deductStamina)
         const rawSpent = await AsyncStorage.getItem(DSK.STAMINA_SPENT_TODAY);
@@ -387,10 +389,19 @@ export default function DormitoryScreen() {
         await AsyncStorage.setItem(DSK.HAS_ENTERED, "true");
 
         // ── Resolve room state via central helper ──────────────────────────
-        const { timeOfDay: resolvedTod, showEveningIntro } = resolveDormitoryTimeOfDay(
+        const resolvedRoom = resolveDormitoryTimeOfDay(
           di, spent,
           { firstSleepDone: fs, hasSeenEveThought: evt, hasEntered: rawHasEntered === "true", savedTimeOfDay: tod },
         );
+        // The first guest tutorial completes Day 2's required progression. Once it
+        // is finished, the player may sleep and move on to Day 3 even though Day 2
+        // originally began in the tutorial-controlled morning state.
+        const postGuestDayTwoEvening = di === 1 && guestTutorialStep === "service_complete";
+        const resolvedTod: TimeOfDay = postGuestDayTwoEvening ? "evening" : resolvedRoom.timeOfDay;
+        const showEveningIntro = postGuestDayTwoEvening ? false : resolvedRoom.showEveningIntro;
+        if (postGuestDayTwoEvening && tod !== "evening") {
+          await AsyncStorage.setItem(DSK.TIME_OF_DAY, "evening");
+        }
         setTimeOfDay(resolvedTod);
 
         if (resolvedTod === "morning") {
