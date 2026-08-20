@@ -1,0 +1,161 @@
+name: Apply UI polish follow-up fixes
+
+on:
+  push:
+    branches:
+      - fix/ui-bubble-portrait-polish
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/ui-bubble-portrait-polish
+          fetch-depth: 0
+
+      - name: Apply follow-up fixes
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match, found {count}: {old[:120]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          # Kitchen: speech-style dialog text, quote-free thoughts, persistent Dining unlock.
+          path = "frontend/src/KitchenScreenBase.tsx"
+          replace_once(
+              path,
+              '  guestTutorialKeepsRupertInDining,\n  loadGuestTutorialIntroStep,',
+              '  guestTutorialHasReached,\n  guestTutorialKeepsRupertInDining,\n  loadGuestTutorialIntroStep,',
+          )
+          replace_once(
+              path,
+              '  const [dormitoryUnlocked, setDormitoryUnlocked] = useState(false);\n  const [gardenActive, setGardenActive] = useState(false);',
+              '  const [dormitoryUnlocked, setDormitoryUnlocked] = useState(false);\n  const [gardenActive, setGardenActive] = useState(false);\n  const [diningUnlocked, setDiningUnlocked] = useState(false);',
+          )
+          replace_once(
+              path,
+              '  function showPlayerBubble(text: string) {\n    if (playerBubbleTimer.current) clearTimeout(playerBubbleTimer.current);\n    setPlayerBubble(text);',
+              '  function showPlayerBubble(text: string) {\n    if (playerBubbleTimer.current) clearTimeout(playerBubbleTimer.current);\n    const thought = text.trim().replace(/^["“”]+|["“”]+$/g, "");\n    setPlayerBubble(thought);',
+          )
+          replace_once(
+              path,
+              '      const step = await loadGuestTutorialIntroStep();\n      if (!active || tsRef.current !== "IDLE") return;\n      setRupertInDining(guestTutorialKeepsRupertInDining(step));',
+              '      const step = await loadGuestTutorialIntroStep();\n      if (!active || tsRef.current !== "IDLE") return;\n      setDiningUnlocked(guestTutorialHasReached(step, "dining_prompt"));\n      setRupertInDining(guestTutorialKeepsRupertInDining(step));',
+          )
+          replace_once(
+              path,
+              '          const initialGuestStep = await loadGuestTutorialIntroStep();\n          setRupertInDining(guestTutorialKeepsRupertInDining(initialGuestStep));',
+              '          const initialGuestStep = await loadGuestTutorialIntroStep();\n          setDiningUnlocked(guestTutorialHasReached(initialGuestStep, "dining_prompt"));\n          setRupertInDining(guestTutorialKeepsRupertInDining(initialGuestStep));',
+          )
+          replace_once(
+              path,
+              '              saveGuestTutorialIntroStep("dining_prompt").catch(() => {});\n              setTutState("WAITING_FOR_DINING_LOCATION_CLICK");',
+              '              saveGuestTutorialIntroStep("dining_prompt").catch(() => {});\n              setDiningUnlocked(true);\n              setTutState("WAITING_FOR_DINING_LOCATION_CLICK");',
+          )
+          replace_once(
+              path,
+              '            (isDormBtn && dormitoryUnlocked) ||\n            (isDiningBtn && DEV_DINING_TEST_ACCESS);',
+              '            (isDormBtn && dormitoryUnlocked) ||\n            (isDiningBtn && diningUnlocked);',
+          )
+          replace_once(
+              path,
+              '            } else if (isDiningBtn && DEV_DINING_TEST_ACCESS) {',
+              '            } else if (isDiningBtn && diningUnlocked) {',
+          )
+          replace_once(
+              path,
+              '  dlgText: { color: "#F0E8D5", fontSize: 16, lineHeight: 25, fontStyle: "italic", textAlign: "center" },',
+              '  dlgText: { color: "#F0E8D5", fontSize: 16, lineHeight: 25, fontFamily: "RobotoRegular", textAlign: "center" },',
+          )
+
+          # Garden: quote-free thoughts and Dining remains reachable after tutorial unlock.
+          path = "frontend/src/GardenScreenBase.tsx"
+          replace_once(
+              path,
+              '  guestTutorialKeepsRupertInDining,\n  guestTutorialRupertHasLeftGarden,',
+              '  guestTutorialHasReached,\n  guestTutorialKeepsRupertInDining,\n  guestTutorialRupertHasLeftGarden,',
+          )
+          replace_once(
+              path,
+              '  const [secondPlotUnlocked, setSecondPlotUnlocked] = useState(false);',
+              '  const [secondPlotUnlocked, setSecondPlotUnlocked] = useState(false);\n  const [diningUnlocked, setDiningUnlocked] = useState(false);',
+          )
+          replace_once(
+              path,
+              '        const guestTutorialStep = await loadGuestTutorialIntroStep();\n        setRupertInDining(guestTutorialKeepsRupertInDining(guestTutorialStep));',
+              '        const guestTutorialStep = await loadGuestTutorialIntroStep();\n        setDiningUnlocked(guestTutorialHasReached(guestTutorialStep, "dining_prompt"));\n        setRupertInDining(guestTutorialKeepsRupertInDining(guestTutorialStep));',
+          )
+          replace_once(
+              path,
+              '  function showPlayerBubble(text: string) {\n    if (playerBubble) return; // not stackable\n    if (playerBubbleTimer.current) clearTimeout(playerBubbleTimer.current);\n    setPlayerBubble(text);',
+              '  function showPlayerBubble(text: string) {\n    if (playerBubble) return; // not stackable\n    if (playerBubbleTimer.current) clearTimeout(playerBubbleTimer.current);\n    const thought = text.trim().replace(/^["“”]+|["“”]+$/g, "");\n    setPlayerBubble(thought);',
+          )
+          replace_once(
+              path,
+              '          const guestDormitoryBlocked = rupertInDining && loc.id === "dormitory";\n          return (\n            <TouchableOpacity\n              key={loc.id}\n              style={[styles.locBtn, guestDormitoryBlocked ? styles.locBtnActive : styles.locBtnLocked]}\n              disabled={!guestDormitoryBlocked}\n              onPress={guestDormitoryBlocked\n                ? () => showPlayerBubble(\'"I need to cook herb soup for the guest."\')\n                : undefined}\n              activeOpacity={0.8}\n            >\n              <Image\n                source={loc.img}\n                style={[styles.locBtnImg, !guestDormitoryBlocked && styles.locBtnImgLocked]}',
+              '          const guestDormitoryBlocked = rupertInDining && loc.id === "dormitory";\n          const diningAvailable = diningUnlocked && loc.id === "dining";\n          const active = guestDormitoryBlocked || diningAvailable;\n          const onPress = guestDormitoryBlocked\n            ? () => showPlayerBubble("I need to cook herb soup for the guest.")\n            : diningAvailable\n              ? () => {\n                  audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });\n                  router.push("/dining");\n                }\n              : undefined;\n          return (\n            <TouchableOpacity\n              key={loc.id}\n              style={[styles.locBtn, active ? styles.locBtnActive : styles.locBtnLocked]}\n              disabled={!active}\n              onPress={onPress}\n              activeOpacity={0.8}\n            >\n              <Image\n                source={loc.img}\n                style={[styles.locBtnImg, !active && styles.locBtnImgLocked]}',
+          )
+
+          # Dining: quote-free thoughts and Kitchen icon always goes to Kitchen.
+          path = "frontend/app/dining.tsx"
+          replace_once(
+              path,
+              '  function showPlayerThought(text: string) {\n    if (thoughtTimer.current) clearTimeout(thoughtTimer.current);\n    setPlayerThought(text);',
+              '  function showPlayerThought(text: string) {\n    if (thoughtTimer.current) clearTimeout(thoughtTimer.current);\n    const thought = text.trim().replace(/^["“”]+|["“”]+$/g, "");\n    setPlayerThought(thought);',
+          )
+          replace_once(
+              path,
+              '  function goToKitchen() {\n    audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });\n    if (router.canGoBack() && params.loadedFromSave !== "1") router.back();\n    else router.replace("/kitchen");\n  }',
+              '  function goToKitchen() {\n    audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });\n    router.replace("/kitchen");\n  }',
+          )
+
+          # Dormitory: quote-free thoughts.
+          path = "frontend/app/dormitory.tsx"
+          replace_once(
+              path,
+              '  function showPlayerBubble(text: string, duration = 2800) {\n    if (playerBubbleTimer.current) clearTimeout(playerBubbleTimer.current);\n    setPlayerBubble(text);',
+              '  function showPlayerBubble(text: string, duration = 2800) {\n    if (playerBubbleTimer.current) clearTimeout(playerBubbleTimer.current);\n    const thought = text.trim().replace(/^["“”]+|["“”]+$/g, "");\n    setPlayerBubble(thought);',
+          )
+
+          # All bottom story-dialog speech uses regular Roboto, not italic styling.
+          replace_once(
+              "frontend/src/components/GuestTutorialDialog.tsx",
+              '    fontFamily: "Oldenburg",\n    fontSize: 14,\n    lineHeight: 21,',
+              '    fontFamily: "RobotoRegular",\n    fontSize: 14,\n    lineHeight: 21,',
+          )
+          replace_once(
+              "frontend/app/intro.tsx",
+              '  dialogText: {\n    color: "#F0E8D5",\n    fontFamily: "Oldenburg",',
+              '  dialogText: {\n    color: "#F0E8D5",\n    fontFamily: "RobotoRegular",',
+          )
+          PY
+
+      - name: Validate
+        shell: bash
+        run: |
+          cd frontend
+          npm ci
+          npx tsc --noEmit
+          npx eslint app/intro.tsx app/dining.tsx app/dormitory.tsx src/KitchenScreenBase.tsx src/GardenScreenBase.tsx src/components/GuestTutorialDialog.tsx
+          git diff --check
+
+      - name: Commit and remove one-shot workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/ui-polish-followup.yml
+          git add frontend
+          git commit -m "Fix dialog typography thoughts and Dining navigation"
+          git push origin HEAD:fix/ui-bubble-portrait-polish
