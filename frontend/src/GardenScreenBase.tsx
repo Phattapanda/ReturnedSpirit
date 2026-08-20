@@ -887,7 +887,8 @@ export default function GardenScreen() {
     showBubble(
       '"Looks like the herbs aren\'t ready to harvest yet. One more day. We\'ll cook together tomorrow."',
       "Rupert",
-      "BLOCK_ALL",\n      null,
+      "BLOCK_ALL",
+      null,
       showIntroBubble3,
     );
   }
@@ -2237,7 +2238,7 @@ export default function GardenScreen() {
               { icon: "play" as const,         label: "Resume",    action: () => setShowMenu(false) },
               { icon: "book-outline" as const,  label: "Logbook",   action: () => { setShowMenu(false); setShowLogbook(true); } },
               { icon: "save-outline" as const,  label: "Save",      action: handleManualSave },
-              { icon: "home-outline" as const,  label: "Main Menu", action: handleMainMenu },
+              { icon: "home-outline" as const,   label: "Main Menu", action: handleMainMenu },
               { icon: "settings-outline" as const, label: "Settings", action: () => { setShowMenu(false); router.push("/settings"); } },
             ].map((item) => (
               <TouchableOpacity key={item.label} style={styles.menuRow} onPress={item.action} activeOpacity={0.7}>
