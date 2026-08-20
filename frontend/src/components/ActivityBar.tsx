@@ -1,7 +1,8 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { View, Text, TouchableOpacity, Image, StyleSheet, useWindowDimensions } from "react-native";
 import { ACTIVITIES, type ActivityId } from "@/src/game/activity-config";
 import { calcEffectiveStaminaCost } from "@/src/game/player-stats";
+import { loadGuestTutorialIntroStep } from "@/src/game/guest-tutorial";
 
 const ACTIVITY_ICONS: Record<ActivityId, ReturnType<typeof require>> = {
   well:         require("../../assets/images/well.png"),
@@ -28,12 +29,29 @@ export default function ActivityBar({
   onLockedTap,
 }: Props) {
   const { width: W } = useWindowDimensions();
+  const [guestTutorialComplete, setGuestTutorialComplete] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    loadGuestTutorialIntroStep()
+      .then((step) => {
+        if (active) setGuestTutorialComplete(step === "service_complete");
+      })
+      .catch(() => {
+        if (active) setGuestTutorialComplete(false);
+      });
+    return () => { active = false; };
+  }, []);
+
   if (!visible) return null;
 
   return (
     <View style={[styles.bar, { width: W }]}>
       {ACTIVITIES.map((act) => {
-        const isEnabled = enabledActivities.includes(act.id);
+        // Water is required by the tutorial itself. Optional resource/training
+        // actions only unlock once the first guest tutorial is fully complete.
+        const storyUnlocked = act.id === "well" || guestTutorialComplete;
+        const isEnabled = storyUnlocked && enabledActivities.includes(act.id);
         const cost = calcEffectiveStaminaCost(act.baseStaminaCost, endurance);
 
         return (
