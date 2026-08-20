@@ -58,6 +58,7 @@ import {
 } from "@/src/game/guest-tutorial";
 import { loadPostGuestTutorialState } from "@/src/game/post-guest-tutorial";
 import { ensureAssetReady } from "@/src/assets/AssetManager";
+import { subscribeGardenRuntimeRefresh } from "@/src/game/garden-runtime-context";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
   PLAYER_AVATAR_KEY,
@@ -448,6 +449,61 @@ export default function GardenScreen() {
   // Keep bag ref in sync to prevent stale closures in async gift flows
   useEffect(() => { playerBagRef.current = playerBag; }, [playerBag]);
 
+  // 2nd Plot actions persist their own plot data directly. Sync only the shared
+  // Garden values they can affect so the room never needs to remount/reset scroll.
+  useEffect(() => {
+    let active = true;
+
+    const syncRuntimeValues = () => {
+      void (async () => {
+        const [rawStats, rawSta, rawSpent, rawInv, rawBag] = await Promise.all([
+          AsyncStorage.getItem(PLAYER_STATS_KEY),
+          AsyncStorage.getItem(GSK.STAMINA),
+          AsyncStorage.getItem(GSK.STAMINA_SPENT_TODAY),
+          AsyncStorage.getItem(GSK.INVENTORY),
+          AsyncStorage.getItem(PLAYER_BAG_KEY),
+        ]);
+        if (!active) return;
+
+        let nextStats = DEFAULT_PLAYER_STATS;
+        if (rawStats) {
+          try { nextStats = { ...DEFAULT_PLAYER_STATS, ...JSON.parse(rawStats) }; } catch { /* default */ }
+        }
+        setPlayerStats(nextStats);
+        staminaMaxSV.value = nextStats.maximumStamina;
+
+        if (rawSta !== null) {
+          const nextStamina = Math.min(Math.max(parseInt(rawSta, 10) || 0, 0), nextStats.maximumStamina);
+          setStaminaCurrent(nextStamina);
+          setStaminaDisplay(nextStamina);
+          staminaSV.value = nextStamina;
+        }
+
+        if (rawSpent !== null) {
+          setStaminaSpentToday(Math.max(0, parseInt(rawSpent, 10) || 0));
+        }
+
+        if (rawInv) {
+          try { setInventory(JSON.parse(rawInv)); } catch { /* keep current */ }
+        }
+
+        if (rawBag) {
+          try {
+            const nextBag: PlayerBagData = { ...DEFAULT_BAG, ...JSON.parse(rawBag) };
+            playerBagRef.current = nextBag;
+            setPlayerBag(nextBag);
+          } catch { /* keep current */ }
+        }
+      })().catch(() => {});
+    };
+
+    const unsubscribe = subscribeGardenRuntimeRefresh(syncRuntimeValues);
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [staminaMaxSV, staminaSV]);
+
   // ─────────────────────────────────────────────────────────────────────────
   // Fly animation: starts AFTER React renders the image (prevents invisible start)
   // Phases: appear → hold → fly → shrink+fade
@@ -831,8 +887,7 @@ export default function GardenScreen() {
     showBubble(
       '"Looks like the herbs aren\'t ready to harvest yet. One more day. We\'ll cook together tomorrow."',
       "Rupert",
-      "BLOCK_ALL",
-      null,
+      "BLOCK_ALL",\n      null,
       showIntroBubble3,
     );
   }
