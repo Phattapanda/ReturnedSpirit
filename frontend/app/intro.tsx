@@ -458,12 +458,14 @@ export default function IntroScreen() {
         <Animated.View
           pointerEvents="none"
           style={[
-            styles.bubble,
+            styles.bubbleWrap,
             { bottom: insets.bottom + 68, opacity: bubbleOpacity },
           ]}
         >
-          <Text style={styles.bubbleText}>{'"Are you awake?"'}</Text>
-          <View style={styles.bubbleTail} />
+          <View style={styles.bubble}>
+            <Text style={styles.bubbleText}>{'"Are you awake?"'}</Text>
+            <View style={styles.bubbleTail} />
+          </View>
         </Animated.View>
       )}
 
@@ -481,7 +483,7 @@ export default function IntroScreen() {
             <Image
               key={`${dialogPortrait}-${playerAvatarId}`}
               source={dialogPortrait === "player_tired" ? getPlayerAvatarSource(playerAvatarId, "tired") : PORTRAITS[dialogPortrait]}
-              style={[styles.portrait, dialogPortrait === "player_tired" && styles.playerPortraitImage]}
+              style={[styles.portrait, dialogPortrait === "player_tired" ? styles.playerPortraitImage : styles.npcPortraitImage]}
               resizeMode="cover"
               resizeMethod="resize"
             />
@@ -574,10 +576,14 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     backgroundColor: "rgba(245,230,200,0.95)",
   },
-  bubble: {
+  bubbleWrap: {
     position: "absolute",
     left: 24,
     right: 24,
+    alignItems: "center",
+  },
+  bubble: {
+    maxWidth: "82%",
     backgroundColor: "rgba(18, 10, 4, 0.93)",
     borderRadius: 14,
     paddingVertical: 16,
@@ -604,8 +610,7 @@ const styles = StyleSheet.create({
   bubbleText: {
     color: "#F5E6C8",
     fontSize: 18,
-    fontStyle: "italic",
-    fontFamily: "Oldenburg",
+    fontFamily: "RobotoRegular",
     textAlign: "center",
   },
   dialogPanel: {
@@ -645,6 +650,7 @@ const styles = StyleSheet.create({
     height: 124,
   },
   playerPortraitImage: { transform: [{ scale: 1.06 }] },
+  npcPortraitImage: { transform: [{ scale: 1.06 }] },
   npcName: {
     color: "#C4943A",
     fontSize: 15,

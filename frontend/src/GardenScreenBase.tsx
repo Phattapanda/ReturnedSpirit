@@ -1818,8 +1818,12 @@ export default function GardenScreen() {
       ? rupertL.y + rupertL.h + 8
       : (headerH > 0 ? headerH + 128 : insets.top + 190);
     const arrowCenterX = rupertL ? rupertL.x + rupertL.w / 2 : W / 2;
-    const bubbleLeftCalc = 16;
-    const bubbleRightCalc = 16;
+    const bubbleWidthTarget = Math.min(
+      W - 32,
+      Math.max(180, Math.min(W * 0.78, Math.max(bubble.text.length * 7.2, bubble.speaker.length * 9) + 48)),
+    );
+    const bubbleLeftCalc = Math.max(16, Math.min(arrowCenterX - bubbleWidthTarget / 2, W - bubbleWidthTarget - 16));
+    const bubbleRightCalc = Math.max(16, W - bubbleLeftCalc - bubbleWidthTarget);
     const arrowOffset = Math.max(12, Math.min(
       arrowCenterX - bubbleLeftCalc - 10,
       W - bubbleLeftCalc - bubbleRightCalc - 32,
@@ -1985,7 +1989,7 @@ export default function GardenScreen() {
             pointerEvents="none"
           >
             {!rupertAwayFromGarden && (
-              <Image source={rupertSrc(rupertPortrait)} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />
+              <Image source={rupertSrc(rupertPortrait)} style={[styles.circleImg, styles.npcPortraitImage]} resizeMode="cover" resizeMethod="resize" />
             )}
           </View>
           {/* Bag icon or locked slot */}
@@ -2517,6 +2521,7 @@ const styles = StyleSheet.create({
   circleWrapLocked: { borderColor: "#3A3A3A", backgroundColor: "#1A1A1A", alignItems: "center", justifyContent: "center" },
   circleImg: { width: "100%", height: "100%" },
   playerPortraitImage: { transform: [{ scale: 1.06 }] },
+  npcPortraitImage: { transform: [{ scale: 1.06 }] },
   rupertAway: { opacity: 0, borderColor: "transparent", backgroundColor: "transparent" },
 
   // Location bar
@@ -2575,7 +2580,7 @@ const styles = StyleSheet.create({
     elevation: 12, gap: 6,
   },
   bubbleSpeaker: { color: "#7A4800", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 1 },
-  bubbleText: { color: "#2A1000", fontSize: 15, lineHeight: 22, fontStyle: "italic" },
+  bubbleText: { color: "#2A1000", fontSize: 15, lineHeight: 22, fontFamily: "RobotoRegular" },
 
   // Player thought bubble
   playerBubbleCard: {
@@ -2586,7 +2591,7 @@ const styles = StyleSheet.create({
     elevation: 14,
     alignSelf: "flex-start" as const,
   },
-  playerBubbleText: { color: "#2A1000", fontSize: 13, fontStyle: "italic", fontFamily: "Oldenburg", lineHeight: 20 },
+  playerBubbleText: { color: "#2A1000", fontSize: 13, fontFamily: "RobotoItalic", lineHeight: 20 },
   playerBubbleArrow: {
     width: 0, height: 0, borderStyle: "solid",
     borderLeftWidth: 8, borderRightWidth: 8,

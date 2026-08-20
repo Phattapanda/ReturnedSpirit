@@ -617,7 +617,7 @@ export default function DiningScreen() {
 
           <View style={[styles.circleWrap, !showRupertInDining && styles.rupertReserve]} pointerEvents="none">
             {showRupertInDining && (
-              <Image source={IMG.rupert} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />
+              <Image source={IMG.rupert} style={[styles.circleImg, styles.npcPortraitImage]} resizeMode="cover" resizeMethod="resize" />
             )}
           </View>
 
@@ -627,7 +627,10 @@ export default function DiningScreen() {
           />
 
           {playerThought && (
-            <View style={styles.playerThoughtWrap} pointerEvents="none">
+            <View
+              style={[styles.playerThoughtWrap, { width: Math.min(W * 0.72, Math.max(150, playerThought.length * 6.6 + 32)) }]}
+              pointerEvents="none"
+            >
               <View style={styles.playerThoughtArrow} />
               <View style={styles.playerThoughtCard}>
                 <Text style={styles.playerThoughtText}>{playerThought}</Text>
@@ -891,6 +894,7 @@ const styles = StyleSheet.create({
   },
   circleImg: { width: "100%", height: "100%" },
   playerPortraitImage: { transform: [{ scale: 1.06 }] },
+  npcPortraitImage: { transform: [{ scale: 1.06 }] },
   rupertReserve: {
     opacity: 0,
     borderColor: "transparent",
@@ -900,7 +904,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 14,
     top: 104,
-    width: 184,
+    maxWidth: 280,
     zIndex: 30,
   },
   playerThoughtArrow: {
@@ -931,8 +935,7 @@ const styles = StyleSheet.create({
     color: "#2A1000",
     fontSize: 12,
     lineHeight: 18,
-    fontStyle: "italic",
-    fontFamily: "Oldenburg",
+    fontFamily: "RobotoItalic",
   },
 
   mealBar: {

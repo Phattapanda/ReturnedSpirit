@@ -309,6 +309,7 @@ const styles = StyleSheet.create({
   portraitImage: {
     width: "100%",
     height: "100%",
+    transform: [{ scale: 1.06 }],
   },
   guestTextArea: {
     flex: 1,

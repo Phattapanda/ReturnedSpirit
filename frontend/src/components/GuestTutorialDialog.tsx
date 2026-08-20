@@ -31,7 +31,7 @@ export default function GuestTutorialDialog({ visible, line, onContinue }: Props
         <View style={styles.portraitWrap}>
           <Image
             source={line.portrait}
-            style={[styles.portrait, line.playerPortrait && styles.playerPortrait]}
+            style={[styles.portrait, line.playerPortrait ? styles.playerPortrait : styles.npcPortrait]}
             resizeMode="cover"
             resizeMethod="resize"
           />
@@ -83,6 +83,7 @@ const styles = StyleSheet.create({
   },
   portrait: { width: "100%", height: "100%" },
   playerPortrait: { transform: [{ scale: 1.06 }] },
+  npcPortrait: { transform: [{ scale: 1.06 }] },
   speaker: {
     color: "#C4943A",
     fontFamily: "Oldenburg",

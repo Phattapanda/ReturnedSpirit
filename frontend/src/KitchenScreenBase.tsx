@@ -165,7 +165,7 @@ const LOCS = [
 // ── TEMP DEV (Point 5 – Dining Hall layout test) ────────────────────────────────
 // Keep direct access for manual Expo layout testing; the story prompt below now
 // supplies the real tutorial unlock/pulse path.
-const DEV_DINING_TEST_ACCESS = true;
+const DEV_DINING_TEST_ACCESS = false;
 
 const IMG = {
   kitchen:     require("../assets/images/kitchen1.jpg"),
@@ -3427,7 +3427,7 @@ export default function KitchenScreen() {
             activeOpacity={postGuestState.upgradeIntroSeen ? 0.78 : 1}
           >
             {!rupertInDining && (
-              <Image source={rupertSrc(rupertPortrait)} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />
+              <Image source={rupertSrc(rupertPortrait)} style={[styles.circleImg, styles.npcPortraitImage]} resizeMode="cover" resizeMethod="resize" />
             )}
           </TouchableOpacity>
           <View ref={bagIconRef} collapsable={false} style={styles.bagDropTarget}>
@@ -3834,8 +3834,11 @@ export default function KitchenScreen() {
           ? rupertL.y + rupertL.h + 8
           : (headerH > 0 ? headerH + 128 : insets.top + 190);
         const arrowCenterX = rupertL ? rupertL.x + rupertL.w / 2 : W * 0.5;
-        // Width: ~68% of screen, right-biased so it doesn't overlap left table slots
-        const bubbleWidthTarget = W * 0.68;
+        // Size to the current content, then cap it for comfortable mobile wrapping.
+        const bubbleWidthTarget = Math.min(
+          W * 0.78,
+          Math.max(180, Math.min(420, Math.max(bubble.text.length * 7.2, bubble.speaker.length * 9) + 48)),
+        );
         const bubbleLeftCalc = Math.max(16, Math.min(arrowCenterX - bubbleWidthTarget / 2, W * 0.32));
         const bubbleRightCalc = Math.max(12, W - bubbleLeftCalc - bubbleWidthTarget);
         const arrowOffset = Math.max(12, Math.min(
@@ -4174,6 +4177,7 @@ const styles = StyleSheet.create({
   circleWrapLocked: { borderColor: "#3A3A3A", backgroundColor: "#1A1A1A", alignItems: "center", justifyContent: "center" },
   circleImg: { width: "100%", height: "100%" },
   playerPortraitImage: { transform: [{ scale: 1.06 }] },
+  npcPortraitImage: { transform: [{ scale: 1.06 }] },
   rupertAway: { opacity: 0, borderColor: "transparent", backgroundColor: "transparent" },
   bagDropTarget: { width: 96, height: 96, borderRadius: 48, position: "relative" },
   bagDropHighlight: {
@@ -4261,8 +4265,9 @@ const styles = StyleSheet.create({
   infoPanelCard: {
     backgroundColor: "rgba(240, 228, 192, 0.97)",
     borderRadius: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 28,
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    maxWidth: "78%",
     borderWidth: 1.5,
     borderColor: "rgba(196,148,58,0.70)",
     shadowColor: "#000",
@@ -4442,7 +4447,7 @@ const styles = StyleSheet.create({
     color: "#2A1000",
     fontSize: 15,
     lineHeight: 22,
-    fontStyle: "italic",
+    fontFamily: "RobotoRegular",
   },
   // Player thought bubble — match the standard light player-thought style used in Garden.
   playerBubbleArrow: {
@@ -4470,7 +4475,7 @@ const styles = StyleSheet.create({
   playerBubbleText: {
     color: "#2A1000",
     fontSize: 13,
-    fontStyle: "italic",
+    fontFamily: "RobotoItalic",
     lineHeight: 18,
   },
 });
