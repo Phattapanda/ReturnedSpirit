@@ -2,7 +2,10 @@ import React, { useEffect, useState } from "react";
 import { View, Text, TouchableOpacity, Image, StyleSheet, useWindowDimensions } from "react-native";
 import { ACTIVITIES, type ActivityId } from "@/src/game/activity-config";
 import { calcEffectiveStaminaCost } from "@/src/game/player-stats";
-import { loadGuestTutorialIntroStep } from "@/src/game/guest-tutorial";
+import {
+  guestTutorialKeepsRupertInDining,
+  loadGuestTutorialIntroStep,
+} from "@/src/game/guest-tutorial";
 
 const ACTIVITY_ICONS: Record<ActivityId, ReturnType<typeof require>> = {
   well:         require("../../assets/images/well.png"),
@@ -30,15 +33,20 @@ export default function ActivityBar({
 }: Props) {
   const { width: W } = useWindowDimensions();
   const [guestTutorialComplete, setGuestTutorialComplete] = useState(false);
+  const [guestMealQuestActive, setGuestMealQuestActive] = useState(false);
 
   useEffect(() => {
     let active = true;
     loadGuestTutorialIntroStep()
       .then((step) => {
-        if (active) setGuestTutorialComplete(step === "service_complete");
+        if (!active) return;
+        setGuestTutorialComplete(step === "service_complete");
+        setGuestMealQuestActive(guestTutorialKeepsRupertInDining(step));
       })
       .catch(() => {
-        if (active) setGuestTutorialComplete(false);
+        if (!active) return;
+        setGuestTutorialComplete(false);
+        setGuestMealQuestActive(false);
       });
     return () => { active = false; };
   }, []);
@@ -54,11 +62,26 @@ export default function ActivityBar({
         const isEnabled = storyUnlocked && enabledActivities.includes(act.id);
         const cost = calcEffectiveStaminaCost(act.baseStaminaCost, endurance);
 
+        const handlePress = () => {
+          if (isEnabled) {
+            onActivity(act.id);
+            return;
+          }
+          // During the meal quest GardenScreenBase already owns the exact player
+          // thought ("I need to cook herb soup for the guest."). Route the tap
+          // through that existing handler without enabling the activity itself.
+          if (guestMealQuestActive && act.id !== "well") {
+            onActivity(act.id);
+            return;
+          }
+          onLockedTap(act.id);
+        };
+
         return (
           <TouchableOpacity
             key={act.id}
             style={[styles.btn, !isEnabled && styles.btnLocked]}
-            onPress={() => (isEnabled ? onActivity(act.id) : onLockedTap(act.id))}
+            onPress={handlePress}
             activeOpacity={isEnabled ? 0.75 : 0.95}
           >
             {act.id === "well" || ACTIVITY_ICONS[act.id] ? (
