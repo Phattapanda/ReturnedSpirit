@@ -108,8 +108,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.07)",
-    backgroundColor: "rgba(10,5,1,0.98)",
+    borderColor: "#24211F",
+    backgroundColor: "#0D0905",
   },
   diningGateImage: {
     width: 42,
