@@ -1,9 +1,15 @@
-import React, { useRef, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { Image, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import KitchenScreenBase from "@/src/KitchenScreenBase";
 import { KitchenRuntimeContext } from "@/src/game/kitchen-runtime-context";
+import {
+  guestTutorialHasReached,
+  loadGuestTutorialIntroStep,
+  subscribeGuestTutorialIntroStep,
+  type GuestTutorialIntroStep,
+} from "@/src/game/guest-tutorial";
 
 /**
  * Thin Kitchen runtime wrapper.
@@ -13,9 +19,28 @@ import { KitchenRuntimeContext } from "@/src/game/kitchen-runtime-context";
  */
 export default function KitchenScreen() {
   const insets = useSafeAreaInsets();
+  const { width: W } = useWindowDimensions();
   const [instanceKey, setInstanceKey] = useState(0);
   const [thought, setThought] = useState<string | null>(null);
+  const [diningUnlocked, setDiningUnlocked] = useState(false);
   const thoughtTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const applyStep = (step: GuestTutorialIntroStep) => {
+      if (active) setDiningUnlocked(guestTutorialHasReached(step, "dining_prompt"));
+    };
+
+    loadGuestTutorialIntroStep().then(applyStep).catch(() => {
+      if (active) setDiningUnlocked(false);
+    });
+    const unsubscribe = subscribeGuestTutorialIntroStep(applyStep);
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
 
   function refreshKitchen() {
     setInstanceKey((current) => current + 1);
@@ -27,10 +52,38 @@ export default function KitchenScreen() {
     thoughtTimer.current = setTimeout(() => setThought(null), 2600);
   }
 
+  // KitchenScreenBase currently owns six equal location buttons. Until the story
+  // reaches dining_prompt, cover only the Dining slot with its locked presentation.
+  const navButtonWidth = Math.max(0, (W - 16 - 25) / 6);
+  const diningLeft = 8 + 2 * (navButtonWidth + 5);
+
   return (
     <KitchenRuntimeContext.Provider value={{ refreshKitchen, showPlayerThought }}>
       <View style={styles.root}>
         <KitchenScreenBase key={instanceKey} />
+
+        {!diningUnlocked && (
+          <TouchableOpacity
+            style={[
+              styles.diningGate,
+              {
+                left: diningLeft,
+                width: navButtonWidth,
+                bottom: insets.bottom + 4,
+              },
+            ]}
+            onPress={() => {}}
+            activeOpacity={1}
+          >
+            <Image
+              source={require("../assets/images/gotodining.png")}
+              style={styles.diningGateImage}
+              resizeMode="contain"
+              resizeMethod="resize"
+            />
+          </TouchableOpacity>
+        )}
+
         {thought && (
           <View style={[styles.thoughtWrap, { top: insets.top + 166 }]} pointerEvents="none">
             <View style={styles.thoughtArrow} />
@@ -46,6 +99,23 @@ export default function KitchenScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  diningGate: {
+    position: "absolute",
+    height: 54,
+    zIndex: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#24211F",
+    backgroundColor: "#0D0905",
+  },
+  diningGateImage: {
+    width: 42,
+    height: 42,
+    opacity: 0.20,
+  },
   thoughtWrap: {
     position: "absolute",
     left: 10,

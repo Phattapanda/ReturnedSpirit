@@ -1,25 +1,57 @@
-import React, { useRef, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { Image, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from "react-native";
+import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import GardenScreenBase from "@/src/GardenScreenBase";
-import { GardenRuntimeContext } from "@/src/game/garden-runtime-context";
+import {
+  GardenRuntimeContext,
+  notifyGardenRuntimeRefresh,
+} from "@/src/game/garden-runtime-context";
+import { useAudioManager } from "@/src/audio/AudioProvider";
+import {
+  guestTutorialHasReached,
+  loadGuestTutorialIntroStep,
+  subscribeGuestTutorialIntroStep,
+  type GuestTutorialIntroStep,
+} from "@/src/game/guest-tutorial";
 
 /**
  * Thin Garden runtime wrapper.
  *
  * The original Garden screen stays intact in src/GardenScreenBase. The wrapper
- * only coordinates the independently persistent second plot and player thoughts
- * raised from shared GardenPlot components.
+ * coordinates the independently persistent second plot and player thoughts.
  */
 export default function GardenScreen() {
+  const router = useRouter();
+  const audioManager = useAudioManager();
   const insets = useSafeAreaInsets();
-  const [instanceKey, setInstanceKey] = useState(0);
+  const { width: W } = useWindowDimensions();
   const [thought, setThought] = useState<string | null>(null);
+  const [diningUnlocked, setDiningUnlocked] = useState(false);
   const thoughtTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  useEffect(() => {
+    let active = true;
+    const applyStep = (step: GuestTutorialIntroStep) => {
+      if (active) setDiningUnlocked(guestTutorialHasReached(step, "dining_prompt"));
+    };
+
+    loadGuestTutorialIntroStep().then(applyStep).catch(() => {
+      if (active) setDiningUnlocked(false);
+    });
+    const unsubscribe = subscribeGuestTutorialIntroStep(applyStep);
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
+
   function refreshGarden() {
-    setInstanceKey((current) => current + 1);
+    // 2nd Plot actions update their own local plot state immediately. The room
+    // only needs to sync shared HUD/inventory values; remounting would reset scroll.
+    notifyGardenRuntimeRefresh();
   }
 
   function showPlayerThought(text: string) {
@@ -28,10 +60,43 @@ export default function GardenScreen() {
     thoughtTimer.current = setTimeout(() => setThought(null), 2600);
   }
 
+  function goToDining() {
+    audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });
+    router.push("/dining");
+  }
+
+  // GardenScreenBase keeps Dining visually locked. Once the guest tutorial has
+  // reached dining_prompt, this story-derived button replaces that single slot.
+  const navButtonWidth = Math.max(0, (W - 16 - 25) / 6);
+  const diningLeft = 8 + 2 * (navButtonWidth + 5);
+
   return (
     <GardenRuntimeContext.Provider value={{ refreshGarden, showPlayerThought }}>
       <View style={styles.root}>
-        <GardenScreenBase key={instanceKey} />
+        <GardenScreenBase />
+
+        {diningUnlocked && (
+          <TouchableOpacity
+            style={[
+              styles.diningButton,
+              {
+                left: diningLeft,
+                width: navButtonWidth,
+                bottom: insets.bottom + 4,
+              },
+            ]}
+            onPress={goToDining}
+            activeOpacity={0.8}
+          >
+            <Image
+              source={require("../assets/images/gotodining.png")}
+              style={styles.diningButtonImage}
+              resizeMode="contain"
+              resizeMethod="resize"
+            />
+          </TouchableOpacity>
+        )}
+
         {thought && (
           <View style={[styles.thoughtWrap, { top: insets.top + 166 }]} pointerEvents="none">
             <View style={styles.thoughtArrow} />
@@ -47,6 +112,22 @@ export default function GardenScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  diningButton: {
+    position: "absolute",
+    height: 54,
+    zIndex: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(196,148,58,0.55)",
+    backgroundColor: "rgba(196,148,58,0.22)",
+  },
+  diningButtonImage: {
+    width: 42,
+    height: 42,
+  },
   thoughtWrap: {
     position: "absolute",
     left: 10,

@@ -37,6 +37,8 @@ const VALID_STEPS = new Set<GuestTutorialIntroStep>([
   "service_complete",
 ]);
 
+const stepListeners = new Set<(step: GuestTutorialIntroStep) => void>();
+
 export function normalizeGuestTutorialIntroStep(raw: string | null): GuestTutorialIntroStep {
   if (raw && VALID_STEPS.has(raw as GuestTutorialIntroStep)) {
     return raw as GuestTutorialIntroStep;
@@ -50,6 +52,15 @@ export async function loadGuestTutorialIntroStep(): Promise<GuestTutorialIntroSt
 
 export async function saveGuestTutorialIntroStep(step: GuestTutorialIntroStep): Promise<void> {
   await AsyncStorage.setItem(GUEST_TUTORIAL_INTRO_KEY, step);
+  stepListeners.forEach((listener) => listener(step));
+}
+
+/** Subscribe to guest tutorial step changes inside the current app runtime. */
+export function subscribeGuestTutorialIntroStep(
+  listener: (step: GuestTutorialIntroStep) => void,
+): () => void {
+  stepListeners.add(listener);
+  return () => stepListeners.delete(listener);
 }
 
 export function guestTutorialHasReached(
