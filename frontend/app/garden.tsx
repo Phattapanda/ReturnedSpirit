@@ -4,7 +4,10 @@ import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import GardenScreenBase from "@/src/GardenScreenBase";
-import { GardenRuntimeContext } from "@/src/game/garden-runtime-context";
+import {
+  GardenRuntimeContext,
+  notifyGardenRuntimeRefresh,
+} from "@/src/game/garden-runtime-context";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import {
   guestTutorialHasReached,
@@ -17,15 +20,13 @@ import {
  * Thin Garden runtime wrapper.
  *
  * The original Garden screen stays intact in src/GardenScreenBase. The wrapper
- * only coordinates the independently persistent second plot and player thoughts
- * raised from shared GardenPlot components.
+ * coordinates the independently persistent second plot and player thoughts.
  */
 export default function GardenScreen() {
   const router = useRouter();
   const audioManager = useAudioManager();
   const insets = useSafeAreaInsets();
   const { width: W } = useWindowDimensions();
-  const [instanceKey, setInstanceKey] = useState(0);
   const [thought, setThought] = useState<string | null>(null);
   const [diningUnlocked, setDiningUnlocked] = useState(false);
   const thoughtTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -48,7 +49,9 @@ export default function GardenScreen() {
   }, []);
 
   function refreshGarden() {
-    setInstanceKey((current) => current + 1);
+    // 2nd Plot actions update their own local plot state immediately. The room
+    // only needs to sync shared HUD/inventory values; remounting would reset scroll.
+    notifyGardenRuntimeRefresh();
   }
 
   function showPlayerThought(text: string) {
@@ -70,7 +73,7 @@ export default function GardenScreen() {
   return (
     <GardenRuntimeContext.Provider value={{ refreshGarden, showPlayerThought }}>
       <View style={styles.root}>
-        <GardenScreenBase key={instanceKey} />
+        <GardenScreenBase />
 
         {diningUnlocked && (
           <TouchableOpacity
