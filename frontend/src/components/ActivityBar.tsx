@@ -3,8 +3,11 @@ import { View, Text, TouchableOpacity, Image, StyleSheet, useWindowDimensions } 
 import { ACTIVITIES, type ActivityId } from "@/src/game/activity-config";
 import { calcEffectiveStaminaCost } from "@/src/game/player-stats";
 import {
+  guestTutorialHasReached,
   guestTutorialKeepsRupertInDining,
   loadGuestTutorialIntroStep,
+  subscribeGuestTutorialIntroStep,
+  type GuestTutorialIntroStep,
 } from "@/src/game/guest-tutorial";
 
 const ACTIVITY_ICONS: Record<ActivityId, ReturnType<typeof require>> = {
@@ -37,18 +40,23 @@ export default function ActivityBar({
 
   useEffect(() => {
     let active = true;
-    loadGuestTutorialIntroStep()
-      .then((step) => {
-        if (!active) return;
-        setGuestTutorialComplete(step === "service_complete");
-        setGuestMealQuestActive(guestTutorialKeepsRupertInDining(step));
-      })
-      .catch(() => {
-        if (!active) return;
-        setGuestTutorialComplete(false);
-        setGuestMealQuestActive(false);
-      });
-    return () => { active = false; };
+    const applyStep = (step: GuestTutorialIntroStep) => {
+      if (!active) return;
+      setGuestTutorialComplete(guestTutorialHasReached(step, "service_complete"));
+      setGuestMealQuestActive(guestTutorialKeepsRupertInDining(step));
+    };
+
+    loadGuestTutorialIntroStep().then(applyStep).catch(() => {
+      if (!active) return;
+      setGuestTutorialComplete(false);
+      setGuestMealQuestActive(false);
+    });
+    const unsubscribe = subscribeGuestTutorialIntroStep(applyStep);
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, []);
 
   if (!visible) return null;
