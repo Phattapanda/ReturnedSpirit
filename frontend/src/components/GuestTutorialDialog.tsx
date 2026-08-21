@@ -17,9 +17,8 @@ type Props = {
 };
 
 /**
- * Temporary portrait-dialog presentation for the guest tutorial.
- * Guest cards use square portraits; story dialogue intentionally keeps the
- * current circular portrait language until the planned half-body redesign.
+ * Portrait-dialog presentation for the guest tutorial.
+ * It intentionally matches the standard story-dialog portrait size and crop.
  */
 export default function GuestTutorialDialog({ visible, line, onContinue }: Props) {
   const insets = useSafeAreaInsets();
@@ -62,7 +61,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1.5,
     borderTopColor: "rgba(196,148,58,0.55)",
     paddingHorizontal: 18,
-    paddingTop: 46,
+    paddingTop: 76,
     alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: -6 },
@@ -72,12 +71,12 @@ const styles = StyleSheet.create({
   },
   portraitWrap: {
     position: "absolute",
-    top: -46,
-    width: 92,
-    height: 92,
-    borderRadius: 46,
+    top: -62,
+    width: 124,
+    height: 124,
+    borderRadius: 62,
     overflow: "hidden",
-    borderWidth: 2.5,
+    borderWidth: 3,
     borderColor: "#C4943A",
     backgroundColor: "#2C1810",
   },
@@ -87,8 +86,9 @@ const styles = StyleSheet.create({
   speaker: {
     color: "#C4943A",
     fontFamily: "Oldenburg",
-    fontSize: 13,
-    letterSpacing: 0.8,
+    fontSize: 15,
+    letterSpacing: 1.2,
+    marginTop: 2,
     marginBottom: 6,
   },
   dialogBox: {
