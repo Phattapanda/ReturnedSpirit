@@ -4,7 +4,6 @@ import {
   Text,
   TouchableOpacity,
   Image,
-  Modal,
   StyleSheet,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -20,7 +19,9 @@ import {
 } from "@/src/game/item-system";
 import { commitHarvestBag } from "@/src/game/garden-harvest";
 import {
-  createCarrotPlot,
+  createGardenPlotFromSeed,
+  createHarvestBagForCrop,
+  getCropYieldLabel,
   loadSecondGardenPlot,
   saveSecondGardenPlot,
   SECOND_GARDEN_PLOT_EMPTY,
@@ -30,6 +31,9 @@ import {
   loadGuestTutorialIntroStep,
 } from "@/src/game/guest-tutorial";
 import { useGardenRuntime } from "@/src/game/garden-runtime-context";
+import SeedSelectionModal, {
+  type SeedSelectionOption,
+} from "@/src/components/seed-selection-modal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -163,6 +167,8 @@ export default function GardenPlot(props: GardenPlotProps) {
   const [secondData, setSecondData] = useState<GardenPlotData>(SECOND_GARDEN_PLOT_EMPTY);
   const [protectSeeds, setProtectSeeds] = useState(false);
   const [plantConfirmVisible, setPlantConfirmVisible] = useState(false);
+  const [availableSeeds, setAvailableSeeds] = useState<SeedSelectionOption[]>([]);
+  const [selectedSeedId, setSelectedSeedId] = useState<string | null>(null);
   const [secondBusy, setSecondBusy] = useState(false);
 
   useEffect(() => {
@@ -197,14 +203,21 @@ export default function GardenPlot(props: GardenPlotProps) {
   }
 
   async function handleSecondPlant() {
-    if (secondBusy) return;
+    if (secondBusy || !selectedSeedId) return;
     setSecondBusy(true);
     try {
       const rawInventory = await AsyncStorage.getItem(GARDEN_INVENTORY_KEY);
       const inventory: GardenInventoryItem[] = rawInventory ? JSON.parse(rawInventory) : [];
-      const seedIndex = inventory.findIndex((item) => item.id === "carrotseed" && item.itemType === "seed" && item.quantity > 0);
+      const seedIndex = inventory.findIndex(
+        (item) => item.id === selectedSeedId && item.itemType === "seed" && item.quantity > 0,
+      );
       if (seedIndex < 0) {
-        showPlayerThought('"I have no carrot seeds."');
+        showPlayerThought('"That seed is no longer available."');
+        return;
+      }
+      const nextPlot = createGardenPlotFromSeed(SECOND_GARDEN_PLOT_EMPTY, selectedSeedId);
+      if (!nextPlot) {
+        showPlayerThought('"I can\'t plant this seed yet."');
         return;
       }
       const nextInventory = inventory.map((item) => ({ ...item }));
@@ -212,13 +225,13 @@ export default function GardenPlot(props: GardenPlotProps) {
         ...nextInventory[seedIndex],
         quantity: nextInventory[seedIndex].quantity - 1,
       };
-      const nextPlot = createCarrotPlot();
       await AsyncStorage.multiSet([
         [GARDEN_INVENTORY_KEY, JSON.stringify(nextInventory)],
         ["@garden:plot_02_data", JSON.stringify(nextPlot)],
       ]);
       setSecondData(nextPlot);
       setPlantConfirmVisible(false);
+      setSelectedSeedId(null);
       refreshGarden();
     } catch {
       showPlayerThought('"I can\'t plant this right now."');
@@ -316,15 +329,12 @@ export default function GardenPlot(props: GardenPlotProps) {
     setSecondBusy(true);
     try {
       const finalYield = secondData.baseYield + secondData.accumulatedWeedYieldBonus + secondData.accumulatedFertilizerYieldBonus;
-      const carrotBag: BagItem = {
-        id: "carrotbag",
-        itemType: "carrotbag",
-        name: "Carrot Bag",
-        quantity: 1,
-        containedItem: "carrot",
-        containedQuantity: finalYield,
-      };
-      const result = await commitHarvestBag(carrotBag, [
+      const harvestBag: BagItem | null = createHarvestBagForCrop(secondData.seedItemId, finalYield);
+      if (!harvestBag) {
+        showPlayerThought('"I can\'t harvest this crop yet."');
+        return;
+      }
+      const result = await commitHarvestBag(harvestBag, [
         ["@garden:plot_02_data", JSON.stringify(SECOND_GARDEN_PLOT_EMPTY)],
       ]);
       if (!result.ok) {
@@ -351,10 +361,15 @@ export default function GardenPlot(props: GardenPlotProps) {
       if (isEmpty) {
         const rawInventory = await AsyncStorage.getItem(GARDEN_INVENTORY_KEY);
         const inventory: GardenInventoryItem[] = rawInventory ? JSON.parse(rawInventory) : [];
-        if (!inventory.some((item) => item.id === "carrotseed" && item.itemType === "seed" && item.quantity > 0)) {
-          showPlayerThought('"I have no carrot seeds."');
+        const seeds = inventory
+          .filter((item) => item.itemType === "seed" && item.quantity > 0)
+          .map((item) => ({ id: item.id, name: item.name, quantity: item.quantity }));
+        if (seeds.length === 0) {
+          showPlayerThought('"I have no seeds."');
           return;
         }
+        setAvailableSeeds(seeds);
+        setSelectedSeedId(null);
         setPlantConfirmVisible(true);
       }
       return;
@@ -381,7 +396,7 @@ export default function GardenPlot(props: GardenPlotProps) {
     : effectiveData.status === "empty"
     ? "Empty"
     : "Growing";
-  const yieldName = effectiveData.cropType === "carrot" ? "carrots" : "herbs";
+  const yieldName = getCropYieldLabel(effectiveData.seedItemId);
   const isEmpty = effectiveData.status === "empty";
 
   const harvestLocked = effectiveData.readyToHarvest;
@@ -416,8 +431,13 @@ export default function GardenPlot(props: GardenPlotProps) {
               <Image source={cropImg} style={styles.cropImg} resizeMode="contain" resizeMethod="resize" />
             ) : (
               <View style={styles.cropEmpty}>
-                <Text style={styles.cropEmptyText}>
-                  {effectiveInteractive ? "Tap to\nPlant" : "Empty\nBed"}
+                <Text
+                  style={styles.cropEmptyText}
+                  numberOfLines={2}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.8}
+                >
+                  {effectiveInteractive ? "Tap to\nplant" : "Empty\nbed"}
                 </Text>
               </View>
             )}
@@ -451,23 +471,18 @@ export default function GardenPlot(props: GardenPlotProps) {
         </View>
       </View>
 
-      <Modal visible={plantConfirmVisible} transparent animationType="fade" onRequestClose={() => setPlantConfirmVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.confirmPanel}>
-            <Image source={CROP_ASSETS.carrotseed} style={styles.confirmSeedImage} resizeMode="contain" />
-            <Text style={styles.confirmTitle}>Plant Carrot Seed?</Text>
-            <Text style={styles.confirmText}>Carrots need 4 days to grow.</Text>
-            <View style={styles.confirmActions}>
-              <TouchableOpacity style={styles.confirmButton} onPress={() => setPlantConfirmVisible(false)}>
-                <Text style={styles.confirmButtonText}>No</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.confirmButton, styles.confirmButtonPrimary]} disabled={secondBusy} onPress={handleSecondPlant}>
-                <Text style={styles.confirmButtonText}>Plant</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      <SeedSelectionModal
+        visible={plantConfirmVisible}
+        seeds={availableSeeds}
+        selectedSeedId={selectedSeedId}
+        busy={secondBusy}
+        onSelect={setSelectedSeedId}
+        onClose={() => {
+          setPlantConfirmVisible(false);
+          setSelectedSeedId(null);
+        }}
+        onConfirm={handleSecondPlant}
+      />
     </>
   );
 }
@@ -525,7 +540,15 @@ const styles = StyleSheet.create({
   },
   cropImg: { width: "100%", height: "100%" },
   cropEmpty: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center", backgroundColor: "rgba(20,12,4,0.8)" },
-  cropEmptyText: { color: "rgba(196,148,58,0.55)", fontSize: 11, fontFamily: "Oldenburg", textAlign: "center" },
+  cropEmptyText: {
+    width: "100%",
+    paddingHorizontal: 6,
+    color: "rgba(225,182,96,0.82)",
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: "Oldenburg",
+    textAlign: "center",
+  },
   infoCol: { flex: 1, gap: 5 },
   statusLabel: { color: "#C4943A", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 0.8 },
   progressLabel: { color: "#F0E8D5", fontSize: 12, fontFamily: "Oldenburg", opacity: 0.85 },
@@ -549,19 +572,4 @@ const styles = StyleSheet.create({
   actionLabel: { color: "#F0E8D5", fontSize: 10, fontFamily: "Oldenburg", textAlign: "center", letterSpacing: 0.3 },
   actionCost: { color: "rgba(240,232,213,0.55)", fontSize: 9, fontFamily: "Oldenburg", textAlign: "center" },
   labelDimmed: { opacity: 0.45 },
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.72)", alignItems: "center", justifyContent: "center", padding: 24 },
-  confirmPanel: {
-    width: "100%", maxWidth: 340, borderRadius: 18, padding: 20, alignItems: "center", gap: 10,
-    backgroundColor: "#160B03", borderWidth: 1.5, borderColor: "rgba(196,148,58,0.45)",
-  },
-  confirmSeedImage: { width: 72, height: 72 },
-  confirmTitle: { color: "#F5E6C8", fontSize: 16, fontFamily: "Oldenburg" },
-  confirmText: { color: "rgba(240,232,213,0.70)", fontSize: 12, fontFamily: "Oldenburg", textAlign: "center" },
-  confirmActions: { flexDirection: "row", gap: 10, marginTop: 6 },
-  confirmButton: {
-    minWidth: 94, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10,
-    borderWidth: 1, borderColor: "rgba(196,148,58,0.35)", alignItems: "center",
-  },
-  confirmButtonPrimary: { backgroundColor: "rgba(196,148,58,0.18)" },
-  confirmButtonText: { color: "#F5E6C8", fontSize: 13, fontFamily: "Oldenburg" },
 });

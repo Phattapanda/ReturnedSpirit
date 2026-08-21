@@ -25,6 +25,7 @@ import Animated, {
 } from "react-native-reanimated";
 
 import GardenPlot, { GardenPlotData } from "@/src/components/GardenPlot";
+import SeedSelectionModal from "@/src/components/seed-selection-modal";
 import SceneBackground from "@/src/components/SceneBackground";
 import CurrencyHud from "@/src/components/CurrencyHud";
 import { useAudioManager } from "@/src/audio/AudioProvider";
@@ -61,6 +62,10 @@ import { loadPostGuestTutorialState } from "@/src/game/post-guest-tutorial";
 import { ensureAssetReady } from "@/src/assets/AssetManager";
 import { subscribeGardenRuntimeRefresh } from "@/src/game/garden-runtime-context";
 import { commitHarvestBag } from "@/src/game/garden-harvest";
+import {
+  createGardenPlotFromSeed,
+  createHarvestBagForCrop,
+} from "@/src/game/garden-crop-system";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
   PLAYER_AVATAR_KEY,
@@ -415,7 +420,8 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
 
   // Seed planting modal
   const [seedModalVisible, setSeedModalVisible] = useState(false);
-  const [plantConfirmSeed, setPlantConfirmSeed] = useState<{id:string;name:string;qty:number} | null>(null);
+  const [selectedSeedId, setSelectedSeedId] = useState<string | null>(null);
+  const [plantBusy, setPlantBusy] = useState(false);
   // Float anim (well/activity)
   const [floatMsg, setFloatMsg] = useState<string | null>(null);
   // Bag inspected state
@@ -1261,18 +1267,16 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
     actionLocked.current = true;
 
     const finalYield = plotData.baseYield + plotData.accumulatedWeedYieldBonus + plotData.accumulatedFertilizerYieldBonus;
-    const herbBag: BagItem = {
-      id: "herbbag",
-      itemType: "herbbag",
-      name: "Herb Bag",
-      quantity: 1,
-      containedItem: "herbs",
-      containedQuantity: finalYield,
-    };
+    const harvestBag = createHarvestBagForCrop(plotData.seedItemId, finalYield);
+    if (!harvestBag) {
+      showPlayerBubble('"I can\'t harvest this crop yet."');
+      actionLocked.current = false;
+      return;
+    }
     const emptyPlot = createEmptyPrimaryPlot();
 
     try {
-      const harvestCommit = await commitHarvestBag(herbBag, [
+      const harvestCommit = await commitHarvestBag(harvestBag, [
         [GSK.PLOT_DATA, JSON.stringify(emptyPlot)],
         [GSK.TUT_STATE, "IDLE"],
         [GSK.TUT_COMPLETE, "true"],
@@ -1309,23 +1313,12 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
     }
 
     if (plotData.status === "empty") {
-      // Empty plot → show seed selection
-      // Carrot Seed is introduced in Point 11, but its crop duration/yield are
-      // intentionally not defined yet. Never fall through to the current Herb-only
-      // planting initializer and accidentally turn a Carrot Seed into an herb crop.
-      const availableSeeds = inventory.filter(
-        i => i.itemType === "seed" && i.quantity > 0 && i.id !== "carrotseed",
-      );
+      const availableSeeds = inventory.filter(i => i.itemType === "seed" && i.quantity > 0);
       if (availableSeeds.length === 0) {
-        const hasCarrotSeed = inventory.some(i => i.id === "carrotseed" && i.quantity > 0);
-        showPlayerBubble(hasCarrotSeed
-          ? '"I should keep the carrot seed for the new plot."'
-          : '"I have no seeds."');
+        showPlayerBubble('"I have no seeds."');
         return;
       }
-      // Auto-select first available seed
-      const seed = availableSeeds[0];
-      setPlantConfirmSeed({ id: seed.id, name: seed.name, qty: seed.quantity });
+      setSelectedSeedId(null);
       setSeedModalVisible(true);
       return;
     }
@@ -1647,38 +1640,42 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
   // Seed planting confirm
   // ─────────────────────────────────────────────────────────────────────────
   async function handleConfirmPlant() {
-    if (!plantConfirmSeed) return;
-    setSeedModalVisible(false);
+    if (!selectedSeedId || plantBusy) return;
+    setPlantBusy(true);
+    try {
+      const rawInventory = await AsyncStorage.getItem(GSK.INVENTORY);
+      const latestInventory: InventoryItem[] = rawInventory ? JSON.parse(rawInventory) : [];
+      const seedIdx = latestInventory.findIndex(
+        i => i.id === selectedSeedId && i.itemType === "seed" && i.quantity > 0,
+      );
+      if (seedIdx === -1) {
+        showPlayerBubble('"That seed is no longer available."');
+        return;
+      }
 
-    // Consume one seed from inventory
-    const seedIdx = inventory.findIndex(i => i.id === plantConfirmSeed.id && i.quantity > 0);
-    if (seedIdx === -1) {
-      showPlayerBubble('"No seeds available."');
-      return;
-    }
+      const newPlot = createGardenPlotFromSeed(plotData, selectedSeedId);
+      if (!newPlot) {
+        showPlayerBubble('"I can\'t plant this seed yet."');
+        return;
+      }
 
-    const newInv = [...inventory];
-    newInv[seedIdx] = { ...newInv[seedIdx], quantity: newInv[seedIdx].quantity - 1 };
-    setInventory(newInv);
-    await AsyncStorage.setItem(GSK.INVENTORY, JSON.stringify(newInv));
-
-    // Initialize new plot
-    const newPlot: GardenPlotData = {
-      id: plotData.id, plotType: plotData.plotType, upgradeLevel: plotData.upgradeLevel,
-      status: "growing", cropType: "herb", cropAsset: "herbseed",
-      seedItemId: plantConfirmSeed.id,
-      totalGrowthDays: 2, completedGrowthDays: 0, remainingGrowthDays: 2,
-      progressPercent: 0, wateredToday: false, weedsPulledToday: false,
-      fertilizedToday: false, fertilizerTypeUsedToday: null,
-      consecutiveUnwateredDays: 0, baseYield: 5,
-      accumulatedWeedYieldBonus: 0, accumulatedFertilizerYieldBonus: 0,
-      readyToHarvest: false, withered: false,
-    };
-    setPlotData(newPlot);
-    await AsyncStorage.setItem(GSK.PLOT_DATA, JSON.stringify(newPlot));
-    setPlantConfirmSeed(null);
-    if (gtsRef.current === "TUTORIAL_WATER_FETCHED" || gtsRef.current === "GARDEN_REPLANTING_AVAILABLE") {
-      setGardenState("GARDEN_REPLANTING_AVAILABLE");
+      const newInv = latestInventory.map(item => ({ ...item }));
+      newInv[seedIdx] = { ...newInv[seedIdx], quantity: newInv[seedIdx].quantity - 1 };
+      await AsyncStorage.multiSet([
+        [GSK.INVENTORY, JSON.stringify(newInv)],
+        [GSK.PLOT_DATA, JSON.stringify(newPlot)],
+      ]);
+      setInventory(newInv);
+      setPlotData(newPlot);
+      setSeedModalVisible(false);
+      setSelectedSeedId(null);
+      if (gtsRef.current === "TUTORIAL_WATER_FETCHED" || gtsRef.current === "GARDEN_REPLANTING_AVAILABLE") {
+        setGardenState("GARDEN_REPLANTING_AVAILABLE");
+      }
+    } catch {
+      showPlayerBubble('"I can\'t plant this right now."');
+    } finally {
+      setPlantBusy(false);
     }
   }
 
@@ -2378,35 +2375,22 @@ return (
         onStatsUpdated={handleStatsUpdated}
       />
 
-      {/* ── Seed planting confirmation Modal ── */}
-      <Modal visible={seedModalVisible} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.tearOutPanel}>
-            <Text style={styles.tearOutTitle}>Plant Seed?</Text>
-            <Text style={styles.tearOutDesc}>
-              {plantConfirmSeed
-                ? `Plant "${plantConfirmSeed.name}"? (${plantConfirmSeed.qty} available)`
-                : "Plant this seed?"}
-            </Text>
-            <View style={styles.tearOutBtns}>
-              <TouchableOpacity
-                style={styles.tearOutBtnNo}
-                onPress={() => { setSeedModalVisible(false); setPlantConfirmSeed(null); }}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.tearOutBtnText}>No</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.tearOutBtnYes}
-                onPress={handleConfirmPlant}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.tearOutBtnText}>Yes</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      <SeedSelectionModal
+        visible={seedModalVisible}
+        seeds={seeds.map(seed => ({
+          id: seed.id,
+          name: seed.name,
+          quantity: seed.quantity,
+        }))}
+        selectedSeedId={selectedSeedId}
+        busy={plantBusy}
+        onSelect={setSelectedSeedId}
+        onClose={() => {
+          setSeedModalVisible(false);
+          setSelectedSeedId(null);
+        }}
+        onConfirm={handleConfirmPlant}
+      />
 
       {/* ── Float message ── */}
       {floatMsg && (
