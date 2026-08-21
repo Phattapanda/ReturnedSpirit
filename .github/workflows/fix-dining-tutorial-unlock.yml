@@ -1,0 +1,94 @@
+name: Fix Dining tutorial unlock
+
+on:
+  push:
+    branches:
+      - fix/ui-bubble-portrait-polish
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/ui-bubble-portrait-polish
+          fetch-depth: 0
+
+      - name: Keep Dining unlocked from first guest prompt onward
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path("frontend/src/KitchenScreenBase.tsx")
+          s = p.read_text()
+
+          def once(old, new):
+              global s
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f"expected one match, found {count}: {old[:120]!r}")
+              s = s.replace(old, new, 1)
+
+          once(
+              'import {\n  guestTutorialKeepsRupertInDining,\n  loadGuestTutorialIntroStep,',
+              'import {\n  guestTutorialHasReached,\n  guestTutorialKeepsRupertInDining,\n  loadGuestTutorialIntroStep,',
+          )
+
+          once(
+              '  const [dormitoryUnlocked, setDormitoryUnlocked] = useState(false);\n  const [gardenActive, setGardenActive] = useState(false);',
+              '  const [dormitoryUnlocked, setDormitoryUnlocked] = useState(false);\n  const [gardenActive, setGardenActive] = useState(false);\n  const [diningUnlocked, setDiningUnlocked] = useState(false);',
+          )
+
+          anchor = '  // ── Menu modals\n'
+          insert = '''  // Dining Hall unlocks when the first guest tutorial points the player there.
+  // Re-read on every Kitchen focus so returning with Herb Soup never requires a Garden detour.
+  useFocusEffect(
+    React.useCallback(() => {
+      let active = true;
+      loadGuestTutorialIntroStep()
+        .then((step) => {
+          if (active) setDiningUnlocked(guestTutorialHasReached(step, "dining_prompt"));
+        })
+        .catch(() => {});
+      return () => { active = false; };
+    }, []),
+  );
+
+'''
+          once(anchor, insert + anchor)
+
+          once(
+              '            (isDormBtn && dormitoryUnlocked) ||\n            (isDiningBtn && DEV_DINING_TEST_ACCESS);',
+              '            (isDormBtn && dormitoryUnlocked) ||\n            (isDiningBtn && diningUnlocked);',
+          )
+
+          once(
+              '            } else if (isDiningBtn && DEV_DINING_TEST_ACCESS) {',
+              '            } else if (isDiningBtn && diningUnlocked) {',
+          )
+
+          p.write_text(s)
+          PY
+
+      - name: Validate
+        shell: bash
+        run: |
+          cd frontend
+          npm ci
+          npx tsc --noEmit
+          npx eslint src/KitchenScreenBase.tsx
+          git diff --check
+
+      - name: Commit and remove workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/fix-dining-tutorial-unlock.yml
+          git add frontend/src/KitchenScreenBase.tsx
+          git commit -m "Keep Dining unlocked during guest tutorial"
+          git push origin HEAD:fix/ui-bubble-portrait-polish
