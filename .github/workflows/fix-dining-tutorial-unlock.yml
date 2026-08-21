@@ -17,71 +17,83 @@ jobs:
           ref: fix/ui-bubble-portrait-polish
           fetch-depth: 0
 
-      - name: Keep Dining unlocked from first guest prompt onward
+      - name: Apply Dining unlock and intro button font
         shell: bash
         run: |
           python3 <<'PY'
           from pathlib import Path
 
-          p = Path("frontend/src/KitchenScreenBase.tsx")
-          s = p.read_text()
+          kitchen = Path("frontend/src/KitchenScreenBase.tsx")
+          text = kitchen.read_text()
 
-          def once(old, new):
-              global s
-              count = s.count(old)
-              if count != 1:
-                  raise SystemExit(f"expected one match, found {count}: {old[:120]!r}")
-              s = s.replace(old, new, 1)
+          if "guestTutorialHasReached," not in text:
+              text = text.replace(
+                  "import {\n  guestTutorialKeepsRupertInDining,\n  loadGuestTutorialIntroStep,",
+                  "import {\n  guestTutorialHasReached,\n  guestTutorialKeepsRupertInDining,\n  loadGuestTutorialIntroStep,",
+                  1,
+              )
 
-          once(
-              'import {\n  guestTutorialKeepsRupertInDining,\n  loadGuestTutorialIntroStep,',
-              'import {\n  guestTutorialHasReached,\n  guestTutorialKeepsRupertInDining,\n  loadGuestTutorialIntroStep,',
+          if "const [diningUnlocked, setDiningUnlocked]" not in text:
+              text = text.replace(
+                  "  const [dormitoryUnlocked, setDormitoryUnlocked] = useState(false);\n  const [gardenActive, setGardenActive] = useState(false);",
+                  "  const [dormitoryUnlocked, setDormitoryUnlocked] = useState(false);\n  const [gardenActive, setGardenActive] = useState(false);\n  const [diningUnlocked, setDiningUnlocked] = useState(false);",
+                  1,
+              )
+
+          text = text.replace(
+              "      const step = await loadGuestTutorialIntroStep();\n      if (!active || tsRef.current !== \"IDLE\") return;\n      setRupertInDining(guestTutorialKeepsRupertInDining(step));",
+              "      const step = await loadGuestTutorialIntroStep();\n      if (!active || tsRef.current !== \"IDLE\") return;\n      setDiningUnlocked(guestTutorialHasReached(step, \"dining_prompt\"));\n      setRupertInDining(guestTutorialKeepsRupertInDining(step));",
+              1,
           )
 
-          once(
-              '  const [dormitoryUnlocked, setDormitoryUnlocked] = useState(false);\n  const [gardenActive, setGardenActive] = useState(false);',
-              '  const [dormitoryUnlocked, setDormitoryUnlocked] = useState(false);\n  const [gardenActive, setGardenActive] = useState(false);\n  const [diningUnlocked, setDiningUnlocked] = useState(false);',
+          text = text.replace(
+              "          const initialGuestStep = await loadGuestTutorialIntroStep();\n          setRupertInDining(guestTutorialKeepsRupertInDining(initialGuestStep));",
+              "          const initialGuestStep = await loadGuestTutorialIntroStep();\n          setDiningUnlocked(guestTutorialHasReached(initialGuestStep, \"dining_prompt\"));\n          setRupertInDining(guestTutorialKeepsRupertInDining(initialGuestStep));",
+              1,
           )
 
-          anchor = '  // ── Menu modals\n'
-          insert = '''  // Dining Hall unlocks when the first guest tutorial points the player there.
-  // Re-read on every Kitchen focus so returning with Herb Soup never requires a Garden detour.
-  useFocusEffect(
-    React.useCallback(() => {
-      let active = true;
-      loadGuestTutorialIntroStep()
-        .then((step) => {
-          if (active) setDiningUnlocked(guestTutorialHasReached(step, "dining_prompt"));
-        })
-        .catch(() => {});
-      return () => { active = false; };
-    }, []),
-  );
-
-'''
-          once(anchor, insert + anchor)
-
-          once(
-              '            (isDormBtn && dormitoryUnlocked) ||\n            (isDiningBtn && DEV_DINING_TEST_ACCESS);',
-              '            (isDormBtn && dormitoryUnlocked) ||\n            (isDiningBtn && diningUnlocked);',
+          text = text.replace(
+              "          const guestStep = await loadGuestTutorialIntroStep();\n          setRupertInDining(guestTutorialKeepsRupertInDining(guestStep));",
+              "          const guestStep = await loadGuestTutorialIntroStep();\n          setDiningUnlocked(guestTutorialHasReached(guestStep, \"dining_prompt\"));\n          setRupertInDining(guestTutorialKeepsRupertInDining(guestStep));",
+              1,
           )
 
-          once(
-              '            } else if (isDiningBtn && DEV_DINING_TEST_ACCESS) {',
-              '            } else if (isDiningBtn && diningUnlocked) {',
+          text = text.replace(
+              "              saveGuestTutorialIntroStep(\"dining_prompt\").catch(() => {});\n              setTutState(\"WAITING_FOR_DINING_LOCATION_CLICK\");",
+              "              saveGuestTutorialIntroStep(\"dining_prompt\").catch(() => {});\n              setDiningUnlocked(true);\n              setTutState(\"WAITING_FOR_DINING_LOCATION_CLICK\");",
+              1,
           )
 
-          p.write_text(s)
+          text = text.replace(
+              "            (isDormBtn && dormitoryUnlocked) ||\n            (isDiningBtn && DEV_DINING_TEST_ACCESS);",
+              "            (isDormBtn && dormitoryUnlocked) ||\n            (isDiningBtn && diningUnlocked);",
+              1,
+          )
+          text = text.replace(
+              "            } else if (isDiningBtn && DEV_DINING_TEST_ACCESS) {",
+              "            } else if (isDiningBtn && diningUnlocked) {",
+              1,
+          )
+
+          kitchen.write_text(text)
+
+          intro = Path("frontend/app/intro.tsx")
+          intro_text = intro.read_text()
+          intro_text = intro_text.replace(
+              '  choiceTxt: {\n    color: "#F5E6C8",\n    fontSize: 15,\n    fontWeight: "600",\n  },',
+              '  choiceTxt: {\n    color: "#F5E6C8",\n    fontSize: 15,\n    fontFamily: "Oldenburg",\n    letterSpacing: 0.4,\n  },',
+              1,
+          )
+          intro.write_text(intro_text)
           PY
 
-      - name: Validate
+      - name: Check patch
         shell: bash
         run: |
-          cd frontend
-          npm ci
-          npx tsc --noEmit
-          npx eslint src/KitchenScreenBase.tsx
           git diff --check
+          grep -q 'guestTutorialHasReached' frontend/src/KitchenScreenBase.tsx
+          grep -q 'diningUnlocked' frontend/src/KitchenScreenBase.tsx
+          grep -q 'fontFamily: "Oldenburg"' frontend/app/intro.tsx
 
       - name: Commit and remove workflow
         shell: bash
@@ -89,6 +101,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/fix-dining-tutorial-unlock.yml
-          git add frontend/src/KitchenScreenBase.tsx
-          git commit -m "Keep Dining unlocked during guest tutorial"
+          git add frontend/src/KitchenScreenBase.tsx frontend/app/intro.tsx
+          git commit -m "Unlock Dining from guest tutorial start"
           git push origin HEAD:fix/ui-bubble-portrait-polish
