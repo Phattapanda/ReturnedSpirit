@@ -42,6 +42,7 @@ import { PLAYER_STATS_KEY, DEFAULT_PLAYER_STATS, type PlayerStats } from "@/src/
 import { loadLogbook, type LogEntry, LOGBOOK_KEY } from "@/src/game/logbook";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
 import {
+  guestTutorialHasReached,
   guestTutorialKeepsRupertInDining,
   loadGuestTutorialIntroStep,
   saveGuestTutorialIntroStep,
@@ -328,6 +329,7 @@ export default function KitchenScreen() {
   useEffect(() => { dayIdxRef.current = dayIdx; }, [dayIdx]);
   const [dormitoryUnlocked, setDormitoryUnlocked] = useState(false);
   const [gardenActive, setGardenActive] = useState(false);
+  const [diningUnlocked, setDiningUnlocked] = useState(false);
   const playerNameRef = useRef("Adventurer");
   const [rupertPortrait, setRupertPortrait] = useState<"normal" | "sad" | "laugh">("normal");
   // Start hidden until persisted placement is resolved. This prevents a one-frame
@@ -685,6 +687,7 @@ export default function KitchenScreen() {
       }
       const step = await loadGuestTutorialIntroStep();
       if (!active || tsRef.current !== "IDLE") return;
+      setDiningUnlocked(guestTutorialHasReached(step, "dining_prompt"));
       setRupertInDining(guestTutorialKeepsRupertInDining(step));
       if (step === "service_complete") {
         void maybeStartPostGuestUpgradeIntro(300);
@@ -729,6 +732,7 @@ export default function KitchenScreen() {
         cookingTutorialCompletedRef.current = initialCookingDone === "true";
         if (initialCookingDone === "true") {
           const initialGuestStep = await loadGuestTutorialIntroStep();
+          setDiningUnlocked(guestTutorialHasReached(initialGuestStep, "dining_prompt"));
           setRupertInDining(guestTutorialKeepsRupertInDining(initialGuestStep));
         } else {
           setRupertInDining(false);
@@ -999,6 +1003,7 @@ export default function KitchenScreen() {
           if (cur !== "IDLE") return; // Don't interfere with active tutorial/dialog
 
           const guestStep = await loadGuestTutorialIntroStep();
+          setDiningUnlocked(guestTutorialHasReached(guestStep, "dining_prompt"));
           setRupertInDining(guestTutorialKeepsRupertInDining(guestStep));
 
           // Refresh stats (may have changed in dormitory after sleep)
@@ -3059,6 +3064,7 @@ export default function KitchenScreen() {
             "Rupert", "BLOCK_ALL", null,
             () => {
               saveGuestTutorialIntroStep("dining_prompt").catch(() => {});
+              setDiningUnlocked(true);
               setTutState("WAITING_FOR_DINING_LOCATION_CLICK");
             },
             "bubble.guest.dining_prompt",
@@ -3596,7 +3602,7 @@ export default function KitchenScreen() {
             enabledInDiningPrompt ||
             (isGardenBtn && gardenActive) ||
             (isDormBtn && dormitoryUnlocked) ||
-            (isDiningBtn && DEV_DINING_TEST_ACCESS);
+            (isDiningBtn && diningUnlocked);
 
           // Resolve location image (mail has no custom PNG → fallback icon)
           const locImgKey = `loc_${loc.id}` as keyof typeof IMG;
@@ -3670,7 +3676,7 @@ export default function KitchenScreen() {
                     audioManager.playSoundEffect('walking-on-wood', { maxDurationMs: 5000 });
                     router.push("/dormitory");
                   };
-            } else if (isDiningBtn && DEV_DINING_TEST_ACCESS) {
+            } else if (isDiningBtn && diningUnlocked) {
               locOnPress = () => {
                 audioManager.playSoundEffect('footstep', { maxDurationMs: 4000 });
                 router.push("/dining");

@@ -707,6 +707,7 @@ const styles = StyleSheet.create({
   choiceTxt: {
     color: "#F5E6C8",
     fontSize: 15,
-    fontWeight: "600",
+    fontFamily: "Oldenburg",
+    letterSpacing: 0.4,
   },
 });
