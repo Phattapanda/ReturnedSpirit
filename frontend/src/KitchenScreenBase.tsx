@@ -3791,7 +3791,7 @@ const blockedByTutorial = tutActive && !(isDiningBtn && diningUnlocked);
                   onSubmitEditing={confirmName}
                 />
                 <TouchableOpacity
-                  style={[styles.continueBtn, !nameInputVal.trim() && styles.btnDisabled]}
+                  style={[styles.continueBtn, styles.confirmBtn, !nameInputVal.trim() && styles.btnDisabled]}
                   onPress={confirmName}
                   disabled={!nameInputVal.trim()}
                   activeOpacity={0.8}
@@ -4339,6 +4339,13 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(196,148,58,0.18)", borderRadius: 12,
     paddingVertical: 13, paddingHorizontal: 26,
     borderWidth: 1, borderColor: "rgba(196,148,58,0.35)", marginTop: 4,
+  },
+  confirmBtn: {
+    alignSelf: "center",
+    justifyContent: "center",
+    minWidth: 150,
+    paddingHorizontal: 24,
+    marginTop: 12,
   },
   continueTxt: { color: "#F5E6C8", fontSize: 15, fontFamily: "Oldenburg", letterSpacing: 0.6 },
   btnDisabled: { opacity: 0.4 },
