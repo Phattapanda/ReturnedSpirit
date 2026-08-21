@@ -671,7 +671,7 @@ const styles = StyleSheet.create({
     color: "#F0E8D5",
     fontSize: 16,
     lineHeight: 25,
-    fontStyle: "italic",
+    fontFamily: "RobotoRegular",
     textAlign: "center",
   },
   narratorText: {
@@ -692,7 +692,7 @@ const styles = StyleSheet.create({
   continueTxt: {
     color: "#F5E6C8",
     fontSize: 15,
-    fontWeight: "700",
+    fontFamily: "Oldenburg",
   },
   choiceBtn: {
     width: "100%",

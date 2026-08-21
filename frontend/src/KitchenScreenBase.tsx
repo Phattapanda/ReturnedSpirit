@@ -430,7 +430,8 @@ export default function KitchenScreen() {
   const playerBubbleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   function showPlayerBubble(text: string) {
     if (playerBubbleTimer.current) clearTimeout(playerBubbleTimer.current);
-    setPlayerBubble(text);
+    const thought = text.trim().replace(/^["“”]+|["“”]+$/g, "");
+    setPlayerBubble(thought);
     playerBubbleTimer.current = setTimeout(() => setPlayerBubble(null), 2500);
   }
 
@@ -3751,7 +3752,7 @@ export default function KitchenScreen() {
                     ? avatarSrc(playerAvatarId, staminaCurrent)
                     : rupertSrc(rupertPortrait)
                 }
-                style={[styles.dlgPortrait, curLine?.portrait === "player" && styles.playerPortraitImage]}
+                style={[styles.dlgPortrait, curLine?.portrait === "player" ? styles.playerPortraitImage : styles.npcPortraitImage]}
                 resizeMode="cover" resizeMethod="resize"
                
               />
@@ -4320,7 +4321,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14, paddingHorizontal: 16, width: "100%",
     borderWidth: 1, borderColor: "rgba(196,148,58,0.18)",
   },
-  dlgText: { color: "#F0E8D5", fontSize: 16, lineHeight: 25, fontStyle: "italic", textAlign: "center" },
+  dlgText: { color: "#F0E8D5", fontSize: 16, lineHeight: 25, fontFamily: "RobotoRegular", textAlign: "center" },
   continueBtn: {
     flexDirection: "row", alignItems: "center", gap: 6,
     backgroundColor: "rgba(196,148,58,0.18)", borderRadius: 12,

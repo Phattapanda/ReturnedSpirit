@@ -279,7 +279,8 @@ export default function DiningScreen() {
 
   function showPlayerThought(text: string) {
     if (thoughtTimer.current) clearTimeout(thoughtTimer.current);
-    setPlayerThought(text);
+    const thought = text.trim().replace(/^["“”]+|["“”]+$/g, "");
+    setPlayerThought(thought);
     thoughtTimer.current = setTimeout(() => setPlayerThought(null), 2600);
   }
 

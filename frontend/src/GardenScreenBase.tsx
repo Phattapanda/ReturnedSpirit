@@ -859,7 +859,8 @@ export default function GardenScreen() {
   function showPlayerBubble(text: string) {
     if (playerBubble) return; // not stackable
     if (playerBubbleTimer.current) clearTimeout(playerBubbleTimer.current);
-    setPlayerBubble(text);
+    const thought = text.trim().replace(/^["“”]+|["“”]+$/g, "");
+    setPlayerBubble(thought);
     playerBubbleTimer.current = setTimeout(() => {
       setPlayerBubble(null);
       playerBubbleTimer.current = null;
@@ -2156,8 +2157,8 @@ export default function GardenScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.storagePanel, { paddingBottom: insets.bottom + 16 }]}>
             <View style={styles.storageTitleRow}>
-              <Ionicons name="bag-outline" size={20} color="#C4943A" />
-              <Text style={styles.panelTitle}> Garden Storage</Text>
+              <Image source={IMG.loc_storage} style={{ width: 28, height: 28 }} resizeMode="contain" resizeMethod="resize" />
+              <Text style={styles.panelTitle}>Garden Storage</Text>
             </View>
             <View style={styles.divider} />
 

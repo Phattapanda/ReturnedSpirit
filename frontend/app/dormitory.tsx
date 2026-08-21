@@ -449,7 +449,8 @@ export default function DormitoryScreen() {
   function showPlayerBubble(text: string, durationMs: number, onCloseInteractive?: boolean) {
     if (playerBubble) return;
     if (playerBubbleTimer.current) clearTimeout(playerBubbleTimer.current);
-    setPlayerBubble(text);
+    const thought = text.trim().replace(/^["“”]+|["“”]+$/g, "");
+    setPlayerBubble(thought);
     playerBubbleTimer.current = setTimeout(() => {
       setPlayerBubble(null);
       playerBubbleTimer.current = null;
