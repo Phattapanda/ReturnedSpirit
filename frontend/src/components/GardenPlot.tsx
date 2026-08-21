@@ -72,6 +72,7 @@ export type GardenPlotProps = {
   onHarvest: () => void;
   onCropTap: () => void;
   onSpendStamina: (baseCost: number) => Promise<boolean>;
+  onHarvestStored?: (item: BagItem) => void;
   onLockedAction?: () => void;
   actionCosts?: { water: number; pullWeeds: number; fertilize: number };
 };
@@ -158,6 +159,7 @@ export default function GardenPlot(props: GardenPlotProps) {
     onHarvest,
     onCropTap,
     onSpendStamina,
+    onHarvestStored,
     onLockedAction,
     actionCosts = { water: 2, pullWeeds: 8, fertilize: 3 },
   } = props;
@@ -345,6 +347,7 @@ export default function GardenPlot(props: GardenPlotProps) {
       }
 
       setSecondData({ ...SECOND_GARDEN_PLOT_EMPTY });
+      onHarvestStored?.(harvestBag);
       refreshGarden();
     } finally {
       setSecondBusy(false);

@@ -26,6 +26,7 @@ import {
   type BagItem,
 } from "@/src/game/item-system";
 import { useKitchenRuntime } from "@/src/game/kitchen-runtime-context";
+import { useAudioManager } from "@/src/audio/AudioProvider";
 
 const ITEM_IMAGES: Record<string, ReturnType<typeof require>> = {
   herbbag:     require("../../assets/images/herbbag.png"),
@@ -65,6 +66,7 @@ export default function PlayerBag({
   const { width: W } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const { refreshKitchen, showPlayerThought: showKitchenThought } = useKitchenRuntime();
+  const audioManager = useAudioManager();
   const [infoItem, setInfoItem] = useState<BagItem | null>(null);
   const [discardTarget, setDiscardTarget] = useState<{ slotIdx: number; item: BagItem } | null>(null);
   const [selectedCarrotBagSlot, setSelectedCarrotBagSlot] = useState<number | null>(null);
@@ -138,6 +140,7 @@ export default function PlayerBag({
       ]);
       carrotEditsPending.current = true;
       setCarrotBagOverride(nextBag);
+      audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
       if (remaining <= 0) setSelectedCarrotBagSlot(null);
     } catch {
       showKitchenThought('"I can\'t unpack this right now."');

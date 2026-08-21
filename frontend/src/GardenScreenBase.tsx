@@ -181,6 +181,7 @@ const IMG = {
   avTired:     require("../assets/images/avatar1_tired.png"),
   avSick:      require("../assets/images/avatar1_sick.png"),
   herbbag:     require("../assets/images/herbbag.png"),
+  carrotbag:   require("../assets/images/carrotbag.png"),
   bucket:      require("../assets/images/bucket.png"),
   bucketwater: require("../assets/images/bucketwater.png"),
   getwater:    require("../assets/images/getwater.png"),
@@ -380,6 +381,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
   // ── Flying item overlay (harvest, bucket, well animations)
   const bagIconViewRef  = useRef<View>(null);
   const cropAreaViewRef = useRef<View>(null);
+  const secondCropAreaViewRef = useRef<View>(null);
   const bagIconLayout   = useRef<{ cx: number; cy: number } | null>(null);
   const cropLayout      = useRef<{ cx: number; cy: number } | null>(null);
   const [activityBarH, setActivityBarH] = useState(70);
@@ -826,6 +828,43 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
 
     // Trigger React re-render to mount the Image inside the Animated.View
     setFlyImg(image);
+  }
+
+  async function animateHarvestToPlayerBag(
+    harvestBag: BagItem,
+    source: "primary" | "second",
+  ) {
+    const image = harvestBag.id === "carrotbag" ? IMG.carrotbag : IMG.herbbag;
+    const sourceRef = source === "second" ? secondCropAreaViewRef : cropAreaViewRef;
+
+    const [startPos, endPos] = await Promise.all([
+      new Promise<{ cx: number; cy: number }>((resolve) => {
+        const view = sourceRef.current;
+        if (!view) {
+          resolve({ cx: W / 2, cy: H * (source === "second" ? 0.66 : 0.45) });
+          return;
+        }
+        view.measureInWindow((x, y, w, h) => {
+          resolve({ cx: x + w / 2, cy: y + h / 2 });
+        });
+      }),
+      new Promise<{ cx: number; cy: number }>((resolve) => {
+        const view = bagIconViewRef.current;
+        if (!view) {
+          resolve(bagIconLayout.current ?? { cx: W * 0.75, cy: H * 0.2 });
+          return;
+        }
+        view.measureInWindow((x, y, w, h) => {
+          const center = { cx: x + w / 2, cy: y + h / 2 };
+          bagIconLayout.current = center;
+          resolve(center);
+        });
+      }),
+    ]);
+
+    audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
+    await ensureAssetReady(harvestBag.id);
+    startFlyAnim(image, startPos.cx, startPos.cy, endPos.cx, endPos.cy);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1293,7 +1332,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
       setPlotData(emptyPlot);
       setGardenState("IDLE");
       deductStamina(harvestCost, `-${harvestCost}`);
-      audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
+      await animateHarvestToPlayerBag(harvestBag, "primary");
     } catch {
       showPlayerBubble('"I can\'t store this harvest right now."');
     } finally {
@@ -1568,6 +1607,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
     // Flash animation + sound
     triggerActionFlash(IMG.getwater);
     audioManager.playSoundEffect('getwater', { maxDurationMs: 3000 });
+    audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
 
     await Promise.all([
       AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(newBag)),
@@ -1966,6 +2006,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
         <Image source={IMG.avTired}     style={{ width: 1, height: 1 }} />
         <Image source={IMG.avSick}      style={{ width: 1, height: 1 }} />
         <Image source={IMG.herbbag}     style={{ width: 1, height: 1 }} />
+        <Image source={IMG.carrotbag}   style={{ width: 1, height: 1 }} />
         <Image source={IMG.bucket}      style={{ width: 1, height: 1 }} />
         <Image source={IMG.bucketwater} style={{ width: 1, height: 1 }} />
       </View>
@@ -2086,7 +2127,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
         </Animated.View>
 
         {secondPlotUnlocked && (
-          <View style={styles.secondPlotWrap}>
+          <View ref={secondCropAreaViewRef} style={styles.secondPlotWrap}>
             <Text style={styles.secondPlotLabel}>2nd Plot</Text>
             <GardenPlot
               data={SECOND_PLOT_EMPTY}
@@ -2097,6 +2138,9 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
               onHarvest={() => {}}
               onCropTap={() => {}}
               onSpendStamina={spendSecondPlotStamina}
+              onHarvestStored={(item) => {
+                void animateHarvestToPlayerBag(item, "second");
+              }}
               actionCosts={{ water: waterCost, pullWeeds: pullWeedsCost, fertilize: fertilizeCost }}
             />
           </View>
@@ -2350,6 +2394,7 @@ return (
           setPlayerBag(newBag);
           playerBagRef.current = newBag;
           await AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(newBag)).catch(() => {});
+          audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
         }}
         onShowThoughtBubble={(text) => {
           // Show player thought bubble for garden discard protection
