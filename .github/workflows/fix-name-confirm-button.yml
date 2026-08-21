@@ -1,3 +1,4 @@
+# Temporary trigger for the centered player-name Confirm button fix.
 name: Fix player-name Confirm button
 
 on:
