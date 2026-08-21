@@ -34,6 +34,15 @@ jobs:
               line[10:] if line.startswith("          ") else line
               for line in block.splitlines()
           )
+
+          exact_prompt_replacement = "s = one(s, prompt_old, prompt_new, 'Stable prompt button frames')"
+          robust_prompt_replacement = '''prompt_start = s.index('          if (enabledInGardenPrompt) {')
+prompt_end = s.index('          // In Tuesday kitchen state', prompt_start)
+s = s[:prompt_start] + prompt_new + "\\n\\n" + s[prompt_end:]'''
+          if exact_prompt_replacement not in script:
+              raise SystemExit('v2 patch prompt replacement hook missing')
+          script = script.replace(exact_prompt_replacement, robust_prompt_replacement, 1)
+
           Path('/tmp/apply-reviewed-fixes-v2.py').write_text(script)
           PY
           python3 /tmp/apply-reviewed-fixes-v2.py
