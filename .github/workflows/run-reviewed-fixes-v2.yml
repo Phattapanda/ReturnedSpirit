@@ -1,0 +1,61 @@
+name: Temporary Confirm button patch source
+
+on:
+  workflow_dispatch:
+
+jobs:
+  patch-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Store patch script for the existing runner
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          path = Path("frontend/src/KitchenScreenBase.tsx")
+          text = path.read_text()
+
+          old_usage = 'style={[styles.continueBtn, !nameInputVal.trim() && styles.btnDisabled]}'
+          new_usage = 'style={[styles.continueBtn, styles.confirmBtn, !nameInputVal.trim() && styles.btnDisabled]}'
+          if old_usage in text:
+              text = text.replace(old_usage, new_usage, 1)
+          elif new_usage not in text:
+              raise SystemExit("Confirm button style usage not found")
+
+          old_styles = '''  continueBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: "rgba(196,148,58,0.18)", borderRadius: 12,
+    paddingVertical: 13, paddingHorizontal: 26,
+    borderWidth: 1, borderColor: "rgba(196,148,58,0.35)", marginTop: 4,
+  },
+  continueTxt: { color: "#F5E6C8", fontSize: 15, fontFamily: "Oldenburg", letterSpacing: 0.6 },'''
+          new_styles = '''  continueBtn: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    backgroundColor: "rgba(196,148,58,0.18)", borderRadius: 12,
+    paddingVertical: 13, paddingHorizontal: 26,
+    borderWidth: 1, borderColor: "rgba(196,148,58,0.35)", marginTop: 4,
+  },
+  confirmBtn: {
+    alignSelf: "center",
+    justifyContent: "center",
+    minWidth: 150,
+    paddingHorizontal: 24,
+    marginTop: 12,
+  },
+  continueTxt: { color: "#F5E6C8", fontSize: 15, fontFamily: "Oldenburg", letterSpacing: 0.6 },'''
+          if old_styles in text:
+              text = text.replace(old_styles, new_styles, 1)
+          elif new_styles not in text:
+              raise SystemExit("Continue button style block not found")
+
+          path.write_text(text)
+
+          for temporary_path in (
+              ".github/workflows/fix-name-confirm-button.yml",
+              ".github/workflows/fix-name-confirm-button-pr.yml",
+          ):
+              if Path(temporary_path).exists():
+                  subprocess.run(["git", "rm", "-f", temporary_path], check=True)
+          PY
