@@ -284,12 +284,14 @@ export default function GardenScreen() {
 
   // ── Audio
   const audioManager = useAudioManager();
+  const { crossfadeTo } = audioManager;
 
-  // Crossfade to garden theme on mount (no-op if already playing garden)
-  useEffect(() => {
-    audioManager.crossfadeTo('garden', 3000);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Restore the Garden theme whenever this retained stack screen regains focus.
+  useFocusEffect(
+    React.useCallback(() => {
+      crossfadeTo('garden', 3000);
+    }, [crossfadeTo]),
+  );
 
   // ── HUD state
   const [staminaCurrent, setStaminaCurrent] = useState(40);

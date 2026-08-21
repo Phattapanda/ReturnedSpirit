@@ -300,12 +300,14 @@ export default function KitchenScreen() {
 
   // ── Audio
   const audioManager = useAudioManager();
+  const { crossfadeTo } = audioManager;
 
-  // Crossfade to kitchen theme on mount (no-op if already playing kitchen)
-  useEffect(() => {
-    audioManager.crossfadeTo('kitchen', 3000);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Restore the Kitchen theme whenever this retained stack screen regains focus.
+  useFocusEffect(
+    React.useCallback(() => {
+      crossfadeTo('kitchen', 3000);
+    }, [crossfadeTo]),
+  );
 
   // ── Menu modals
   const [showMenu, setShowMenu] = useState(false);
