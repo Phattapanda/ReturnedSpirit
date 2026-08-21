@@ -9,7 +9,7 @@ import {
   StyleSheet,
   useWindowDimensions,
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -233,6 +233,18 @@ export default function DormitoryScreen() {
 
   // ── Audio (via central AudioManager)
   const audioManager = useAudioManager();
+  const { crossfadeTo } = audioManager;
+  const dormitoryThemeReady = roomState !== "LOADING";
+  const dormitoryTheme = getMusicTheme('dormitory', timeOfDay);
+
+  // Restore the time-of-day theme whenever the retained room regains focus.
+  // The same callback also reacts to the morning/evening transition in-place.
+  useFocusEffect(
+    React.useCallback(() => {
+      if (!dormitoryThemeReady) return;
+      crossfadeTo(dormitoryTheme, 3000);
+    }, [crossfadeTo, dormitoryTheme, dormitoryThemeReady]),
+  );
   // Track morning birds per-wake so they only play once each morning transition
   const morningBirdsPlayedRef = useRef(false);
 
@@ -406,24 +418,18 @@ export default function DormitoryScreen() {
 
         if (resolvedTod === "morning") {
           setRS("ROOM_MORNING");
-          // Crossfade to morning theme
-          audioManager.crossfadeTo(getMusicTheme('dormitory', 'morning'), 3000);
           // Ambient: morning birds on Day 3+ morning entry
           if (di >= 2) {
             playMorningBirdsOnce();
           }
         } else if (showEveningIntro) {
           setRS("ENTERING_ROOM_FIRST_TIME");
-          // Crossfade to evening theme
-          audioManager.crossfadeTo(getMusicTheme('dormitory', 'evening'), 3000);
           setTimeout(() => {
             setRS("ROOM_EVENING_INTRO");
             showPlayerBubble('"It is already getting dark. I should get some more rest."', 3000, true);
           }, 400);
         } else {
           setRS("ROOM_EVENING_INTERACTIVE");
-          // Crossfade to evening theme
-          audioManager.crossfadeTo(getMusicTheme('dormitory', 'evening'), 3000);
           // Ambient: owl on Day 3+ evening entry
           if (di >= 2) {
             audioManager.playSoundEffect('owl', { maxDurationMs: 30000 });
@@ -449,7 +455,8 @@ export default function DormitoryScreen() {
   function showPlayerBubble(text: string, durationMs: number, onCloseInteractive?: boolean) {
     if (playerBubble) return;
     if (playerBubbleTimer.current) clearTimeout(playerBubbleTimer.current);
-    setPlayerBubble(text);
+    const thought = text.trim().replace(/^["“”]+|["“”]+$/g, "");
+    setPlayerBubble(thought);
     playerBubbleTimer.current = setTimeout(() => {
       setPlayerBubble(null);
       playerBubbleTimer.current = null;
@@ -576,11 +583,9 @@ export default function DormitoryScreen() {
         await createSnapshot(slotNum, "day_transition");
       }
 
-      // ── 8. Switch to morning + start music crossfade + reset birds flag
+      // ── 8. Switch to morning; the focus effect crossfades the music
       setRS("ROOM_MORNING");
       morningBirdsPlayedRef.current = false;
-      // Start crossfading to morning theme (3 s)
-      audioManager.crossfadeTo(getMusicTheme('dormitory', 'morning'), 3000);
 
       await new Promise(res => setTimeout(res, 200));
 
@@ -825,7 +830,15 @@ export default function DormitoryScreen() {
         onPress={() => isEveningIntroState ? dismissPlayerBubble(true) : dismissPlayerBubble(false)}
         activeOpacity={1}
       >
-        <View style={{ position: "absolute", top: topPos, left: W * 0.18, right: Math.max(8, W - W * 0.18 - Math.min(W * 0.75, 420)) }} pointerEvents="none">
+        <View
+          style={{
+            position: "absolute",
+            top: topPos,
+            left: W * 0.18,
+            width: Math.min(W * 0.75, Math.max(150, playerBubble.length * 6.6 + 32)),
+          }}
+          pointerEvents="none"
+        >
           <View style={styles.playerBubbleArrow} />
           <View style={styles.playerBubbleCard}>
             <Text style={styles.playerBubbleText}>{playerBubble}</Text>
@@ -1295,7 +1308,7 @@ const styles = StyleSheet.create({
     shadowColor: "#000", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.4, shadowRadius: 7, elevation: 14,
     alignSelf: "flex-start" as const,
   },
-  playerBubbleText:  { color: "#2A1000", fontSize: 13, fontStyle: "italic", fontFamily: "Oldenburg", lineHeight: 20 },
+  playerBubbleText:  { color: "#2A1000", fontSize: 13, fontFamily: "RobotoItalic", lineHeight: 20 },
   playerBubbleArrow: {
     width: 0, height: 0, borderStyle: "solid",
     borderLeftWidth: 8, borderRightWidth: 8,

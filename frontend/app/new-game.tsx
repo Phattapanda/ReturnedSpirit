@@ -277,7 +277,6 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: "center",
     fontSize: 22,
-    fontWeight: "700",
     color: "#2C1810",
     fontFamily: "Oldenburg",
   },
@@ -308,7 +307,7 @@ const styles = StyleSheet.create({
   iconCircleEmpty: { backgroundColor: "rgba(196,148,58,0.15)" },
   iconCircleOccupied: { backgroundColor: "rgba(0,0,0,0.07)" },
   cardInfo: { flex: 1 },
-  slotName: { fontSize: 17, fontWeight: "700", color: "#2C1810", fontFamily: "Oldenburg" },
+  slotName: { fontSize: 17, color: "#2C1810", fontFamily: "Oldenburg" },
   slotNameOccupied: { color: "#8B7355" },
   slotSub: { fontSize: 13, color: "#8B7355", marginTop: 2 },
   inUseLabel: { fontSize: 13, color: "#8B7355", fontStyle: "italic" },
@@ -323,7 +322,7 @@ const styles = StyleSheet.create({
     alignItems: "stretch",
   },
   sheetHandle: { width: 40, height: 4, backgroundColor: "rgba(0,0,0,0.18)", borderRadius: 2, alignSelf: "center", marginBottom: 8 },
-  sheetTitle: { fontSize: 20, fontWeight: "700", color: "#2C1810", fontFamily: "Oldenburg", textAlign: "center" },
+  sheetTitle: { fontSize: 20, color: "#2C1810", fontFamily: "Oldenburg", textAlign: "center" },
   sheetSub: { fontSize: 14, color: "#8B7355", textAlign: "center" },
   avatarRow: { flexDirection: "row", justifyContent: "center", gap: 14, marginBottom: 2 },
   avatarChoice: {
@@ -349,6 +348,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   beginBtnDisabled: { opacity: 0.45 },
-  beginBtnText: { color: "#FFF", fontSize: 16, fontWeight: "700", fontFamily: "Oldenburg" },
+  beginBtnText: { color: "#FFF", fontSize: 16, fontFamily: "Oldenburg" },
   cancelText: { textAlign: "center", color: "#8B7355", fontSize: 14, paddingVertical: 4 },
 });

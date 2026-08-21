@@ -13,7 +13,7 @@ import {
   Image,
   useWindowDimensions,
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -52,6 +52,7 @@ import {
 import type { ActivityId } from "@/src/game/activity-config";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
 import {
+  guestTutorialHasReached,
   guestTutorialKeepsRupertInDining,
   guestTutorialRupertHasLeftGarden,
   loadGuestTutorialIntroStep,
@@ -283,12 +284,14 @@ export default function GardenScreen() {
 
   // ── Audio
   const audioManager = useAudioManager();
+  const { crossfadeTo } = audioManager;
 
-  // Crossfade to garden theme on mount (no-op if already playing garden)
-  useEffect(() => {
-    audioManager.crossfadeTo('garden', 3000);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Restore the Garden theme whenever this retained stack screen regains focus.
+  useFocusEffect(
+    React.useCallback(() => {
+      crossfadeTo('garden', 3000);
+    }, [crossfadeTo]),
+  );
 
   // ── HUD state
   const [staminaCurrent, setStaminaCurrent] = useState(40);
@@ -312,6 +315,26 @@ export default function GardenScreen() {
   const [rupertInDining, setRupertInDining] = useState(false);
   const [rupertAwayFromGarden, setRupertAwayFromGarden] = useState(true);
   const [secondPlotUnlocked, setSecondPlotUnlocked] = useState(false);
+  const [diningUnlocked, setDiningUnlocked] = useState(false);
+  const [coreTravelUnlocked, setCoreTravelUnlocked] = useState(false);
+
+  // Guest progression refresh: Dining opens at dining_prompt;
+  // Dormitory becomes normal travel after service_complete.
+  useFocusEffect(
+    React.useCallback(() => {
+      let active = true;
+      loadGuestTutorialIntroStep()
+        .then((step) => {
+if (!active) return;
+setDiningUnlocked(guestTutorialHasReached(step, "dining_prompt"));
+setCoreTravelUnlocked(guestTutorialHasReached(step, "service_complete"));
+setRupertInDining(guestTutorialKeepsRupertInDining(step));
+setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
+        })
+        .catch(() => {});
+      return () => { active = false; };
+    }, []),
+  );
 
   // ── Tutorial state machine
   const [gts, setGts] = useState<GTState>("LOADING");
@@ -859,7 +882,8 @@ export default function GardenScreen() {
   function showPlayerBubble(text: string) {
     if (playerBubble) return; // not stackable
     if (playerBubbleTimer.current) clearTimeout(playerBubbleTimer.current);
-    setPlayerBubble(text);
+    const thought = text.trim().replace(/^["“”]+|["“”]+$/g, "");
+    setPlayerBubble(thought);
     playerBubbleTimer.current = setTimeout(() => {
       setPlayerBubble(null);
       playerBubbleTimer.current = null;
@@ -1818,8 +1842,12 @@ export default function GardenScreen() {
       ? rupertL.y + rupertL.h + 8
       : (headerH > 0 ? headerH + 128 : insets.top + 190);
     const arrowCenterX = rupertL ? rupertL.x + rupertL.w / 2 : W / 2;
-    const bubbleLeftCalc = 16;
-    const bubbleRightCalc = 16;
+    const bubbleWidthTarget = Math.min(
+      W - 32,
+      Math.max(180, Math.min(W * 0.78, Math.max(bubble.text.length * 7.2, bubble.speaker.length * 9) + 48)),
+    );
+    const bubbleLeftCalc = Math.max(16, Math.min(arrowCenterX - bubbleWidthTarget / 2, W - bubbleWidthTarget - 16));
+    const bubbleRightCalc = Math.max(16, W - bubbleLeftCalc - bubbleWidthTarget);
     const arrowOffset = Math.max(12, Math.min(
       arrowCenterX - bubbleLeftCalc - 10,
       W - bubbleLeftCalc - bubbleRightCalc - 32,
@@ -1985,7 +2013,7 @@ export default function GardenScreen() {
             pointerEvents="none"
           >
             {!rupertAwayFromGarden && (
-              <Image source={rupertSrc(rupertPortrait)} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />
+              <Image source={rupertSrc(rupertPortrait)} style={[styles.circleImg, styles.npcPortraitImage]} resizeMode="cover" resizeMethod="resize" />
             )}
           </View>
           {/* Bag icon or locked slot */}
@@ -2087,32 +2115,46 @@ export default function GardenScreen() {
           />
         </TouchableOpacity>
 
-        {/* Locked slots: dining, dormitory, mail, explore */}
+        {/* Guest progression unlocks Dining first, then all core travel. */}
         {([
-          { id: "dining",    img: IMG.loc_dining    },
-          { id: "dormitory", img: IMG.loc_dormitory },
-          { id: "mail",      img: IMG.loc_mail      },
-          { id: "explore",   img: IMG.loc_explore   },
+{ id: "dining",    img: IMG.loc_dining    },
+{ id: "dormitory", img: IMG.loc_dormitory },
+{ id: "mail",      img: IMG.loc_mail      },
+{ id: "explore",   img: IMG.loc_explore   },
         ] as const).map((loc) => {
-          const guestDormitoryBlocked = rupertInDining && loc.id === "dormitory";
-          return (
-            <TouchableOpacity
-              key={loc.id}
-              style={[styles.locBtn, guestDormitoryBlocked ? styles.locBtnActive : styles.locBtnLocked]}
-              disabled={!guestDormitoryBlocked}
-              onPress={guestDormitoryBlocked
-                ? () => showPlayerBubble('"I need to cook herb soup for the guest."')
-                : undefined}
-              activeOpacity={0.8}
-            >
-              <Image
-                source={loc.img}
-                style={[styles.locBtnImg, !guestDormitoryBlocked && styles.locBtnImgLocked]}
-                resizeMode="contain"
-                resizeMethod="resize"
-              />
-            </TouchableOpacity>
-          );
+const guestDormitoryBlocked = rupertInDining && loc.id === "dormitory";
+const diningAvailable = diningUnlocked && loc.id === "dining";
+const dormitoryAvailable = coreTravelUnlocked && loc.id === "dormitory";
+const active = guestDormitoryBlocked || diningAvailable || dormitoryAvailable;
+const onPress = guestDormitoryBlocked
+  ? () => showPlayerBubble('"I need to cook herb soup for the guest."')
+  : diningAvailable
+    ? () => {
+        audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });
+        router.push("/dining");
+      }
+    : dormitoryAvailable
+      ? () => {
+          audioManager.playSoundEffect("walking-on-wood", { maxDurationMs: 5000 });
+          router.push("/dormitory");
+        }
+      : undefined;
+return (
+  <TouchableOpacity
+    key={loc.id}
+    style={[styles.locBtn, active ? styles.locBtnActive : styles.locBtnLocked]}
+    disabled={!active}
+    onPress={onPress}
+    activeOpacity={0.8}
+  >
+    <Image
+      source={loc.img}
+      style={[styles.locBtnImg, !active && styles.locBtnImgLocked]}
+      resizeMode="contain"
+      resizeMethod="resize"
+    />
+  </TouchableOpacity>
+);
         })}
       </View>
 
@@ -2152,8 +2194,8 @@ export default function GardenScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.storagePanel, { paddingBottom: insets.bottom + 16 }]}>
             <View style={styles.storageTitleRow}>
-              <Ionicons name="bag-outline" size={20} color="#C4943A" />
-              <Text style={styles.panelTitle}> Garden Storage</Text>
+              <Image source={IMG.loc_storage} style={{ width: 28, height: 28 }} resizeMode="contain" resizeMethod="resize" />
+              <Text style={styles.panelTitle}>Garden Storage</Text>
             </View>
             <View style={styles.divider} />
 
@@ -2517,6 +2559,7 @@ const styles = StyleSheet.create({
   circleWrapLocked: { borderColor: "#3A3A3A", backgroundColor: "#1A1A1A", alignItems: "center", justifyContent: "center" },
   circleImg: { width: "100%", height: "100%" },
   playerPortraitImage: { transform: [{ scale: 1.06 }] },
+  npcPortraitImage: { transform: [{ scale: 1.06 }] },
   rupertAway: { opacity: 0, borderColor: "transparent", backgroundColor: "transparent" },
 
   // Location bar
@@ -2575,7 +2618,7 @@ const styles = StyleSheet.create({
     elevation: 12, gap: 6,
   },
   bubbleSpeaker: { color: "#7A4800", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 1 },
-  bubbleText: { color: "#2A1000", fontSize: 15, lineHeight: 22, fontStyle: "italic" },
+  bubbleText: { color: "#2A1000", fontSize: 15, lineHeight: 22, fontFamily: "RobotoRegular" },
 
   // Player thought bubble
   playerBubbleCard: {
@@ -2586,7 +2629,7 @@ const styles = StyleSheet.create({
     elevation: 14,
     alignSelf: "flex-start" as const,
   },
-  playerBubbleText: { color: "#2A1000", fontSize: 13, fontStyle: "italic", fontFamily: "Oldenburg", lineHeight: 20 },
+  playerBubbleText: { color: "#2A1000", fontSize: 13, fontFamily: "RobotoItalic", lineHeight: 20 },
   playerBubbleArrow: {
     width: 0, height: 0, borderStyle: "solid",
     borderLeftWidth: 8, borderRightWidth: 8,

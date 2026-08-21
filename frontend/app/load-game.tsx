@@ -172,7 +172,6 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: "center",
     fontSize: 22,
-    fontWeight: "700",
     color: "#2C1810",
     fontFamily: "Oldenburg",
   },
@@ -196,7 +195,7 @@ const styles = StyleSheet.create({
   iconOccupied: { backgroundColor: "rgba(196,97,74,0.15)" },
   iconEmpty: { backgroundColor: "rgba(0,0,0,0.06)" },
   cardContent: { flex: 1 },
-  slotName: { fontSize: 17, fontWeight: "700", color: "#2C1810", fontFamily: "Oldenburg" },
+  slotName: { fontSize: 17, color: "#2C1810", fontFamily: "Oldenburg" },
   slotNameEmpty: { color: "#8B7355" },
   slotSub: { fontSize: 13, color: "#8B7355", marginTop: 2 },
   deleteBtn: {

@@ -29,12 +29,22 @@ import { useEffect, useRef, useState } from "react";
 /** jsDelivr Fontsource CDN — stable URL, same CDN as use-icon-fonts.ts */
 const OLDENBURG_CDN =
   "https://cdn.jsdelivr.net/fontsource/fonts/oldenburg@latest/latin-400-normal.ttf";
+const ROBOTO_REGULAR_CDN =
+  "https://cdn.jsdelivr.net/fontsource/fonts/roboto@latest/latin-400-normal.ttf";
+const ROBOTO_ITALIC_CDN =
+  "https://cdn.jsdelivr.net/fontsource/fonts/roboto@latest/latin-400-italic.ttf";
 
 // Evaluate both maps at module scope so useFonts always receives a
 // referentially-stable object (prevents unnecessary reloads on re-renders).
-const FONT_MAP_CDN = { Oldenburg: OLDENBURG_CDN } as const;
+const FONT_MAP_CDN = {
+  Oldenburg: OLDENBURG_CDN,
+  RobotoRegular: ROBOTO_REGULAR_CDN,
+  RobotoItalic: ROBOTO_ITALIC_CDN,
+} as const;
 const FONT_MAP_LOCAL = {
   Oldenburg: require("../../assets/fonts/Oldenburg-Regular.ttf") as number,
+  RobotoRegular: require("../../assets/fonts/Roboto-Regular.ttf") as number,
+  RobotoItalic: require("../../assets/fonts/Roboto-Italic.ttf") as number,
 } as const;
 
 /** Resolved once at module init – StoreClient → CDN, everything else → require */

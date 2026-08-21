@@ -10,7 +10,7 @@ import {
   StyleSheet,
   useWindowDimensions,
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -60,7 +60,6 @@ const DSK = {
   LIFE:          "@game:life",
   PLAYER_NAME:   "@game:player_name",
   DAY_INDEX:     "@game:day_index",
-  TIME_OF_DAY:   "@room:time_of_day",
   SAVE_LOCATION: "@game:save_location",
   ACTIVE_SLOT:   "@game:active_slot",
   GAME_SLOTS:    "game_slots",
@@ -147,10 +146,10 @@ function rupertServingExplanation(playerName: string): TutorialLine[] {
 
 export default function DiningScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ loadedFromSave?: string }>();
   const insets = useSafeAreaInsets();
   const { width: W } = useWindowDimensions();
   const audioManager = useAudioManager();
+  const { crossfadeTo } = audioManager;
 
   const [staminaCurrent, setStaminaCurrent] = useState(40);
   const [lifeCurrent, setLifeCurrent] = useState(15);
@@ -158,7 +157,7 @@ export default function DiningScreen() {
   const [dayIdx, setDayIdx] = useState(0);
   const [playerName, setPlayerName] = useState("Adventurer");
   const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(1);
-  const [timeOfDay, setTimeOfDay] = useState<"morning" | "evening">("evening");
+  const [diningLoaded, setDiningLoaded] = useState(false);
   const [headerH, setHeaderH] = useState(0);
   const [playerBag, setPlayerBag] = useState<PlayerBagData>(DEFAULT_BAG);
   const [mealState, setMealState] = useState<DiningMealState>(DEFAULT_DINING_MEAL_STATE);
@@ -198,7 +197,6 @@ export default function DiningScreen() {
         const rawDay = await AsyncStorage.getItem(DSK.DAY_INDEX);
         const rawName = await AsyncStorage.getItem(DSK.PLAYER_NAME);
         const rawAv = await AsyncStorage.getItem(PLAYER_AVATAR_KEY);
-        const rawTod = await AsyncStorage.getItem(DSK.TIME_OF_DAY);
         const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
         const loadedMeals = await loadDiningMealState();
         const loadedTutorialStep = await loadGuestTutorialIntroStep();
@@ -212,7 +210,6 @@ export default function DiningScreen() {
         setDayIdx(rawDay !== null ? parseInt(rawDay, 10) : 0);
         setPlayerName(resolvedName);
         setPlayerAvatarId(normalizePlayerAvatarId(rawAv));
-        setTimeOfDay(rawTod === "morning" ? "morning" : "evening");
         setMealState(loadedMeals);
         if (rawBag) {
           try { setPlayerBag(JSON.parse(rawBag)); } catch { /* default */ }
@@ -266,6 +263,8 @@ export default function DiningScreen() {
         await AsyncStorage.setItem(DSK.SAVE_LOCATION, "dining");
       } catch (e) {
         if (__DEV__) console.error("[Dining] load failed:", e);
+      } finally {
+        if (active) setDiningLoaded(true);
       }
     })();
     return () => { active = false; };
@@ -279,7 +278,8 @@ export default function DiningScreen() {
 
   function showPlayerThought(text: string) {
     if (thoughtTimer.current) clearTimeout(thoughtTimer.current);
-    setPlayerThought(text);
+    const thought = text.trim().replace(/^["“”]+|["“”]+$/g, "");
+    setPlayerThought(thought);
     thoughtTimer.current = setTimeout(() => setPlayerThought(null), 2600);
   }
 
@@ -383,7 +383,18 @@ export default function DiningScreen() {
   const tutorialInDining = guestTutorialHasReached(tutorialStep, "dining_intro");
   const showDiningServiceUi = !tutorialInDining || guestTutorialHasReached(tutorialStep, "meal_reveal");
   const showRupertInDining = tutorialStep === "meal_reveal" || guestTutorialKeepsRupertInDining(tutorialStep);
-  const useDawnBackground = (tutorialInDining && tutorialStep !== "service_complete") || timeOfDay === "morning";
+  const useDawnBackground = tutorialInDining && tutorialStep !== "service_complete";
+  const diningTheme = useDawnBackground ? "dining-dawn" : "dining";
+
+  // Keep the room music tied to the same mode that selects the background.
+  // Focus-based playback also restores the correct theme when returning from
+  // another screen that remained mounted in the navigation stack.
+  useFocusEffect(
+    React.useCallback(() => {
+      if (!diningLoaded) return;
+      crossfadeTo(diningTheme, 3000);
+    }, [crossfadeTo, diningLoaded, diningTheme]),
+  );
 
   async function handleBagToMealSlot(bagSlotIndex: number) {
     const plan = planBagItemToMealSlot(playerBag, bagSlotIndex, mealState);
@@ -544,8 +555,7 @@ export default function DiningScreen() {
 
   function goToKitchen() {
     audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });
-    if (router.canGoBack() && params.loadedFromSave !== "1") router.back();
-    else router.replace("/kitchen");
+    router.replace("/kitchen");
   }
 
   const staminaPct = Math.max(0, Math.min(1, staminaCurrent / (playerStats.maximumStamina || 1)));
@@ -617,7 +627,7 @@ export default function DiningScreen() {
 
           <View style={[styles.circleWrap, !showRupertInDining && styles.rupertReserve]} pointerEvents="none">
             {showRupertInDining && (
-              <Image source={IMG.rupert} style={styles.circleImg} resizeMode="cover" resizeMethod="resize" />
+              <Image source={IMG.rupert} style={[styles.circleImg, styles.npcPortraitImage]} resizeMode="cover" resizeMethod="resize" />
             )}
           </View>
 
@@ -627,7 +637,10 @@ export default function DiningScreen() {
           />
 
           {playerThought && (
-            <View style={styles.playerThoughtWrap} pointerEvents="none">
+            <View
+              style={[styles.playerThoughtWrap, { width: Math.min(W * 0.72, Math.max(150, playerThought.length * 6.6 + 32)) }]}
+              pointerEvents="none"
+            >
               <View style={styles.playerThoughtArrow} />
               <View style={styles.playerThoughtCard}>
                 <Text style={styles.playerThoughtText}>{playerThought}</Text>
@@ -688,26 +701,39 @@ export default function DiningScreen() {
       <View style={[styles.locationBar, { paddingBottom: insets.bottom + 4 }]}>
         {LOCS.map((loc) => {
           const isCurrent = loc.id === "dining";
-          const guestDormitoryBlocked = guestTutorialKeepsRupertInDining(tutorialStep) && loc.id === "dormitory";
-          const locImg = IMG[`loc_${loc.id}` as keyof typeof IMG] as number | undefined;
-          const active = loc.nav || isCurrent || guestDormitoryBlocked;
+const coreTravelUnlocked = guestTutorialHasReached(tutorialStep, "service_complete");
+const guestDormitoryBlocked = guestTutorialKeepsRupertInDining(tutorialStep) && loc.id === "dormitory";
+const coreDestination = coreTravelUnlocked &&
+  (loc.id === "kitchen" || loc.id === "garden" || loc.id === "dormitory");
+const locImg = IMG[`loc_${loc.id}` as keyof typeof IMG] as number | undefined;
+const active = loc.id === "kitchen" || isCurrent || coreDestination || guestDormitoryBlocked;
 
-          const content = locImg ? (
-            <Image
-              source={locImg}
-              style={[styles.locBtnImg, !active && styles.locBtnImgLocked]}
-              resizeMode="contain"
-              resizeMethod="resize"
-            />
-          ) : (
-            <Ionicons name="help-outline" size={22} color={active ? "#F5E6C8" : "#3A3535"} />
-          );
+const content = locImg ? (
+  <Image
+    source={locImg}
+    style={[styles.locBtnImg, !active && styles.locBtnImgLocked]}
+    resizeMode="contain"
+    resizeMethod="resize"
+  />
+) : (
+  <Ionicons name="help-outline" size={22} color={active ? "#F5E6C8" : "#3A3535"} />
+);
 
-          const locationAction = loc.nav
-            ? goToKitchen
-            : guestDormitoryBlocked
-              ? () => showPlayerThought("I need to cook herb soup for the guest.")
-              : undefined;
+const locationAction = guestDormitoryBlocked
+  ? () => showPlayerThought("I need to cook herb soup for the guest.")
+  : loc.id === "kitchen"
+    ? goToKitchen
+    : loc.id === "garden" && coreDestination
+      ? () => {
+          audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });
+          router.replace("/garden");
+        }
+      : loc.id === "dormitory" && coreDestination
+        ? () => {
+            audioManager.playSoundEffect("walking-on-wood", { maxDurationMs: 5000 });
+            router.replace("/dormitory");
+          }
+        : undefined;
 
           return (
             <TouchableOpacity
@@ -891,6 +917,7 @@ const styles = StyleSheet.create({
   },
   circleImg: { width: "100%", height: "100%" },
   playerPortraitImage: { transform: [{ scale: 1.06 }] },
+  npcPortraitImage: { transform: [{ scale: 1.06 }] },
   rupertReserve: {
     opacity: 0,
     borderColor: "transparent",
@@ -900,7 +927,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 14,
     top: 104,
-    width: 184,
+    maxWidth: 280,
     zIndex: 30,
   },
   playerThoughtArrow: {
@@ -931,8 +958,7 @@ const styles = StyleSheet.create({
     color: "#2A1000",
     fontSize: 12,
     lineHeight: 18,
-    fontStyle: "italic",
-    fontFamily: "Oldenburg",
+    fontFamily: "RobotoItalic",
   },
 
   mealBar: {
