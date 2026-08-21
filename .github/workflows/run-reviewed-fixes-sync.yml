@@ -2,7 +2,7 @@ name: Run reviewed fixes on synchronize
 
 on:
   pull_request:
-    types: [synchronize]
+    types: [synchronize, reopened]
     branches: [main]
 
 permissions:
