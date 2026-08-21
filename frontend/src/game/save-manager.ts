@@ -33,6 +33,14 @@ import {
   DEFAULT_POST_GUEST_TUTORIAL_STATE,
   POST_GUEST_TUTORIAL_STATE_KEY,
 } from "@/src/game/post-guest-tutorial";
+import {
+  DEFAULT_PLAYER_STATS,
+  PLAYER_STATS_KEY,
+  advanceStaminaBuffDay,
+  normalizePlayerStats,
+} from "@/src/game/player-stats";
+import { DEFAULT_PROGRESSION_STATE, PROGRESSION_STATE_KEY } from "@/src/game/progression";
+import { flushPlaytime } from "@/src/game/playtime-tracker";
 
 /** All gameplay keys that form a complete save snapshot (NO meta keys like active_slot / game_slots). */
 export const ALL_SNAPSHOT_KEYS: string[] = [
@@ -47,7 +55,8 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   "@game:unlocked_locs",
   "@game:save_location",
   "@game:player_bag",
-  "@game:player_stats",
+  PLAYER_STATS_KEY,
+  PROGRESSION_STATE_KEY,
   "@game:bag_inspected",
   "@game:logbook",
   CURRENCY_KEY,
@@ -129,6 +138,8 @@ export async function createSnapshot(
         [DINING_MEAL_STATE_KEY, JSON.stringify(DEFAULT_DINING_MEAL_STATE)],
         [GUEST_TUTORIAL_INTRO_KEY, DEFAULT_GUEST_TUTORIAL_INTRO_STEP],
         [POST_GUEST_TUTORIAL_STATE_KEY, JSON.stringify(DEFAULT_POST_GUEST_TUTORIAL_STATE)],
+        [PLAYER_STATS_KEY, JSON.stringify(DEFAULT_PLAYER_STATS)],
+        [PROGRESSION_STATE_KEY, JSON.stringify(DEFAULT_PROGRESSION_STATE)],
       ]);
     }
 
@@ -140,7 +151,12 @@ export async function createSnapshot(
       const newDay = rawDay !== null ? parseInt(rawDay, 10) : 0;
       await advanceGuestCalendar(newDay);
       await advanceSecondGardenPlotDay();
+      const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
+      const stats = normalizePlayerStats(rawStats ? JSON.parse(rawStats) : null);
+      await AsyncStorage.setItem(PLAYER_STATS_KEY, JSON.stringify(advanceStaminaBuffDay(stats)));
     }
+
+    await flushPlaytime();
 
     const pairs = await AsyncStorage.multiGet(ALL_SNAPSHOT_KEYS);
     const snapshot: Record<string, string | null> = {};
@@ -181,6 +197,16 @@ export async function restoreFromSnapshot(slotNum: number): Promise<void> {
 
     if (toSet.length > 0) await AsyncStorage.multiSet(toSet);
     if (toRemove.length > 0) await AsyncStorage.multiRemove(toRemove);
+
+    // Persist schema defaults for snapshots created before Level/Run/KP existed.
+    const [rawStats, rawProgression] = await AsyncStorage.multiGet([
+      PLAYER_STATS_KEY,
+      PROGRESSION_STATE_KEY,
+    ]);
+    await AsyncStorage.multiSet([
+      [PLAYER_STATS_KEY, JSON.stringify(normalizePlayerStats(rawStats[1] ? JSON.parse(rawStats[1]) : null))],
+      [PROGRESSION_STATE_KEY, rawProgression[1] ?? JSON.stringify(DEFAULT_PROGRESSION_STATE)],
+    ]);
   } catch (e) {
     console.error("[SaveManager] restoreFromSnapshot failed:", e);
   }

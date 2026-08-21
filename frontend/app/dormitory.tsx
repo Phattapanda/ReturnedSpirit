@@ -40,9 +40,10 @@ import {
 import SceneBackground from "@/src/components/SceneBackground";
 import CurrencyHud from "@/src/components/CurrencyHud";
 import StatusModal from "@/src/components/StatusModal";
-import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, type PlayerStats } from "@/src/game/player-stats";
+import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
 import { PLAYER_BAG_KEY, DEFAULT_BAG } from "@/src/game/item-system";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
+import { setPlaytimePaused } from "@/src/game/playtime-tracker";
 import { loadGuestTutorialIntroStep } from "@/src/game/guest-tutorial";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
@@ -194,6 +195,11 @@ export default function DormitoryScreen() {
   const [showStorageModal, setShowStorageModal]   = useState(false);
   const [statusOpen, setStatusOpen]                 = useState(false);
   const [showMenu, setShowMenu]                   = useState(false);
+
+  useEffect(() => {
+    void setPlaytimePaused(showMenu);
+    return () => { void setPlaytimePaused(false); };
+  }, [showMenu]);
   const [upgradeMsg, setUpgradeMsg]               = useState<string | null>(null);
   const upgradeMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -223,7 +229,7 @@ export default function DormitoryScreen() {
   const regenLifeStyle = useAnimatedStyle(() => ({ transform: [{ translateY: regenLifeY.value }], opacity: regenLifeOp.value }));
 
   const staminaFillStyle = useAnimatedStyle(() => ({
-    width: (staminaSV.value / staminaMaxSV.value) * barWidthSV.value,
+    width: Math.min(1, staminaSV.value / staminaMaxSV.value) * barWidthSV.value,
   }));
   const lifeFillStyle = useAnimatedStyle(() => ({
     width: (lifeSV.value / lifeMaxSV.value) * barWidthSV.value,
@@ -327,7 +333,7 @@ export default function DormitoryScreen() {
         let loadedStats = DEFAULT_PLAYER_STATS;
         const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
         if (rawStats) {
-          try { loadedStats = { ...DEFAULT_PLAYER_STATS, ...JSON.parse(rawStats) }; } catch { /* default */ }
+          try { loadedStats = normalizePlayerStats(JSON.parse(rawStats)); } catch { /* default */ }
         }
         setPlayerStats(loadedStats);
         staminaMaxSV.value = loadedStats.maximumStamina;
@@ -335,7 +341,7 @@ export default function DormitoryScreen() {
 
         // Stamina
         const rawSta = await AsyncStorage.getItem(DSK.STAMINA);
-        const sta = rawSta ? Math.min(Math.max(parseInt(rawSta, 10), 0), loadedStats.maximumStamina) : 40;
+        const sta = rawSta ? Math.max(parseInt(rawSta, 10), 0) : 40;
         setStaminaCurrent(sta); setStaminaDisplay(sta); staminaSV.value = sta;
 
         // Life
@@ -580,6 +586,8 @@ export default function DormitoryScreen() {
       const slotNum = await updateSaveSlot(newDay, newSta, newLife);
       if (slotNum > 0) {
         await createSnapshot(slotNum, "day_transition");
+        const rawUpdatedStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
+        if (rawUpdatedStats) setPlayerStats(normalizePlayerStats(JSON.parse(rawUpdatedStats)));
       }
 
       // ── 8. Switch to morning; the focus effect crossfades the music

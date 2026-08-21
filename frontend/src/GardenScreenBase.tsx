@@ -48,6 +48,8 @@ import {
 import {
   PLAYER_STATS_KEY, DEFAULT_PLAYER_STATS,
   calcEffectiveStaminaCost,
+  getActiveStaminaBuffReduction,
+  normalizePlayerStats,
   type PlayerStats,
 } from "@/src/game/player-stats";
 import type { ActivityId } from "@/src/game/activity-config";
@@ -62,6 +64,8 @@ import { loadPostGuestTutorialState } from "@/src/game/post-guest-tutorial";
 import { ensureAssetReady } from "@/src/assets/AssetManager";
 import { subscribeGardenRuntimeRefresh } from "@/src/game/garden-runtime-context";
 import { commitHarvestBag } from "@/src/game/garden-harvest";
+import { addKarmaPoints } from "@/src/game/progression";
+import { setPlaytimePaused } from "@/src/game/playtime-tracker";
 import {
   createGardenPlotFromSeed,
   createHarvestBagForCrop,
@@ -431,6 +435,11 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
 
   // ── UI modals
   const [showMenu, setShowMenu] = useState(false);
+
+  useEffect(() => {
+    void setPlaytimePaused(showMenu);
+    return () => { void setPlaytimePaused(false); };
+  }, [showMenu]);
   const [showStorage, setShowStorage] = useState(false);
   const [showTearOut, setShowTearOut] = useState(false);
 
@@ -465,7 +474,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
 
   // ── Animated styles
   const staminaFillStyle = useAnimatedStyle(() => ({
-    width: (staminaSV.value / staminaMaxSV.value) * barWidthSV.value,
+    width: Math.min(1, staminaSV.value / staminaMaxSV.value) * barWidthSV.value,
   }));
   const plotOpacityStyle = useAnimatedStyle(() => ({ opacity: plotOpacity.value }));
   const staFloatStyle = useAnimatedStyle(() => ({
@@ -503,13 +512,13 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
 
         let nextStats = DEFAULT_PLAYER_STATS;
         if (rawStats) {
-          try { nextStats = { ...DEFAULT_PLAYER_STATS, ...JSON.parse(rawStats) }; } catch { /* default */ }
+          try { nextStats = normalizePlayerStats(JSON.parse(rawStats)); } catch { /* default */ }
         }
         setPlayerStats(nextStats);
         staminaMaxSV.value = nextStats.maximumStamina;
 
         if (rawSta !== null) {
-          const nextStamina = Math.min(Math.max(parseInt(rawSta, 10) || 0, 0), nextStats.maximumStamina);
+          const nextStamina = Math.max(parseInt(rawSta, 10) || 0, 0);
           staminaCurrentRef.current = nextStamina;
           setStaminaCurrent(nextStamina);
           setStaminaDisplay(nextStamina);
@@ -616,14 +625,14 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
         let loadedStats = DEFAULT_PLAYER_STATS;
         const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
         if (rawStats) {
-          try { loadedStats = { ...DEFAULT_PLAYER_STATS, ...JSON.parse(rawStats) }; } catch { /* default */ }
+          try { loadedStats = normalizePlayerStats(JSON.parse(rawStats)); } catch { /* default */ }
         }
         setPlayerStats(loadedStats);
         staminaMaxSV.value = loadedStats.maximumStamina;
 
         // Load stamina
         const rawSta = await AsyncStorage.getItem(GSK.STAMINA);
-        const sta = rawSta ? Math.min(Math.max(parseInt(rawSta, 10), 0), loadedStats.maximumStamina) : 40;
+        const sta = rawSta ? Math.max(parseInt(rawSta, 10), 0) : 40;
         staminaCurrentRef.current = sta;
         setStaminaCurrent(sta);
         setStaminaDisplay(sta);
@@ -1036,7 +1045,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
   }
 
   async function spendSecondPlotStamina(baseCost: number): Promise<boolean> {
-    const actualCost = calcEffectiveStaminaCost(baseCost, playerStats.endurance);
+    const actualCost = calcEffectiveStaminaCost(baseCost, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
     if (staminaCurrentRef.current < actualCost) return false;
     deductStamina(actualCost, `-${actualCost}`);
     return true;
@@ -1052,7 +1061,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
       showPlayerBubble('"Already watered today."');
       return;
     }
-    const waterCost = calcEffectiveStaminaCost(2, playerStats.endurance);
+    const waterCost = calcEffectiveStaminaCost(2, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
     if (staminaCurrent < waterCost) {
       showPlayerBubble('"Not enough stamina."');
       return;
@@ -1081,7 +1090,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
 
     if (plotData.withered) {
       // Special: remove withered crop
-      const clearCost = calcEffectiveStaminaCost(5, playerStats.endurance);
+      const clearCost = calcEffectiveStaminaCost(5, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
       if (staminaCurrent < clearCost) { showPlayerBubble('"Not enough stamina."'); return; }
       actionLocked.current = true;
       const newPlot: GardenPlotData = {
@@ -1110,7 +1119,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
       showPlayerBubble('"I already did this today."');
       return;
     }
-    const pullCost = calcEffectiveStaminaCost(8, playerStats.endurance);
+    const pullCost = calcEffectiveStaminaCost(8, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
     if (staminaCurrent < pullCost) { showPlayerBubble('"Not enough stamina."'); return; }
     actionLocked.current = true;
 
@@ -1145,7 +1154,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
     const fertConfig = FERTILIZER_CONFIGS.find(f => f.id === selectedFertilizer);
     if (!fertConfig) { showPlayerBubble('"No fertilizer available."'); return; }
 
-    const fertilizerCost = calcEffectiveStaminaCost(fertConfig.staminaCost, playerStats.endurance);
+    const fertilizerCost = calcEffectiveStaminaCost(fertConfig.staminaCost, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
     if (staminaCurrentRef.current < fertilizerCost) {
       showPlayerBubble('"Not enough stamina."');
       return;
@@ -1277,6 +1286,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
       playerBagRef.current = harvestCommit.bag;
       setPlayerBag(harvestCommit.bag);
       setPlotData(emptyPlot);
+      await addKarmaPoints(1);
       audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
 
       // Start fly animation, then complete harvest after
@@ -1301,7 +1311,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
     }
 
     // Free-play harvest: every harvest bag gets its own next free Player Bag slot.
-    const harvestCost = calcEffectiveStaminaCost(1, playerStats.endurance);
+    const harvestCost = calcEffectiveStaminaCost(1, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
     if (staminaCurrentRef.current < harvestCost) { showPlayerBubble('"Not enough stamina."'); return; }
     actionLocked.current = true;
 
@@ -1331,6 +1341,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
       setPlayerBag(harvestCommit.bag);
       setPlotData(emptyPlot);
       setGardenState("IDLE");
+      await addKarmaPoints(1);
       deductStamina(harvestCost, `-${harvestCost}`);
       await animateHarvestToPlayerBag(harvestBag, "primary");
     } catch {
@@ -1584,7 +1595,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
       return;
     }
 
-    const wellCost = calcEffectiveStaminaCost(3, playerStats.endurance);
+    const wellCost = calcEffectiveStaminaCost(3, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
     if (staminaCurrent < wellCost) {
       showPlayerBubble('"Not enough stamina."');
       return;
@@ -1620,7 +1631,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
 
   async function handleCollectWood() {
     if (woodLocked.current || actionLocked.current) return;
-    const cost = calcEffectiveStaminaCost(5, playerStats.endurance);
+    const cost = calcEffectiveStaminaCost(5, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
     if (staminaCurrent < cost) { showPlayerBubble('"Not enough stamina."'); return; }
     if (sharedResources.wood >= 999) { showPlayerBubble('"Storage is full."'); return; }
 
@@ -1637,7 +1648,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
 
   async function handleCollectStone() {
     if (stoneLocked.current || actionLocked.current) return;
-    const cost = calcEffectiveStaminaCost(5, playerStats.endurance);
+    const cost = calcEffectiveStaminaCost(5, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
     if (staminaCurrent < cost) { showPlayerBubble('"Not enough stamina."'); return; }
     if (sharedResources.stone >= 999) { showPlayerBubble('"Storage is full."'); return; }
 
@@ -1654,7 +1665,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
 
   function handleWorkout() {
     if (workoutLocked.current || actionLocked.current) return;
-    const cost = calcEffectiveStaminaCost(15, playerStats.endurance);
+    const cost = calcEffectiveStaminaCost(15, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
     if (staminaCurrent < cost) { showPlayerBubble('"Not enough stamina."'); return; }
 
     workoutLocked.current = true;
@@ -1878,9 +1889,10 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
   // ─────────────────────────────────────────────────────────────────────────
   // Derived
   // ─────────────────────────────────────────────────────────────────────────
-  const waterCost      = calcEffectiveStaminaCost(2, playerStats.endurance);
-  const pullWeedsCost  = calcEffectiveStaminaCost(8, playerStats.endurance);
-  const fertilizeCost  = calcEffectiveStaminaCost(3, playerStats.endurance);
+  const temporaryStaminaReduction = getActiveStaminaBuffReduction(playerStats);
+  const waterCost      = calcEffectiveStaminaCost(2, playerStats.endurance, temporaryStaminaReduction);
+  const pullWeedsCost  = calcEffectiveStaminaCost(8, playerStats.endurance, temporaryStaminaReduction);
+  const fertilizeCost  = calcEffectiveStaminaCost(3, playerStats.endurance, temporaryStaminaReduction);
 
   const plotInteractive =
     gts === "GARDEN_PLOT_INTERACTIVE" ||
@@ -2154,6 +2166,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
           visible={showActivityBar}
           enabledActivities={["well", "collectWood", "collectStone", "workout"]}
           endurance={playerStats.endurance}
+          temporaryStaminaReduction={getActiveStaminaBuffReduction(playerStats)}
           onActivity={handleActivity}
           onLockedTap={handleLockedActivity}
         />
@@ -2380,6 +2393,17 @@ return (
         dayIdx={dayIdx}
         onTransferItem={() => {
           // Garden context: no table, handled via discard dialog inside PlayerBag
+        }}
+        onBagUpdated={(nextBag) => {
+          setPlayerBag(nextBag);
+          playerBagRef.current = nextBag;
+        }}
+        onStatsUpdated={setPlayerStats}
+        onStaminaUpdated={(nextStamina) => {
+          staminaCurrentRef.current = nextStamina;
+          setStaminaCurrent(nextStamina);
+          setStaminaDisplay(nextStamina);
+          staminaSV.value = nextStamina;
         }}
         onDiscardItem={async (slotIdx, item) => {
           // Remove item from bag (called after user confirms discard outside protection)

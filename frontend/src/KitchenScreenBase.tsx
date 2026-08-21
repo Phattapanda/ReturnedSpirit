@@ -38,9 +38,10 @@ import {
   type PlayerBagData, type BagItem,
 } from "@/src/game/item-system";
 import { planKitchenItemToBag } from "@/src/game/kitchen-bag-transfer";
-import { PLAYER_STATS_KEY, DEFAULT_PLAYER_STATS, type PlayerStats } from "@/src/game/player-stats";
+import { PLAYER_STATS_KEY, DEFAULT_PLAYER_STATS, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
 import { loadLogbook, type LogEntry, LOGBOOK_KEY } from "@/src/game/logbook";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
+import { setPlaytimePaused } from "@/src/game/playtime-tracker";
 import {
   guestTutorialHasReached,
   guestTutorialKeepsRupertInDining,
@@ -311,6 +312,11 @@ export default function KitchenScreen() {
 
   // ── Menu modals
   const [showMenu, setShowMenu] = useState(false);
+
+  useEffect(() => {
+    void setPlaytimePaused(showMenu);
+    return () => { void setPlaytimePaused(false); };
+  }, [showMenu]);
   const [showRecipes, setShowRecipes] = useState(false);
   const [showUpgrades, setShowUpgrades] = useState(false);
   const [upgradeBusy, setUpgradeBusy] = useState(false);
@@ -616,7 +622,7 @@ export default function KitchenScreen() {
 
   // ── Animated styles
   const staminaFillStyle = useAnimatedStyle(() => ({
-    width: (staminaSV.value / staminaMaxSV.value) * barWidthSV.value,
+    width: Math.min(1, staminaSV.value / staminaMaxSV.value) * barWidthSV.value,
   }));
   const plusFloatStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: plusY.value }],
@@ -760,7 +766,7 @@ export default function KitchenScreen() {
         let loadedMaxStamina = DEFAULT_PLAYER_STATS.maximumStamina;
         if (rawStats) {
           try {
-            const parsedStats = JSON.parse(rawStats);
+            const parsedStats = normalizePlayerStats(JSON.parse(rawStats));
             setPlayerStats(parsedStats);
             loadedMaxStamina = parsedStats.maximumStamina ?? DEFAULT_PLAYER_STATS.maximumStamina;
             staminaMaxSV.value = loadedMaxStamina;
@@ -778,7 +784,7 @@ export default function KitchenScreen() {
 
         if (done === "true") {
           const rawSta = await AsyncStorage.getItem(SK.STAMINA);
-          const sta = rawSta ? Math.min(Math.max(parseInt(rawSta, 10), 0), loadedMaxStamina) : 40;
+          const sta = rawSta ? Math.max(parseInt(rawSta, 10), 0) : 40;
           setStaminaCurrent(sta);
           setStaminaDisplay(sta);
           staminaSV.value = sta;
@@ -1012,7 +1018,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
           // Refresh stats (may have changed in dormitory after sleep)
           const rawSta = await AsyncStorage.getItem(SK.STAMINA);
           if (rawSta) {
-            const sta = Math.min(Math.max(parseInt(rawSta, 10), 0), staminaMaxSV.value);
+            const sta = Math.max(parseInt(rawSta, 10), 0);
             setStaminaCurrent(sta);
             setStaminaDisplay(sta);
             staminaSV.value = sta;
@@ -1028,7 +1034,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
           const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
           if (rawStats) {
             try {
-              const parsedStats = JSON.parse(rawStats);
+              const parsedStats = normalizePlayerStats(JSON.parse(rawStats));
               setPlayerStats(parsedStats);
               staminaMaxSV.value = parsedStats.maximumStamina ?? DEFAULT_PLAYER_STATS.maximumStamina;
             } catch { /* default */ }
@@ -4129,6 +4135,20 @@ const blockedByTutorial = tutActive && !(isDiningBtn && diningUnlocked);
         dayIdx={dayIdx}
         onClose={() => setBagOpen(false)}
         onTransferItem={(bagSlotIdx, item) => handleBagToTable(bagSlotIdx, item)}
+        onBagUpdated={(nextBag) => {
+          setPlayerBag(nextBag);
+          playerBagRef.current = nextBag;
+        }}
+        onStatsUpdated={(nextStats) => {
+          setPlayerStats(nextStats);
+          staminaMaxSV.value = nextStats.maximumStamina;
+        }}
+        onStaminaUpdated={(nextStamina) => {
+          setStaminaCurrent(nextStamina);
+          setStaminaDisplay(nextStamina);
+          staminaSV.value = nextStamina;
+        }}
+        onShowThoughtBubble={showPlayerBubble}
       />
 
       {/* ── Kitchen detail modal (long press on table items) */}

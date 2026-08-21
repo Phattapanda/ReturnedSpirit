@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -38,7 +38,7 @@ import {
   saveGuestTutorialIntroStep,
   type GuestTutorialIntroStep,
 } from "@/src/game/guest-tutorial";
-import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, type PlayerStats } from "@/src/game/player-stats";
+import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
 import { DEFAULT_BAG, PLAYER_BAG_KEY, type PlayerBagData } from "@/src/game/item-system";
 import { addCurrencyCopper } from "@/src/game/currency-system";
 import { setActiveGuest, type GuestVisitView } from "@/src/game/guest-system";
@@ -48,6 +48,7 @@ import {
   markSecondPlotThoughtSeen,
 } from "@/src/game/post-guest-tutorial";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
+import { setPlaytimePaused } from "@/src/game/playtime-tracker";
 import {
   PLAYER_AVATAR_KEY,
   getPlayerAvatarForStamina,
@@ -168,6 +169,7 @@ export default function DiningScreen() {
   const [tutorialLines, setTutorialLines] = useState<TutorialLine[]>([]);
   const [tutorialLineIndex, setTutorialLineIndex] = useState(0);
   const [serviceDialogLine, setServiceDialogLine] = useState<TutorialLine | null>(null);
+  const [favorDialogLine, setFavorDialogLine] = useState<TutorialLine | null>(null);
   const serviceDialogNextStep = useRef<GuestTutorialIntroStep | null>(null);
   const [serviceBusy, setServiceBusy] = useState(false);
   const [departingGuestId, setDepartingGuestId] = useState<"old_farmer" | null>(null);
@@ -180,6 +182,11 @@ export default function DiningScreen() {
 
   const [statusOpen, setStatusOpen] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+
+  useEffect(() => {
+    void setPlaytimePaused(showMenu);
+    return () => { void setPlaytimePaused(false); };
+  }, [showMenu]);
   const [bagOpen, setBagOpen] = useState(false);
 
   useEffect(() => {
@@ -189,7 +196,7 @@ export default function DiningScreen() {
         let loadedStats = DEFAULT_PLAYER_STATS;
         const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
         if (rawStats) {
-          try { loadedStats = { ...DEFAULT_PLAYER_STATS, ...JSON.parse(rawStats) }; } catch { /* default */ }
+          try { loadedStats = normalizePlayerStats(JSON.parse(rawStats)); } catch { /* default */ }
         }
 
         const rawSta = await AsyncStorage.getItem(DSK.STAMINA);
@@ -205,7 +212,7 @@ export default function DiningScreen() {
         if (!active) return;
 
         setPlayerStats(loadedStats);
-        setStaminaCurrent(rawSta ? Math.min(Math.max(parseInt(rawSta, 10), 0), loadedStats.maximumStamina) : 40);
+        setStaminaCurrent(rawSta ? Math.max(parseInt(rawSta, 10), 0) : 40);
         setLifeCurrent(rawLife ? Math.min(Math.max(parseInt(rawLife, 10), 0), loadedStats.maximumLife) : 15);
         setDayIdx(rawDay !== null ? parseInt(rawDay, 10) : 0);
         setPlayerName(resolvedName);
@@ -282,6 +289,20 @@ export default function DiningScreen() {
     setPlayerThought(thought);
     thoughtTimer.current = setTimeout(() => setPlayerThought(null), 2600);
   }
+
+  const showFavorRewardDialog = useCallback((guest: GuestVisitView, text: string) => {
+    setFavorDialogLine({
+      speaker: guest.profile.name,
+      portrait: guest.profile.id === "old_farmer" ? "old_farmer" : "rupert",
+      text: `"${text}"`,
+    });
+    AsyncStorage.getItem(PLAYER_BAG_KEY).then((rawBag) => {
+      if (rawBag) setPlayerBag(JSON.parse(rawBag));
+    }).catch(() => {});
+    if (text.includes("Here, take this.")) {
+      audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
+    }
+  }, [audioManager]);
 
   function runTransfer(
     image: ReturnType<typeof require>,
@@ -372,7 +393,7 @@ export default function DiningScreen() {
     return IMG.rupert;
   }
 
-  const currentTutorialLine = serviceDialogLine ?? tutorialLines[tutorialLineIndex] ?? null;
+  const currentTutorialLine = favorDialogLine ?? serviceDialogLine ?? tutorialLines[tutorialLineIndex] ?? null;
   const dialogLine: GuestTutorialDialogLine | null = currentTutorialLine ? {
     speaker: currentTutorialLine.speaker,
     text: currentTutorialLine.text,
@@ -693,6 +714,7 @@ export default function DiningScreen() {
               departingGuestId={departingGuestId}
               hiddenGuestIds={tutorialStep === "service_complete" ? ["old_farmer"] : []}
               onService={handleGuestService}
+              onFavorRewardDialog={showFavorRewardDialog}
             />
           </>
         )}
@@ -755,7 +777,9 @@ const locationAction = guestDormitoryBlocked
       <GuestTutorialDialog
         visible={!!dialogLine}
         line={dialogLine}
-        onContinue={serviceDialogLine ? closeServiceDialog : advanceTutorialDialog}
+        onContinue={favorDialogLine
+          ? () => setFavorDialogLine(null)
+          : serviceDialogLine ? closeServiceDialog : advanceTutorialDialog}
       />
 
       {transferImage && (
@@ -813,6 +837,10 @@ const locationAction = guestDormitoryBlocked
         dayIdx={dayIdx}
         onClose={() => setBagOpen(false)}
         onTransferItem={(slotIdx) => handleBagToMealSlot(slotIdx)}
+        onBagUpdated={setPlayerBag}
+        onStatsUpdated={setPlayerStats}
+        onStaminaUpdated={setStaminaCurrent}
+        onShowThoughtBubble={showPlayerThought}
       />
 
       <StatusModal
@@ -823,7 +851,11 @@ const locationAction = guestDormitoryBlocked
         onClose={() => setStatusOpen(false)}
         onStatsUpdated={(newStats, newLife) => {
           setPlayerStats(newStats);
-          if (newLife !== null) setLifeCurrent(newLife);
+          AsyncStorage.setItem(PLAYER_STATS_KEY, JSON.stringify(newStats)).catch(() => {});
+          if (newLife !== null) {
+            setLifeCurrent(newLife);
+            AsyncStorage.setItem(DSK.LIFE, String(newLife)).catch(() => {});
+          }
         }}
       />
     </View>

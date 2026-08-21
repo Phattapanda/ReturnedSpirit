@@ -14,6 +14,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   prepareGuestsForDay,
   setActiveGuest,
+  subscribeFavorRewardDialog,
   type GuestId,
   type GuestVisitView,
 } from "@/src/game/guest-system";
@@ -36,6 +37,17 @@ const SERVICE_SELL = require("../../assets/images/service_sell.png");
 const SERVICE_WATER = require("../../assets/images/service_water.png");
 const SERVICE_TALK = require("../../assets/images/service_talk.png");
 const TRADE_POTATO = require("../../assets/images/potato.png");
+const TRADE_CARROT = require("../../assets/images/carrot.png");
+const TRADE_FERTILIZER = require("../../assets/images/fertilizer.png");
+const TRADE_GOLDEN_APPLE = require("../../assets/images/golden apple.png");
+
+const TRADE_IMAGES: Record<string, ReturnType<typeof require>> = {
+  potato: TRADE_POTATO,
+  carrot: TRADE_CARROT,
+  standardfertilizer: TRADE_FERTILIZER,
+  premiumfertilizer: TRADE_FERTILIZER,
+  goldenapple: TRADE_GOLDEN_APPLE,
+};
 
 const GUEST_PORTRAITS: Record<string, ReturnType<typeof require>> = {
   old_farmer: OLD_FARMER,
@@ -62,7 +74,8 @@ export function GuestCard({
 }: GuestCardProps) {
   const { profile, selected } = guest;
   const portrait = GUEST_PORTRAITS[profile.portraitKey];
-  const canTrade = profile.tradePool.length > 0;
+  const canTrade = guest.exchangeOffer !== null;
+  const tradeImage = guest.exchangeOffer ? TRADE_IMAGES[guest.exchangeOffer.itemId] : null;
   const departureOpacity = useRef(new Animated.Value(1)).current;
   const departureX = useRef(new Animated.Value(0)).current;
 
@@ -123,10 +136,18 @@ export function GuestCard({
               activeOpacity={0.8}
             >
               <View style={styles.tradeItemWrap}>
-                <Image source={TRADE_POTATO} style={styles.tradeItemImage} resizeMode="contain" resizeMethod="resize" />
-                {/* Visual offer placeholder only until roll → concrete item quantity is defined. */}
+                {tradeImage ? (
+                  <Image source={tradeImage} style={styles.tradeItemImage} resizeMode="contain" resizeMethod="resize" />
+                ) : (
+                  <Ionicons name="gift-outline" size={25} color="#C4943A" />
+                )}
               </View>
               <Text style={styles.serviceLabel}>Exchange</Text>
+              {guest.exchangeOffer && (
+                <Text style={styles.tradeOfferText} numberOfLines={2}>
+                  {guest.exchangeOffer.quantity}× {guest.exchangeOffer.name}
+                </Text>
+              )}
             </TouchableOpacity>
           )}
 
@@ -167,6 +188,7 @@ type DiningGuestAreaProps = {
   departingGuestId?: GuestId | null;
   hiddenGuestIds?: readonly GuestId[];
   onService?: (guest: GuestVisitView, action: GuestServiceAction) => void;
+  onFavorRewardDialog?: (guest: GuestVisitView, text: string) => void;
 };
 
 /**
@@ -181,6 +203,7 @@ export default function DiningGuestArea({
   departingGuestId = null,
   hiddenGuestIds = [],
   onService,
+  onFavorRewardDialog,
 }: DiningGuestAreaProps) {
   const [guests, setGuests] = useState<GuestVisitView[]>([]);
   const [loading, setLoading] = useState(true);
@@ -197,7 +220,11 @@ export default function DiningGuestArea({
         const rawDay = await AsyncStorage.getItem("@game:day_index");
         const persistedDay = rawDay !== null ? parseInt(rawDay, 10) : dayIndex;
         const prepared = await prepareGuestsForDay(Number.isFinite(persistedDay) ? persistedDay : dayIndex);
-        if (active) setGuests(prepared);
+        if (active) {
+          setGuests(prepared);
+          const reward = prepared.find((guest) => !!guest.favorRewardDialog);
+          if (reward?.favorRewardDialog) onFavorRewardDialog?.(reward, reward.favorRewardDialog);
+        }
       } catch {
         if (active) setGuests([]);
       } finally {
@@ -206,7 +233,12 @@ export default function DiningGuestArea({
     })();
 
     return () => { active = false; };
-  }, [dayIndex]);
+  }, [dayIndex, onFavorRewardDialog]);
+
+  useEffect(() => subscribeFavorRewardDialog((guestId, text) => {
+    const guest = guests.find((entry) => entry.profile.id === guestId);
+    if (guest) onFavorRewardDialog?.(guest, text);
+  }), [guests, onFavorRewardDialog]);
 
   async function handleSelect(guestId: GuestId) {
     await setActiveGuest(guestId);
@@ -390,6 +422,13 @@ const styles = StyleSheet.create({
     color: "rgba(240,232,213,0.55)",
     fontSize: 9,
     lineHeight: 11,
+    textAlign: "center",
+    fontFamily: "Oldenburg",
+  },
+  tradeOfferText: {
+    color: "rgba(240,232,213,0.60)",
+    fontSize: 8,
+    lineHeight: 10,
     textAlign: "center",
     fontFamily: "Oldenburg",
   },
