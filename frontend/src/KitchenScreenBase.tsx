@@ -163,11 +163,6 @@ const LOCS = [
   { id: "explore",   active: false, locked: true  },
 ];
 
-// ── TEMP DEV (Point 5 – Dining Hall layout test) ────────────────────────────────
-// Keep direct access for manual Expo layout testing; the story prompt below now
-// supplies the real tutorial unlock/pulse path.
-const DEV_DINING_TEST_ACCESS = false;
-
 const IMG = {
   kitchen:     require("../assets/images/kitchen1.jpg"),
   herbsoup:    require("../assets/images/herbsoup.png"),
@@ -330,6 +325,7 @@ export default function KitchenScreen() {
   const [dormitoryUnlocked, setDormitoryUnlocked] = useState(false);
   const [gardenActive, setGardenActive] = useState(false);
   const [diningUnlocked, setDiningUnlocked] = useState(false);
+  const [coreTravelUnlocked, setCoreTravelUnlocked] = useState(false);
   const playerNameRef = useRef("Adventurer");
   const [rupertPortrait, setRupertPortrait] = useState<"normal" | "sad" | "laugh">("normal");
   // Start hidden until persisted placement is resolved. This prevents a one-frame
@@ -688,6 +684,7 @@ export default function KitchenScreen() {
       const step = await loadGuestTutorialIntroStep();
       if (!active || tsRef.current !== "IDLE") return;
       setDiningUnlocked(guestTutorialHasReached(step, "dining_prompt"));
+      setCoreTravelUnlocked(guestTutorialHasReached(step, "service_complete"));
       setRupertInDining(guestTutorialKeepsRupertInDining(step));
       if (step === "service_complete") {
         void maybeStartPostGuestUpgradeIntro(300);
@@ -733,6 +730,7 @@ export default function KitchenScreen() {
         if (initialCookingDone === "true") {
           const initialGuestStep = await loadGuestTutorialIntroStep();
           setDiningUnlocked(guestTutorialHasReached(initialGuestStep, "dining_prompt"));
+          setCoreTravelUnlocked(guestTutorialHasReached(initialGuestStep, "service_complete"));
           setRupertInDining(guestTutorialKeepsRupertInDining(initialGuestStep));
         } else {
           setRupertInDining(false);
@@ -999,12 +997,13 @@ export default function KitchenScreen() {
 
       (async () => {
         try {
-          const cur = tsRef.current;
-          if (cur !== "IDLE") return; // Don't interfere with active tutorial/dialog
-
           const guestStep = await loadGuestTutorialIntroStep();
-          setDiningUnlocked(guestTutorialHasReached(guestStep, "dining_prompt"));
-          setRupertInDining(guestTutorialKeepsRupertInDining(guestStep));
+setDiningUnlocked(guestTutorialHasReached(guestStep, "dining_prompt"));
+setCoreTravelUnlocked(guestTutorialHasReached(guestStep, "service_complete"));
+setRupertInDining(guestTutorialKeepsRupertInDining(guestStep));
+
+const cur = tsRef.current;
+if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay state untouched.
 
           // Refresh stats (may have changed in dormitory after sleep)
           const rawSta = await AsyncStorage.getItem(SK.STAMINA);
@@ -1434,6 +1433,7 @@ export default function KitchenScreen() {
 
     setSoupSlot(sourceSlot);
     soupSlotRef.current = sourceSlot;
+    setCookingDragActiveSlot(-1);
     setFlyingItemId("herbsoup");
 
     // Same anti-flicker handoff as the generic Cooking drag: leave the source
@@ -3244,7 +3244,8 @@ export default function KitchenScreen() {
 
     // Herb Soup keeps its dedicated share/eat tutorial behavior after crafting.
     if (ts === "COOKING_SHARE_EAT" && item.id === "herbsoup") {
-      const isBeingDragged = soupDragging && soupSlot === slotIdx;
+      const isBeingDragged =
+        soupDragging && cookingDragActiveSlot < 0 && soupSlot === slotIdx;
       const gesture = createCookingSoupGesture(slotIdx, item.quantity);
       return (
         <GestureDetector gesture={gesture}>
@@ -3600,6 +3601,7 @@ export default function KitchenScreen() {
             loc.active ||
             enabledInGardenPrompt ||
             enabledInDiningPrompt ||
+            (coreTravelUnlocked && (isGardenBtn || isDormBtn || isDiningBtn)) ||
             (isGardenBtn && gardenActive) ||
             (isDormBtn && dormitoryUnlocked) ||
             (isDiningBtn && diningUnlocked);
@@ -3621,32 +3623,30 @@ export default function KitchenScreen() {
             );
 
           if (enabledInGardenPrompt) {
-            return (
-              <Animated.View key={loc.id} style={[{ flex: 1 }, gardenPulseStyle]}>
-                <TouchableOpacity
-                  style={[styles.locBtn, styles.locBtnActive, styles.locBtnGardenHighlight, { flex: 1 }]}
-                  onPress={handleGardenTap}
-                  activeOpacity={0.8}
-                >
-                  {renderLocContent(true)}
-                </TouchableOpacity>
-              </Animated.View>
-            );
-          }
+  return (
+    <TouchableOpacity
+      key={loc.id}
+      style={[styles.locBtn, styles.locBtnActive, styles.locBtnGardenHighlight]}
+      onPress={handleGardenTap}
+      activeOpacity={0.8}
+    >
+      <Animated.View style={gardenPulseStyle}>{renderLocContent(true)}</Animated.View>
+    </TouchableOpacity>
+  );
+}
 
-          if (enabledInDiningPrompt) {
-            return (
-              <Animated.View key={loc.id} style={[{ flex: 1 }, diningPulseStyle]}>
-                <TouchableOpacity
-                  style={[styles.locBtn, styles.locBtnActive, styles.locBtnGardenHighlight, { flex: 1 }]}
-                  onPress={() => { void handleDiningTap(); }}
-                  activeOpacity={0.8}
-                >
-                  {renderLocContent(true)}
-                </TouchableOpacity>
-              </Animated.View>
-            );
-          }
+if (enabledInDiningPrompt) {
+  return (
+    <TouchableOpacity
+      key={loc.id}
+      style={[styles.locBtn, styles.locBtnActive]}
+      onPress={() => { void handleDiningTap(); }}
+      activeOpacity={0.8}
+    >
+      <Animated.View style={diningPulseStyle}>{renderLocContent(true)}</Animated.View>
+    </TouchableOpacity>
+  );
+}
 
           // In Tuesday kitchen state, dormitory tap shows thought bubble
           if (ts === "TUESDAY_KITCHEN_GARDEN_PROMPT" && isDormBtn) {
@@ -3663,32 +3663,35 @@ export default function KitchenScreen() {
           }
 
           let locOnPress: (() => void) | undefined;
-          if (!tutActive && isEffectivelyActive) {
-            if (isGardenBtn && gardenActive) {
-              locOnPress = () => {
-                audioManager.playSoundEffect('footstep', { maxDurationMs: 4000 });
-                router.push("/garden");
-              };
-            } else if (isDormBtn && dormitoryUnlocked) {
-              locOnPress = rupertInDining
-                ? () => showPlayerBubble('"I need to cook herb soup for the guest."')
-                : () => {
-                    audioManager.playSoundEffect('walking-on-wood', { maxDurationMs: 5000 });
-                    router.push("/dormitory");
-                  };
-            } else if (isDiningBtn && diningUnlocked) {
-              locOnPress = () => {
-                audioManager.playSoundEffect('footstep', { maxDurationMs: 4000 });
-                router.push("/dining");
-              };
-            }
-          }
+if (isDiningBtn && diningUnlocked) {
+  // Dining stays reachable throughout the guest tutorial, including
+  // the return trip with Herb Soup.
+  locOnPress = () => {
+    audioManager.playSoundEffect('footstep', { maxDurationMs: 4000 });
+    router.push("/dining");
+  };
+} else if (!tutActive && isEffectivelyActive) {
+  if (isGardenBtn && (gardenActive || coreTravelUnlocked)) {
+    locOnPress = () => {
+      audioManager.playSoundEffect('footstep', { maxDurationMs: 4000 });
+      router.push("/garden");
+    };
+  } else if (isDormBtn && (dormitoryUnlocked || coreTravelUnlocked)) {
+    locOnPress = rupertInDining
+      ? () => showPlayerBubble('"I need to cook herb soup for the guest."')
+      : () => {
+          audioManager.playSoundEffect('walking-on-wood', { maxDurationMs: 5000 });
+          router.push("/dormitory");
+        };
+  }
+}
 
+const blockedByTutorial = tutActive && !(isDiningBtn && diningUnlocked);
           return (
             <TouchableOpacity
               key={loc.id}
               style={[styles.locBtn, isEffectivelyActive ? styles.locBtnActive : styles.locBtnLocked]}
-              disabled={!isEffectivelyActive || tutActive}
+              disabled={!isEffectivelyActive || blockedByTutorial}
               onPress={locOnPress}
               activeOpacity={0.8}
             >
@@ -3727,7 +3730,10 @@ export default function KitchenScreen() {
 
       {/* ── Tutorial blocking overlay (non-interactive states) */}
       {tutActive && !showDlgOverlay && !tutInteractable && ts !== "WAITING_FOR_GARDEN_LOCATION_CLICK" && ts !== "WAITING_FOR_DINING_LOCATION_CLICK" && (
-        <View style={StyleSheet.absoluteFill} pointerEvents="box-only" />
+        <View
+          style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: locationBarH }}
+          pointerEvents="box-only"
+        />
       )}
       {/* ── Story prompt dim overlay — visual only, no touch blocking */}
       {(ts === "WAITING_FOR_GARDEN_LOCATION_CLICK" || ts === "WAITING_FOR_DINING_LOCATION_CLICK") && headerH > 0 && (
@@ -4394,9 +4400,12 @@ const styles = StyleSheet.create({
   recipeTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "center" },
   recipeEmpty: { color: "rgba(240,232,213,0.5)", fontSize: 14, fontStyle: "italic", textAlign: "center", lineHeight: 22, marginVertical: 20 },
   closeBtn: {
+    alignSelf: "center",
+    alignItems: "center",
+    minWidth: 132,
     backgroundColor: "rgba(196,148,58,0.16)", borderRadius: 12,
-    paddingVertical: 10, paddingHorizontal: 36,
-    borderWidth: 1, borderColor: "rgba(196,148,58,0.35)", marginTop: 4,
+    paddingVertical: 10, paddingHorizontal: 24,
+    borderWidth: 1, borderColor: "rgba(196,148,58,0.35)", marginTop: 12,
   },
   closeBtnText: { color: "#F5E6C8", fontSize: 14, fontFamily: "Oldenburg", letterSpacing: 0.5 },
 

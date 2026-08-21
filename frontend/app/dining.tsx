@@ -10,7 +10,7 @@ import {
   StyleSheet,
   useWindowDimensions,
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -147,7 +147,6 @@ function rupertServingExplanation(playerName: string): TutorialLine[] {
 
 export default function DiningScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ loadedFromSave?: string }>();
   const insets = useSafeAreaInsets();
   const { width: W } = useWindowDimensions();
   const audioManager = useAudioManager();
@@ -545,8 +544,7 @@ export default function DiningScreen() {
 
   function goToKitchen() {
     audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });
-    if (router.canGoBack() && params.loadedFromSave !== "1") router.back();
-    else router.replace("/kitchen");
+    router.replace("/kitchen");
   }
 
   const staminaPct = Math.max(0, Math.min(1, staminaCurrent / (playerStats.maximumStamina || 1)));
@@ -692,26 +690,39 @@ export default function DiningScreen() {
       <View style={[styles.locationBar, { paddingBottom: insets.bottom + 4 }]}>
         {LOCS.map((loc) => {
           const isCurrent = loc.id === "dining";
-          const guestDormitoryBlocked = guestTutorialKeepsRupertInDining(tutorialStep) && loc.id === "dormitory";
-          const locImg = IMG[`loc_${loc.id}` as keyof typeof IMG] as number | undefined;
-          const active = loc.nav || isCurrent || guestDormitoryBlocked;
+const coreTravelUnlocked = guestTutorialHasReached(tutorialStep, "service_complete");
+const guestDormitoryBlocked = guestTutorialKeepsRupertInDining(tutorialStep) && loc.id === "dormitory";
+const coreDestination = coreTravelUnlocked &&
+  (loc.id === "kitchen" || loc.id === "garden" || loc.id === "dormitory");
+const locImg = IMG[`loc_${loc.id}` as keyof typeof IMG] as number | undefined;
+const active = loc.id === "kitchen" || isCurrent || coreDestination || guestDormitoryBlocked;
 
-          const content = locImg ? (
-            <Image
-              source={locImg}
-              style={[styles.locBtnImg, !active && styles.locBtnImgLocked]}
-              resizeMode="contain"
-              resizeMethod="resize"
-            />
-          ) : (
-            <Ionicons name="help-outline" size={22} color={active ? "#F5E6C8" : "#3A3535"} />
-          );
+const content = locImg ? (
+  <Image
+    source={locImg}
+    style={[styles.locBtnImg, !active && styles.locBtnImgLocked]}
+    resizeMode="contain"
+    resizeMethod="resize"
+  />
+) : (
+  <Ionicons name="help-outline" size={22} color={active ? "#F5E6C8" : "#3A3535"} />
+);
 
-          const locationAction = loc.nav
-            ? goToKitchen
-            : guestDormitoryBlocked
-              ? () => showPlayerThought("I need to cook herb soup for the guest.")
-              : undefined;
+const locationAction = guestDormitoryBlocked
+  ? () => showPlayerThought("I need to cook herb soup for the guest.")
+  : loc.id === "kitchen"
+    ? goToKitchen
+    : loc.id === "garden" && coreDestination
+      ? () => {
+          audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });
+          router.replace("/garden");
+        }
+      : loc.id === "dormitory" && coreDestination
+        ? () => {
+            audioManager.playSoundEffect("walking-on-wood", { maxDurationMs: 5000 });
+            router.replace("/dormitory");
+          }
+        : undefined;
 
           return (
             <TouchableOpacity

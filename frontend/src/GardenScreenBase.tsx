@@ -13,7 +13,7 @@ import {
   Image,
   useWindowDimensions,
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -52,6 +52,7 @@ import {
 import type { ActivityId } from "@/src/game/activity-config";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
 import {
+  guestTutorialHasReached,
   guestTutorialKeepsRupertInDining,
   guestTutorialRupertHasLeftGarden,
   loadGuestTutorialIntroStep,
@@ -312,6 +313,26 @@ export default function GardenScreen() {
   const [rupertInDining, setRupertInDining] = useState(false);
   const [rupertAwayFromGarden, setRupertAwayFromGarden] = useState(true);
   const [secondPlotUnlocked, setSecondPlotUnlocked] = useState(false);
+  const [diningUnlocked, setDiningUnlocked] = useState(false);
+  const [coreTravelUnlocked, setCoreTravelUnlocked] = useState(false);
+
+  // Guest progression refresh: Dining opens at dining_prompt;
+  // Dormitory becomes normal travel after service_complete.
+  useFocusEffect(
+    React.useCallback(() => {
+      let active = true;
+      loadGuestTutorialIntroStep()
+        .then((step) => {
+if (!active) return;
+setDiningUnlocked(guestTutorialHasReached(step, "dining_prompt"));
+setCoreTravelUnlocked(guestTutorialHasReached(step, "service_complete"));
+setRupertInDining(guestTutorialKeepsRupertInDining(step));
+setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
+        })
+        .catch(() => {});
+      return () => { active = false; };
+    }, []),
+  );
 
   // ── Tutorial state machine
   const [gts, setGts] = useState<GTState>("LOADING");
@@ -2092,32 +2113,46 @@ export default function GardenScreen() {
           />
         </TouchableOpacity>
 
-        {/* Locked slots: dining, dormitory, mail, explore */}
+        {/* Guest progression unlocks Dining first, then all core travel. */}
         {([
-          { id: "dining",    img: IMG.loc_dining    },
-          { id: "dormitory", img: IMG.loc_dormitory },
-          { id: "mail",      img: IMG.loc_mail      },
-          { id: "explore",   img: IMG.loc_explore   },
+{ id: "dining",    img: IMG.loc_dining    },
+{ id: "dormitory", img: IMG.loc_dormitory },
+{ id: "mail",      img: IMG.loc_mail      },
+{ id: "explore",   img: IMG.loc_explore   },
         ] as const).map((loc) => {
-          const guestDormitoryBlocked = rupertInDining && loc.id === "dormitory";
-          return (
-            <TouchableOpacity
-              key={loc.id}
-              style={[styles.locBtn, guestDormitoryBlocked ? styles.locBtnActive : styles.locBtnLocked]}
-              disabled={!guestDormitoryBlocked}
-              onPress={guestDormitoryBlocked
-                ? () => showPlayerBubble('"I need to cook herb soup for the guest."')
-                : undefined}
-              activeOpacity={0.8}
-            >
-              <Image
-                source={loc.img}
-                style={[styles.locBtnImg, !guestDormitoryBlocked && styles.locBtnImgLocked]}
-                resizeMode="contain"
-                resizeMethod="resize"
-              />
-            </TouchableOpacity>
-          );
+const guestDormitoryBlocked = rupertInDining && loc.id === "dormitory";
+const diningAvailable = diningUnlocked && loc.id === "dining";
+const dormitoryAvailable = coreTravelUnlocked && loc.id === "dormitory";
+const active = guestDormitoryBlocked || diningAvailable || dormitoryAvailable;
+const onPress = guestDormitoryBlocked
+  ? () => showPlayerBubble('"I need to cook herb soup for the guest."')
+  : diningAvailable
+    ? () => {
+        audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });
+        router.push("/dining");
+      }
+    : dormitoryAvailable
+      ? () => {
+          audioManager.playSoundEffect("walking-on-wood", { maxDurationMs: 5000 });
+          router.push("/dormitory");
+        }
+      : undefined;
+return (
+  <TouchableOpacity
+    key={loc.id}
+    style={[styles.locBtn, active ? styles.locBtnActive : styles.locBtnLocked]}
+    disabled={!active}
+    onPress={onPress}
+    activeOpacity={0.8}
+  >
+    <Image
+      source={loc.img}
+      style={[styles.locBtnImg, !active && styles.locBtnImgLocked]}
+      resizeMode="contain"
+      resizeMethod="resize"
+    />
+  </TouchableOpacity>
+);
         })}
       </View>
 
