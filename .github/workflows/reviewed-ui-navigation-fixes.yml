@@ -1,0 +1,464 @@
+name: Apply reviewed UI and navigation fixes
+
+on:
+  push:
+    branches:
+      - fix/ui-bubble-portrait-polish
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/ui-bubble-portrait-polish
+          fetch-depth: 0
+
+      - name: Apply reviewed fixes
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match, found {count}: {old[:140]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          # ------------------------------------------------------------------
+          # Guest Tutorial dialog: match the normal 124 px portrait treatment.
+          # ------------------------------------------------------------------
+          replace_once(
+              "frontend/src/components/GuestTutorialDialog.tsx",
+              '    paddingHorizontal: 18,\n    paddingTop: 46,',
+              '    paddingHorizontal: 18,\n    paddingTop: 76,',
+          )
+          replace_once(
+              "frontend/src/components/GuestTutorialDialog.tsx",
+              '    top: -46,\n    width: 92,\n    height: 92,\n    borderRadius: 46,\n    overflow: "hidden",\n    borderWidth: 2.5,',
+              '    top: -62,\n    width: 124,\n    height: 124,\n    borderRadius: 62,\n    overflow: "hidden",\n    borderWidth: 3,',
+          )
+          replace_once(
+              "frontend/src/components/GuestTutorialDialog.tsx",
+              '    fontSize: 13,\n    letterSpacing: 0.8,\n    marginBottom: 6,',
+              '    fontSize: 15,\n    letterSpacing: 1.2,\n    marginTop: 2,\n    marginBottom: 6,',
+          )
+
+          # ------------------------------------------------------------------
+          # Kitchen: separate Herb Soup drag visibility from generic item drags.
+          # The old condition used global soupDragging + soupSlot, so dragging any
+          # other item hid the tracked Herb Soup bowl during COOKING_SHARE_EAT.
+          # ------------------------------------------------------------------
+          replace_once(
+              "frontend/src/KitchenScreenBase.tsx",
+              '    if (ts === "COOKING_SHARE_EAT" && item.id === "herbsoup") {\n      const isBeingDragged = soupDragging && soupSlot === slotIdx;',
+              '    if (ts === "COOKING_SHARE_EAT" && item.id === "herbsoup") {\n      const isBeingDragged =\n        soupDragging && cookingDragActiveSlot < 0 && soupSlot === slotIdx;',
+          )
+          replace_once(
+              "frontend/src/KitchenScreenBase.tsx",
+              '    setSoupSlot(sourceSlot);\n    soupSlotRef.current = sourceSlot;\n    setFlyingItemId("herbsoup");',
+              '    setSoupSlot(sourceSlot);\n    soupSlotRef.current = sourceSlot;\n    setCookingDragActiveSlot(-1);\n    setFlyingItemId("herbsoup");',
+          )
+
+          # Track the full post-guest travel state as a migration-safe override.
+          replace_once(
+              "frontend/src/KitchenScreenBase.tsx",
+              '  const [gardenActive, setGardenActive] = useState(false);\n  const [diningUnlocked, setDiningUnlocked] = useState(false);',
+              '  const [gardenActive, setGardenActive] = useState(false);\n  const [diningUnlocked, setDiningUnlocked] = useState(false);\n  const [coreTravelUnlocked, setCoreTravelUnlocked] = useState(false);',
+          )
+
+          # Restore Dining/core travel from every persisted guest-step read.
+          replace_once(
+              "frontend/src/KitchenScreenBase.tsx",
+              '      setDiningUnlocked(guestTutorialHasReached(step, "dining_prompt"));\n      setRupertInDining(guestTutorialKeepsRupertInDining(step));',
+              '      setDiningUnlocked(guestTutorialHasReached(step, "dining_prompt"));\n      setCoreTravelUnlocked(guestTutorialHasReached(step, "service_complete"));\n      setRupertInDining(guestTutorialKeepsRupertInDining(step));',
+          )
+          replace_once(
+              "frontend/src/KitchenScreenBase.tsx",
+              '          setDiningUnlocked(guestTutorialHasReached(initialGuestStep, "dining_prompt"));\n          setRupertInDining(guestTutorialKeepsRupertInDining(initialGuestStep));',
+              '          setDiningUnlocked(guestTutorialHasReached(initialGuestStep, "dining_prompt"));\n          setCoreTravelUnlocked(guestTutorialHasReached(initialGuestStep, "service_complete"));\n          setRupertInDining(guestTutorialKeepsRupertInDining(initialGuestStep));',
+          )
+
+          # On focus, refresh navigation state even while a tutorial state is active.
+          replace_once(
+              "frontend/src/KitchenScreenBase.tsx",
+              '          const cur = tsRef.current;\n          if (cur !== "IDLE") return; // Don\'t interfere with active tutorial/dialog\n\n          const guestStep = await loadGuestTutorialIntroStep();\n          setDiningUnlocked(guestTutorialHasReached(guestStep, "dining_prompt"));\n          setRupertInDining(guestTutorialKeepsRupertInDining(guestStep));',
+              '          const guestStep = await loadGuestTutorialIntroStep();\n          setDiningUnlocked(guestTutorialHasReached(guestStep, "dining_prompt"));\n          setCoreTravelUnlocked(guestTutorialHasReached(guestStep, "service_complete"));\n          setRupertInDining(guestTutorialKeepsRupertInDining(guestStep));\n\n          const cur = tsRef.current;\n          if (cur !== "IDLE") return; // Keep gameplay state untouched; navigation was refreshed above.',
+          )
+
+          # Remove the obsolete dev-only Dining access switch.
+          replace_once(
+              "frontend/src/KitchenScreenBase.tsx",
+              '// ── TEMP DEV (Point 5 – Dining Hall layout test) ────────────────────────────────\n// Keep direct access for manual Expo layout testing; the story prompt below now\n// supplies the real tutorial unlock/pulse path.\nconst DEV_DINING_TEST_ACCESS = false;\n\n',
+              '',
+          )
+
+          # Keep prompt button frames fixed in the row. Pulse only their icons so
+          # Dining no longer looks doubled or vertically offset.
+          replace_once(
+              "frontend/src/KitchenScreenBase.tsx",
+              '''          if (enabledInGardenPrompt) {
+            return (
+              <Animated.View key={loc.id} style={[{ flex: 1 }, gardenPulseStyle]}>
+                <TouchableOpacity
+                  style={[styles.locBtn, styles.locBtnActive, styles.locBtnGardenHighlight, { flex: 1 }]}
+                  onPress={handleGardenTap}
+                  activeOpacity={0.8}
+                >
+                  {renderLocContent(true)}
+                </TouchableOpacity>
+              </Animated.View>
+            );
+          }
+
+          if (enabledInDiningPrompt) {
+            return (
+              <Animated.View key={loc.id} style={[{ flex: 1 }, diningPulseStyle]}>
+                <TouchableOpacity
+                  style={[styles.locBtn, styles.locBtnActive, styles.locBtnGardenHighlight, { flex: 1 }]}
+                  onPress={() => { void handleDiningTap(); }}
+                  activeOpacity={0.8}
+                >
+                  {renderLocContent(true)}
+                </TouchableOpacity>
+              </Animated.View>
+            );
+          }''',
+              '''          if (enabledInGardenPrompt) {
+            return (
+              <TouchableOpacity
+                key={loc.id}
+                style={[styles.locBtn, styles.locBtnActive, styles.locBtnGardenHighlight]}
+                onPress={handleGardenTap}
+                activeOpacity={0.8}
+              >
+                <Animated.View style={gardenPulseStyle}>
+                  {renderLocContent(true)}
+                </Animated.View>
+              </TouchableOpacity>
+            );
+          }
+
+          if (enabledInDiningPrompt) {
+            return (
+              <TouchableOpacity
+                key={loc.id}
+                style={[styles.locBtn, styles.locBtnActive]}
+                onPress={() => { void handleDiningTap(); }}
+                activeOpacity={0.8}
+              >
+                <Animated.View style={diningPulseStyle}>
+                  {renderLocContent(true)}
+                </Animated.View>
+              </TouchableOpacity>
+            );
+          }''',
+          )
+
+          replace_once(
+              "frontend/src/KitchenScreenBase.tsx",
+              '            enabledInDiningPrompt ||\n            (isGardenBtn && gardenActive) ||\n            (isDormBtn && dormitoryUnlocked) ||\n            (isDiningBtn && diningUnlocked);',
+              '            enabledInDiningPrompt ||\n            (coreTravelUnlocked && (isGardenBtn || isDormBtn || isDiningBtn)) ||\n            (isGardenBtn && gardenActive) ||\n            (isDormBtn && dormitoryUnlocked) ||\n            (isDiningBtn && diningUnlocked);',
+          )
+
+          replace_once(
+              "frontend/src/KitchenScreenBase.tsx",
+              '''          let locOnPress: (() => void) | undefined;
+          if (!tutActive && isEffectivelyActive) {
+            if (isGardenBtn && gardenActive) {
+              locOnPress = () => {
+                audioManager.playSoundEffect('footstep', { maxDurationMs: 4000 });
+                router.push("/garden");
+              };
+            } else if (isDormBtn && dormitoryUnlocked) {
+              locOnPress = rupertInDining
+                ? () => showPlayerBubble('"I need to cook herb soup for the guest."')
+                : () => {
+                    audioManager.playSoundEffect('walking-on-wood', { maxDurationMs: 5000 });
+                    router.push("/dormitory");
+                  };
+            } else if (isDiningBtn && diningUnlocked) {
+              locOnPress = () => {
+                audioManager.playSoundEffect('footstep', { maxDurationMs: 4000 });
+                router.push("/dining");
+              };
+            }
+          }
+
+          return (
+            <TouchableOpacity
+              key={loc.id}
+              style={[styles.locBtn, isEffectivelyActive ? styles.locBtnActive : styles.locBtnLocked]}
+              disabled={!isEffectivelyActive || tutActive}
+              onPress={locOnPress}''',
+              '''          let locOnPress: (() => void) | undefined;
+          // Dining remains usable from dining_prompt onward, including while the
+          // guest tutorial is waiting for the player to return with Herb Soup.
+          if (isDiningBtn && diningUnlocked) {
+            locOnPress = () => {
+              audioManager.playSoundEffect('footstep', { maxDurationMs: 4000 });
+              router.push("/dining");
+            };
+          } else if (!tutActive && isEffectivelyActive) {
+            if (isGardenBtn && (gardenActive || coreTravelUnlocked)) {
+              locOnPress = () => {
+                audioManager.playSoundEffect('footstep', { maxDurationMs: 4000 });
+                router.push("/garden");
+              };
+            } else if (isDormBtn && (dormitoryUnlocked || coreTravelUnlocked)) {
+              locOnPress = rupertInDining
+                ? () => showPlayerBubble('"I need to cook herb soup for the guest."')
+                : () => {
+                    audioManager.playSoundEffect('walking-on-wood', { maxDurationMs: 5000 });
+                    router.push("/dormitory");
+                  };
+            }
+          }
+
+          const blockedByTutorial = tutActive && !(isDiningBtn && diningUnlocked);
+          return (
+            <TouchableOpacity
+              key={loc.id}
+              style={[styles.locBtn, isEffectivelyActive ? styles.locBtnActive : styles.locBtnLocked]}
+              disabled={!isEffectivelyActive || blockedByTutorial}
+              onPress={locOnPress}''',
+          )
+
+          # Tutorial blockers should block the scene, not the location bar.
+          replace_once(
+              "frontend/src/KitchenScreenBase.tsx",
+              '        <View style={StyleSheet.absoluteFill} pointerEvents="box-only" />',
+              '        <View\n          style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: locationBarH }}\n          pointerEvents="box-only"\n        />',
+          )
+
+          # Rupert upgrade close button: compact and centered (also improves Recipes).
+          replace_once(
+              "frontend/src/KitchenScreenBase.tsx",
+              '  closeBtn: {\n    backgroundColor: "rgba(196,148,58,0.16)", borderRadius: 12,\n    paddingVertical: 10, paddingHorizontal: 36,\n    borderWidth: 1, borderColor: "rgba(196,148,58,0.35)", marginTop: 4,\n  },',
+              '  closeBtn: {\n    alignSelf: "center",\n    alignItems: "center",\n    minWidth: 132,\n    backgroundColor: "rgba(196,148,58,0.16)", borderRadius: 12,\n    paddingVertical: 10, paddingHorizontal: 24,\n    borderWidth: 1, borderColor: "rgba(196,148,58,0.35)", marginTop: 12,\n  },',
+          )
+
+          # ------------------------------------------------------------------
+          # Garden: refresh guest progression on every focus and expose Dining
+          # from dining_prompt, Dormitory after service_complete.
+          # ------------------------------------------------------------------
+          replace_once(
+              "frontend/src/GardenScreenBase.tsx",
+              'import { useLocalSearchParams, useRouter } from "expo-router";',
+              'import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";',
+          )
+          replace_once(
+              "frontend/src/GardenScreenBase.tsx",
+              'import {\n  guestTutorialKeepsRupertInDining,',
+              'import {\n  guestTutorialHasReached,\n  guestTutorialKeepsRupertInDining,',
+          )
+          replace_once(
+              "frontend/src/GardenScreenBase.tsx",
+              '  const [rupertAwayFromGarden, setRupertAwayFromGarden] = useState(true);\n  const [secondPlotUnlocked, setSecondPlotUnlocked] = useState(false);',
+              '  const [rupertAwayFromGarden, setRupertAwayFromGarden] = useState(true);\n  const [secondPlotUnlocked, setSecondPlotUnlocked] = useState(false);\n  const [diningUnlocked, setDiningUnlocked] = useState(false);\n  const [coreTravelUnlocked, setCoreTravelUnlocked] = useState(false);',
+          )
+
+          # Insert the focus refresh immediately before the tutorial state machine.
+          replace_once(
+              "frontend/src/GardenScreenBase.tsx",
+              '  // ── Tutorial state machine\n  const [gts, setGts] = useState<GTState>("LOADING");',
+              '''  useFocusEffect(
+    React.useCallback(() => {
+      let active = true;
+      loadGuestTutorialIntroStep()
+        .then((step) => {
+          if (!active) return;
+          setDiningUnlocked(guestTutorialHasReached(step, "dining_prompt"));
+          setCoreTravelUnlocked(guestTutorialHasReached(step, "service_complete"));
+          setRupertInDining(guestTutorialKeepsRupertInDining(step));
+          setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
+        })
+        .catch(() => {});
+      return () => { active = false; };
+    }, []),
+  );
+
+  // ── Tutorial state machine
+  const [gts, setGts] = useState<GTState>("LOADING");''',
+          )
+
+          replace_once(
+              "frontend/src/GardenScreenBase.tsx",
+              '''        {/* Locked slots: dining, dormitory, mail, explore */}
+        {([
+          { id: "dining",    img: IMG.loc_dining    },
+          { id: "dormitory", img: IMG.loc_dormitory },
+          { id: "mail",      img: IMG.loc_mail      },
+          { id: "explore",   img: IMG.loc_explore   },
+        ] as const).map((loc) => {
+          const guestDormitoryBlocked = rupertInDining && loc.id === "dormitory";
+          return (
+            <TouchableOpacity
+              key={loc.id}
+              style={[styles.locBtn, guestDormitoryBlocked ? styles.locBtnActive : styles.locBtnLocked]}
+              disabled={!guestDormitoryBlocked}
+              onPress={guestDormitoryBlocked
+                ? () => showPlayerBubble('"I need to cook herb soup for the guest."')
+                : undefined}
+              activeOpacity={0.8}
+            >
+              <Image
+                source={loc.img}
+                style={[styles.locBtnImg, !guestDormitoryBlocked && styles.locBtnImgLocked]}
+                resizeMode="contain"
+                resizeMethod="resize"
+              />
+            </TouchableOpacity>
+          );
+        })}''',
+              '''        {/* Guest progression unlocks Dining first, then all core travel. */}
+        {([
+          { id: "dining",    img: IMG.loc_dining    },
+          { id: "dormitory", img: IMG.loc_dormitory },
+          { id: "mail",      img: IMG.loc_mail      },
+          { id: "explore",   img: IMG.loc_explore   },
+        ] as const).map((loc) => {
+          const guestDormitoryBlocked = rupertInDining && loc.id === "dormitory";
+          const diningAvailable = diningUnlocked && loc.id === "dining";
+          const dormitoryAvailable = coreTravelUnlocked && loc.id === "dormitory";
+          const active = guestDormitoryBlocked || diningAvailable || dormitoryAvailable;
+          const onPress = guestDormitoryBlocked
+            ? () => showPlayerBubble('"I need to cook herb soup for the guest."')
+            : diningAvailable
+              ? () => {
+                  audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });
+                  router.push("/dining");
+                }
+              : dormitoryAvailable
+                ? () => {
+                    audioManager.playSoundEffect("walking-on-wood", { maxDurationMs: 5000 });
+                    router.push("/dormitory");
+                  }
+                : undefined;
+          return (
+            <TouchableOpacity
+              key={loc.id}
+              style={[styles.locBtn, active ? styles.locBtnActive : styles.locBtnLocked]}
+              disabled={!active}
+              onPress={onPress}
+              activeOpacity={0.8}
+            >
+              <Image
+                source={loc.img}
+                style={[styles.locBtnImg, !active && styles.locBtnImgLocked]}
+                resizeMode="contain"
+                resizeMethod="resize"
+              />
+            </TouchableOpacity>
+          );
+        })}''',
+          )
+
+          # ------------------------------------------------------------------
+          # Dining: explicit destinations; never use router.back() for Kitchen.
+          # ------------------------------------------------------------------
+          replace_once(
+              "frontend/app/dining.tsx",
+              'import { useLocalSearchParams, useRouter } from "expo-router";',
+              'import { useRouter } from "expo-router";',
+          )
+          replace_once(
+              "frontend/app/dining.tsx",
+              '  const router = useRouter();\n  const params = useLocalSearchParams<{ loadedFromSave?: string }>();',
+              '  const router = useRouter();',
+          )
+          replace_once(
+              "frontend/app/dining.tsx",
+              '  function goToKitchen() {\n    audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });\n    if (router.canGoBack() && params.loadedFromSave !== "1") router.back();\n    else router.replace("/kitchen");\n  }',
+              '  function goToKitchen() {\n    audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });\n    router.replace("/kitchen");\n  }',
+          )
+
+          replace_once(
+              "frontend/app/dining.tsx",
+              '''          const isCurrent = loc.id === "dining";
+          const guestDormitoryBlocked = guestTutorialKeepsRupertInDining(tutorialStep) && loc.id === "dormitory";
+          const locImg = IMG[`loc_${loc.id}` as keyof typeof IMG] as number | undefined;
+          const active = loc.nav || isCurrent || guestDormitoryBlocked;
+
+          const content = locImg ? (
+            <Image
+              source={locImg}
+              style={[styles.locBtnImg, !active && styles.locBtnImgLocked]}
+              resizeMode="contain"
+              resizeMethod="resize"
+            />
+          ) : (
+            <Ionicons name="help-outline" size={22} color={active ? "#F5E6C8" : "#3A3535"} />
+          );
+
+          const locationAction = loc.nav
+            ? goToKitchen
+            : guestDormitoryBlocked
+              ? () => showPlayerThought("I need to cook herb soup for the guest.")
+              : undefined;''',
+              '''          const isCurrent = loc.id === "dining";
+          const coreTravelUnlocked = guestTutorialHasReached(tutorialStep, "service_complete");
+          const guestDormitoryBlocked = guestTutorialKeepsRupertInDining(tutorialStep) && loc.id === "dormitory";
+          const coreDestination = coreTravelUnlocked &&
+            (loc.id === "kitchen" || loc.id === "garden" || loc.id === "dormitory");
+          const locImg = IMG[`loc_${loc.id}` as keyof typeof IMG] as number | undefined;
+          const active = loc.id === "kitchen" || isCurrent || coreDestination || guestDormitoryBlocked;
+
+          const content = locImg ? (
+            <Image
+              source={locImg}
+              style={[styles.locBtnImg, !active && styles.locBtnImgLocked]}
+              resizeMode="contain"
+              resizeMethod="resize"
+            />
+          ) : (
+            <Ionicons name="help-outline" size={22} color={active ? "#F5E6C8" : "#3A3535"} />
+          );
+
+          const locationAction = guestDormitoryBlocked
+            ? () => showPlayerThought("I need to cook herb soup for the guest.")
+            : loc.id === "kitchen"
+              ? goToKitchen
+              : loc.id === "garden" && coreDestination
+                ? () => {
+                    audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });
+                    router.replace("/garden");
+                  }
+                : loc.id === "dormitory" && coreDestination
+                  ? () => {
+                      audioManager.playSoundEffect("walking-on-wood", { maxDurationMs: 5000 });
+                      router.replace("/dormitory");
+                    }
+                  : undefined;''',
+          )
+          PY
+
+      - name: Validate TypeScript and focused lint
+        shell: bash
+        run: |
+          cd frontend
+          npm ci
+          npx tsc --noEmit
+          npx eslint \
+            src/KitchenScreenBase.tsx \
+            src/GardenScreenBase.tsx \
+            src/components/GuestTutorialDialog.tsx \
+            app/dining.tsx \
+            app/intro.tsx
+          git diff --check
+
+      - name: Commit patch and remove one-shot workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/reviewed-ui-navigation-fixes.yml
+          git add frontend
+          git commit -m "Fix reviewed tutorial UI drag and navigation issues"
+          git push origin HEAD:fix/ui-bubble-portrait-polish
