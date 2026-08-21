@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import type { GardenPlotData } from "@/src/components/GardenPlot";
+import type { BagItem } from "@/src/game/item-system";
 
 export const SECOND_GARDEN_PLOT_KEY = "@garden:plot_02_data";
 
@@ -28,6 +29,98 @@ export const SECOND_GARDEN_PLOT_EMPTY: GardenPlotData = {
   withered: false,
 };
 
+export type GardenSeedConfig = {
+  seedItemId: string;
+  cropType: string;
+  cropAsset: string;
+  totalGrowthDays: number;
+  completedGrowthDaysAtPlanting: number;
+  baseYield: number;
+  yieldLabel: string;
+  harvestBag: Omit<BagItem, "containedQuantity">;
+};
+
+const GARDEN_SEED_CONFIGS: Record<string, GardenSeedConfig> = {
+  herbseed: {
+    seedItemId: "herbseed",
+    cropType: "herb",
+    cropAsset: "herbseed",
+    totalGrowthDays: 2,
+    completedGrowthDaysAtPlanting: 0,
+    baseYield: 5,
+    yieldLabel: "herbs",
+    harvestBag: {
+      id: "herbbag",
+      itemType: "herbbag",
+      name: "Herb Bag",
+      quantity: 1,
+      containedItem: "herbs",
+    },
+  },
+  carrotseed: {
+    seedItemId: "carrotseed",
+    cropType: "carrot",
+    cropAsset: "carrotseed",
+    totalGrowthDays: 4,
+    completedGrowthDaysAtPlanting: 1,
+    baseYield: 5,
+    yieldLabel: "carrots",
+    harvestBag: {
+      id: "carrotbag",
+      itemType: "carrotbag",
+      name: "Carrot Bag",
+      quantity: 1,
+      containedItem: "carrot",
+    },
+  },
+};
+
+export function getGardenSeedConfig(seedItemId: string | null): GardenSeedConfig | null {
+  return seedItemId ? (GARDEN_SEED_CONFIGS[seedItemId] ?? null) : null;
+}
+
+export function createGardenPlotFromSeed(
+  basePlot: GardenPlotData,
+  seedItemId: string,
+): GardenPlotData | null {
+  const config = getGardenSeedConfig(seedItemId);
+  if (!config) return null;
+
+  return {
+    ...basePlot,
+    status: "growing",
+    cropType: config.cropType,
+    cropAsset: config.cropAsset,
+    seedItemId: config.seedItemId,
+    totalGrowthDays: config.totalGrowthDays,
+    completedGrowthDays: config.completedGrowthDaysAtPlanting,
+    remainingGrowthDays: Math.max(0, config.totalGrowthDays - config.completedGrowthDaysAtPlanting),
+    progressPercent: 0,
+    wateredToday: false,
+    weedsPulledToday: false,
+    fertilizedToday: false,
+    fertilizerTypeUsedToday: null,
+    consecutiveUnwateredDays: 0,
+    baseYield: config.baseYield,
+    accumulatedWeedYieldBonus: 0,
+    accumulatedFertilizerYieldBonus: 0,
+    readyToHarvest: false,
+    withered: false,
+  };
+}
+
+export function createHarvestBagForCrop(
+  seedItemId: string | null,
+  containedQuantity: number,
+): BagItem | null {
+  const config = getGardenSeedConfig(seedItemId);
+  return config ? { ...config.harvestBag, containedQuantity } : null;
+}
+
+export function getCropYieldLabel(seedItemId: string | null): string {
+  return getGardenSeedConfig(seedItemId)?.yieldLabel ?? "items";
+}
+
 /**
  * Carrot calendar:
  * Day 1 planting = carrotseed (completedGrowthDays 1, visual progress 0)
@@ -36,18 +129,7 @@ export const SECOND_GARDEN_PLOT_EMPTY: GardenPlotData = {
  * Day 4 = carrotbed / ready to harvest
  */
 export function createCarrotPlot(): GardenPlotData {
-  return {
-    ...SECOND_GARDEN_PLOT_EMPTY,
-    status: "growing",
-    cropType: "carrot",
-    cropAsset: "carrotseed",
-    seedItemId: "carrotseed",
-    totalGrowthDays: 4,
-    completedGrowthDays: 1,
-    remainingGrowthDays: 3,
-    progressPercent: 0,
-    baseYield: 5,
-  };
+  return createGardenPlotFromSeed(SECOND_GARDEN_PLOT_EMPTY, "carrotseed")!;
 }
 
 export function processGardenPlotDayChange(plot: GardenPlotData): GardenPlotData {

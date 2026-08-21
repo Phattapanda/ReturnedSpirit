@@ -25,6 +25,7 @@ import Animated, {
 } from "react-native-reanimated";
 
 import GardenPlot, { GardenPlotData } from "@/src/components/GardenPlot";
+import SeedSelectionModal from "@/src/components/seed-selection-modal";
 import SceneBackground from "@/src/components/SceneBackground";
 import CurrencyHud from "@/src/components/CurrencyHud";
 import { useAudioManager } from "@/src/audio/AudioProvider";
@@ -60,6 +61,11 @@ import {
 import { loadPostGuestTutorialState } from "@/src/game/post-guest-tutorial";
 import { ensureAssetReady } from "@/src/assets/AssetManager";
 import { subscribeGardenRuntimeRefresh } from "@/src/game/garden-runtime-context";
+import { commitHarvestBag } from "@/src/game/garden-harvest";
+import {
+  createGardenPlotFromSeed,
+  createHarvestBagForCrop,
+} from "@/src/game/garden-crop-system";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
   PLAYER_AVATAR_KEY,
@@ -175,6 +181,7 @@ const IMG = {
   avTired:     require("../assets/images/avatar1_tired.png"),
   avSick:      require("../assets/images/avatar1_sick.png"),
   herbbag:     require("../assets/images/herbbag.png"),
+  carrotbag:   require("../assets/images/carrotbag.png"),
   bucket:      require("../assets/images/bucket.png"),
   bucketwater: require("../assets/images/bucketwater.png"),
   getwater:    require("../assets/images/getwater.png"),
@@ -296,10 +303,12 @@ export default function GardenScreen() {
   // ── HUD state
   const [staminaCurrent, setStaminaCurrent] = useState(40);
   const [staminaDisplay, setStaminaDisplay] = useState(40);
+  const staminaCurrentRef = useRef(40);
   const [barWidth, setBarWidth] = useState(0);
   const [lifeCurrent, setLifeCurrent] = useState(15);
   // Daily stamina-spend tracker (reset to 0 each new day after sleep)
   const [staminaSpentToday, setStaminaSpentToday] = useState(0);
+  const staminaSpentTodayRef = useRef(0);
 
   // ── Day
   const [dayIdx, setDayIdx] = useState(0);
@@ -372,6 +381,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
   // ── Flying item overlay (harvest, bucket, well animations)
   const bagIconViewRef  = useRef<View>(null);
   const cropAreaViewRef = useRef<View>(null);
+  const secondCropAreaViewRef = useRef<View>(null);
   const bagIconLayout   = useRef<{ cx: number; cy: number } | null>(null);
   const cropLayout      = useRef<{ cx: number; cy: number } | null>(null);
   const [activityBarH, setActivityBarH] = useState(70);
@@ -412,7 +422,8 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
 
   // Seed planting modal
   const [seedModalVisible, setSeedModalVisible] = useState(false);
-  const [plantConfirmSeed, setPlantConfirmSeed] = useState<{id:string;name:string;qty:number} | null>(null);
+  const [selectedSeedId, setSelectedSeedId] = useState<string | null>(null);
+  const [plantBusy, setPlantBusy] = useState(false);
   // Float anim (well/activity)
   const [floatMsg, setFloatMsg] = useState<string | null>(null);
   // Bag inspected state
@@ -466,6 +477,8 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
   // Sync gtsRef
   // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => { gtsRef.current = gts; }, [gts]);
+  useEffect(() => { staminaCurrentRef.current = staminaCurrent; }, [staminaCurrent]);
+  useEffect(() => { staminaSpentTodayRef.current = staminaSpentToday; }, [staminaSpentToday]);
   useEffect(() => {
     staminaMaxSV.value = playerStats.maximumStamina;
   }, [playerStats.maximumStamina, staminaMaxSV]);
@@ -497,13 +510,16 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
 
         if (rawSta !== null) {
           const nextStamina = Math.min(Math.max(parseInt(rawSta, 10) || 0, 0), nextStats.maximumStamina);
+          staminaCurrentRef.current = nextStamina;
           setStaminaCurrent(nextStamina);
           setStaminaDisplay(nextStamina);
           staminaSV.value = nextStamina;
         }
 
         if (rawSpent !== null) {
-          setStaminaSpentToday(Math.max(0, parseInt(rawSpent, 10) || 0));
+          const nextSpent = Math.max(0, parseInt(rawSpent, 10) || 0);
+          staminaSpentTodayRef.current = nextSpent;
+          setStaminaSpentToday(nextSpent);
         }
 
         if (rawInv) {
@@ -608,13 +624,16 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
         // Load stamina
         const rawSta = await AsyncStorage.getItem(GSK.STAMINA);
         const sta = rawSta ? Math.min(Math.max(parseInt(rawSta, 10), 0), loadedStats.maximumStamina) : 40;
+        staminaCurrentRef.current = sta;
         setStaminaCurrent(sta);
         setStaminaDisplay(sta);
         staminaSV.value = sta;
 
         // Load daily stamina spend tracker
         const rawSpent = await AsyncStorage.getItem(GSK.STAMINA_SPENT_TODAY);
-        setStaminaSpentToday(rawSpent ? Math.max(0, parseInt(rawSpent, 10)) : 0);
+        const spent = rawSpent ? Math.max(0, parseInt(rawSpent, 10)) : 0;
+        staminaSpentTodayRef.current = spent;
+        setStaminaSpentToday(spent);
 
         // Load life
         const rawLife = await AsyncStorage.getItem(GSK.LIFE);
@@ -811,6 +830,43 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
     setFlyImg(image);
   }
 
+  async function animateHarvestToPlayerBag(
+    harvestBag: BagItem,
+    source: "primary" | "second",
+  ) {
+    const image = harvestBag.id === "carrotbag" ? IMG.carrotbag : IMG.herbbag;
+    const sourceRef = source === "second" ? secondCropAreaViewRef : cropAreaViewRef;
+
+    const [startPos, endPos] = await Promise.all([
+      new Promise<{ cx: number; cy: number }>((resolve) => {
+        const view = sourceRef.current;
+        if (!view) {
+          resolve({ cx: W / 2, cy: H * (source === "second" ? 0.66 : 0.45) });
+          return;
+        }
+        view.measureInWindow((x, y, w, h) => {
+          resolve({ cx: x + w / 2, cy: y + h / 2 });
+        });
+      }),
+      new Promise<{ cx: number; cy: number }>((resolve) => {
+        const view = bagIconViewRef.current;
+        if (!view) {
+          resolve(bagIconLayout.current ?? { cx: W * 0.75, cy: H * 0.2 });
+          return;
+        }
+        view.measureInWindow((x, y, w, h) => {
+          const center = { cx: x + w / 2, cy: y + h / 2 };
+          bagIconLayout.current = center;
+          resolve(center);
+        });
+      }),
+    ]);
+
+    audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
+    await ensureAssetReady(harvestBag.id);
+    startFlyAnim(image, startPos.cx, startPos.cy, endPos.cx, endPos.cy);
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Action flash: centered image fades up over 1s (getwater / getwood / getstone)
   // Multiple flashes can coexist (rapid tapping supported)
@@ -940,13 +996,17 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
   // Stamina helpers — centralised spend function that also tracks daily total
   // ─────────────────────────────────────────────────────────────────────────
   function deductStamina(amount: number, floatLabel: string) {
-    const newSta = Math.max(0, staminaCurrent - amount);
+    const oldSta = staminaCurrentRef.current;
+    const actualAmount = Math.min(Math.max(0, amount), oldSta);
+    const newSta = oldSta - actualAmount;
+    staminaCurrentRef.current = newSta;
     setStaminaCurrent(newSta);
     staminaSV.value = withTiming(newSta, { duration: STA_MS });
     AsyncStorage.setItem(GSK.STAMINA, String(newSta)).catch(() => {});
 
     // Track actual daily spend (only increments, never decrements)
-    const newSpent = staminaSpentToday + amount;
+    const newSpent = staminaSpentTodayRef.current + actualAmount;
+    staminaSpentTodayRef.current = newSpent;
     setStaminaSpentToday(newSpent);
     AsyncStorage.setItem(GSK.STAMINA_SPENT_TODAY, String(newSpent)).catch(() => {});
 
@@ -961,7 +1021,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
     }, FLOAT_MS - FLOAT_FADE_OUT);
 
     // Counter animation
-    const start = staminaCurrent;
+    const start = oldSta;
     const end = newSta;
     const steps = 16;
     const stepMs = STA_MS / steps;
@@ -973,6 +1033,13 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
       setStaminaDisplay(Math.max(v, end));
       if (count >= steps) { clearInterval(staminaCountTimer.current!); setStaminaDisplay(end); }
     }, stepMs);
+  }
+
+  async function spendSecondPlotStamina(baseCost: number): Promise<boolean> {
+    const actualCost = calcEffectiveStaminaCost(baseCost, playerStats.endurance);
+    if (staminaCurrentRef.current < actualCost) return false;
+    deductStamina(actualCost, `-${actualCost}`);
+    return true;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1078,7 +1145,8 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
     const fertConfig = FERTILIZER_CONFIGS.find(f => f.id === selectedFertilizer);
     if (!fertConfig) { showPlayerBubble('"No fertilizer available."'); return; }
 
-    if (staminaCurrent < fertConfig.staminaCost) {
+    const fertilizerCost = calcEffectiveStaminaCost(fertConfig.staminaCost, playerStats.endurance);
+    if (staminaCurrentRef.current < fertilizerCost) {
       showPlayerBubble('"Not enough stamina."');
       return;
     }
@@ -1102,8 +1170,35 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
     if (gtsRef.current === "GARDEN_PLOT_INTERACTIVE" || gtsRef.current === "GARDEN_MINIMUM_TASK_COMPLETE") {
       await AsyncStorage.setItem(GSK.HAS_FERTILIZED, "true");
     }
-    deductStamina(fertConfig.staminaCost, `-${fertConfig.staminaCost}`);
+    deductStamina(fertilizerCost, `-${fertilizerCost}`);
     actionLocked.current = false;
+  }
+
+  function createEmptyPrimaryPlot(): GardenPlotData {
+    return {
+      ...TUTORIAL_PLOT_INITIAL,
+      id: plotData.id,
+      plotType: plotData.plotType,
+      upgradeLevel: plotData.upgradeLevel,
+      status: "empty",
+      cropType: null,
+      cropAsset: null,
+      seedItemId: null,
+      progressPercent: 0,
+      completedGrowthDays: 0,
+      remainingGrowthDays: 0,
+      totalGrowthDays: 0,
+      wateredToday: false,
+      weedsPulledToday: false,
+      fertilizedToday: false,
+      fertilizerTypeUsedToday: null,
+      consecutiveUnwateredDays: 0,
+      baseYield: 0,
+      accumulatedWeedYieldBonus: 0,
+      accumulatedFertilizerYieldBonus: 0,
+      readyToHarvest: false,
+      withered: false,
+    };
   }
 
   async function handleHarvest() {
@@ -1138,14 +1233,6 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
         containedQuantity: finalYield,
       };
 
-      const result = planAddToBag(herbbagItem, playerBagRef.current);
-      if (!result.canTransfer) {
-        showPlayerBubble('"No free space available."');
-        setGardenState("TUTORIAL_HARVEST_AVAILABLE");
-        harvestLocked.current = false;
-        return;
-      }
-
       // Measure positions for fly animation
       await new Promise<void>(res => {
         bagIconViewRef.current?.measureInWindow((x, y, w, h) => {
@@ -1166,40 +1253,39 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
       // Defensive: ensure herbbag asset is decoded before flying animation
       await ensureAssetReady('herbbag');
 
+      const emptyPlot = createEmptyPrimaryPlot();
+      let harvestCommit;
+      try {
+        harvestCommit = await commitHarvestBag(herbbagItem, [
+          [GSK.PLOT_DATA, JSON.stringify(emptyPlot)],
+        ]);
+      } catch {
+        showPlayerBubble('"I can\'t store this harvest right now."');
+        setGardenState("TUTORIAL_HARVEST_AVAILABLE");
+        harvestLocked.current = false;
+        return;
+      }
+      if (!harvestCommit.ok) {
+        showPlayerBubble(harvestCommit.reason === "bag_locked"
+          ? '"I need my bag first."'
+          : '"My bag is full."');
+        setGardenState("TUTORIAL_HARVEST_AVAILABLE");
+        harvestLocked.current = false;
+        return;
+      }
+
+      playerBagRef.current = harvestCommit.bag;
+      setPlayerBag(harvestCommit.bag);
+      setPlotData(emptyPlot);
+      audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
+
       // Start fly animation, then complete harvest after
       startFlyAnim(
         IMG.herbbag,
         startPos.cx, startPos.cy,
         endPos.cx, endPos.cy,
         async () => {
-          // Reset plot to empty using ref for latest bag state
-          const latestBag = playerBagRef.current;
-          const latestResult = planAddToBag(herbbagItem, latestBag);
-          if (!latestResult.canTransfer) {
-            setGardenState("TUTORIAL_HARVEST_AVAILABLE");
-            harvestLocked.current = false;
-            return;
-          }
-          const emptyPlot: GardenPlotData = {
-            ...TUTORIAL_PLOT_INITIAL,
-            id: plotData.id, plotType: plotData.plotType, upgradeLevel: plotData.upgradeLevel,
-            status: "empty", cropType: null, cropAsset: null, seedItemId: null,
-            progressPercent: 0, completedGrowthDays: 0, remainingGrowthDays: 0,
-            totalGrowthDays: 0, wateredToday: false, weedsPulledToday: false,
-            fertilizedToday: false, fertilizerTypeUsedToday: null,
-            consecutiveUnwateredDays: 0, baseYield: 0,
-            accumulatedWeedYieldBonus: 0, accumulatedFertilizerYieldBonus: 0,
-            readyToHarvest: false, withered: false,
-          };
-
-          const newBag = { ...latestBag, slots: latestResult.updatedSlots };
-          setPlotData(emptyPlot);
-          setPlayerBag(newBag);
-          audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
-
           await Promise.all([
-            AsyncStorage.setItem(GSK.PLOT_DATA, JSON.stringify(emptyPlot)),
-            AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(newBag)),
             AsyncStorage.setItem(GSK.HAS_HARVESTED, "true"),
             AsyncStorage.setItem(GSK.HARVEST_YIELD, String(finalYield)),
           ]);
@@ -1214,47 +1300,44 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
       return;
     }
 
-    // Legacy path (pre-Tuesday / IDLE)
-    if (staminaCurrent < 1) { showPlayerBubble('"Not enough stamina."'); return; }
+    // Free-play harvest: every harvest bag gets its own next free Player Bag slot.
+    const harvestCost = calcEffectiveStaminaCost(1, playerStats.endurance);
+    if (staminaCurrentRef.current < harvestCost) { showPlayerBubble('"Not enough stamina."'); return; }
     actionLocked.current = true;
 
     const finalYield = plotData.baseYield + plotData.accumulatedWeedYieldBonus + plotData.accumulatedFertilizerYieldBonus;
-
-    // Add herbs to garden inventory
-    const newInv = [...inventory];
-    const existingBagIdx = newInv.findIndex(
-      i => i.id === "herbbag" && i.containedItem === "herbs" && i.containedQuantity === finalYield,
-    );
-    if (existingBagIdx >= 0) {
-      newInv[existingBagIdx] = { ...newInv[existingBagIdx], quantity: newInv[existingBagIdx].quantity + 1 };
-    } else {
-      newInv.push({
-        id: "herbbag", itemType: "herbbag", name: `Herb Bag (${finalYield})`,
-        quantity: 1, containedItem: "herbs", containedQuantity: finalYield,
-      });
+    const harvestBag = createHarvestBagForCrop(plotData.seedItemId, finalYield);
+    if (!harvestBag) {
+      showPlayerBubble('"I can\'t harvest this crop yet."');
+      actionLocked.current = false;
+      return;
     }
-    setInventory(newInv);
-    await AsyncStorage.setItem(GSK.INVENTORY, JSON.stringify(newInv));
+    const emptyPlot = createEmptyPrimaryPlot();
 
-    // Reset plot
-    const emptyPlot: GardenPlotData = {
-      ...TUTORIAL_PLOT_INITIAL,
-      id: plotData.id, plotType: plotData.plotType, upgradeLevel: plotData.upgradeLevel,
-      status: "empty", cropType: null, cropAsset: null, seedItemId: null,
-      progressPercent: 0, completedGrowthDays: 0, remainingGrowthDays: 0,
-      totalGrowthDays: 0, wateredToday: false, weedsPulledToday: false,
-      fertilizedToday: false, fertilizerTypeUsedToday: null,
-      consecutiveUnwateredDays: 0, baseYield: 0,
-      accumulatedWeedYieldBonus: 0, accumulatedFertilizerYieldBonus: 0,
-      readyToHarvest: false, withered: false,
-    };
-    setPlotData(emptyPlot);
-    await AsyncStorage.setItem(GSK.PLOT_DATA, JSON.stringify(emptyPlot));
-    setGardenState("IDLE");
-    await AsyncStorage.setItem(GSK.TUT_STATE, "IDLE");
-    await AsyncStorage.setItem(GSK.TUT_COMPLETE, "true");
+    try {
+      const harvestCommit = await commitHarvestBag(harvestBag, [
+        [GSK.PLOT_DATA, JSON.stringify(emptyPlot)],
+        [GSK.TUT_STATE, "IDLE"],
+        [GSK.TUT_COMPLETE, "true"],
+      ]);
+      if (!harvestCommit.ok) {
+        showPlayerBubble(harvestCommit.reason === "bag_locked"
+          ? '"I need my bag first."'
+          : '"My bag is full."');
+        return;
+      }
 
-    actionLocked.current = false;
+      playerBagRef.current = harvestCommit.bag;
+      setPlayerBag(harvestCommit.bag);
+      setPlotData(emptyPlot);
+      setGardenState("IDLE");
+      deductStamina(harvestCost, `-${harvestCost}`);
+      await animateHarvestToPlayerBag(harvestBag, "primary");
+    } catch {
+      showPlayerBubble('"I can\'t store this harvest right now."');
+    } finally {
+      actionLocked.current = false;
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1269,23 +1352,12 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
     }
 
     if (plotData.status === "empty") {
-      // Empty plot → show seed selection
-      // Carrot Seed is introduced in Point 11, but its crop duration/yield are
-      // intentionally not defined yet. Never fall through to the current Herb-only
-      // planting initializer and accidentally turn a Carrot Seed into an herb crop.
-      const availableSeeds = inventory.filter(
-        i => i.itemType === "seed" && i.quantity > 0 && i.id !== "carrotseed",
-      );
+      const availableSeeds = inventory.filter(i => i.itemType === "seed" && i.quantity > 0);
       if (availableSeeds.length === 0) {
-        const hasCarrotSeed = inventory.some(i => i.id === "carrotseed" && i.quantity > 0);
-        showPlayerBubble(hasCarrotSeed
-          ? '"I should keep the carrot seed for the new plot."'
-          : '"I have no seeds."');
+        showPlayerBubble('"I have no seeds."');
         return;
       }
-      // Auto-select first available seed
-      const seed = availableSeeds[0];
-      setPlantConfirmSeed({ id: seed.id, name: seed.name, qty: seed.quantity });
+      setSelectedSeedId(null);
       setSeedModalVisible(true);
       return;
     }
@@ -1535,6 +1607,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
     // Flash animation + sound
     triggerActionFlash(IMG.getwater);
     audioManager.playSoundEffect('getwater', { maxDurationMs: 3000 });
+    audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
 
     await Promise.all([
       AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(newBag)),
@@ -1607,38 +1680,42 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
   // Seed planting confirm
   // ─────────────────────────────────────────────────────────────────────────
   async function handleConfirmPlant() {
-    if (!plantConfirmSeed) return;
-    setSeedModalVisible(false);
+    if (!selectedSeedId || plantBusy) return;
+    setPlantBusy(true);
+    try {
+      const rawInventory = await AsyncStorage.getItem(GSK.INVENTORY);
+      const latestInventory: InventoryItem[] = rawInventory ? JSON.parse(rawInventory) : [];
+      const seedIdx = latestInventory.findIndex(
+        i => i.id === selectedSeedId && i.itemType === "seed" && i.quantity > 0,
+      );
+      if (seedIdx === -1) {
+        showPlayerBubble('"That seed is no longer available."');
+        return;
+      }
 
-    // Consume one seed from inventory
-    const seedIdx = inventory.findIndex(i => i.id === plantConfirmSeed.id && i.quantity > 0);
-    if (seedIdx === -1) {
-      showPlayerBubble('"No seeds available."');
-      return;
-    }
+      const newPlot = createGardenPlotFromSeed(plotData, selectedSeedId);
+      if (!newPlot) {
+        showPlayerBubble('"I can\'t plant this seed yet."');
+        return;
+      }
 
-    const newInv = [...inventory];
-    newInv[seedIdx] = { ...newInv[seedIdx], quantity: newInv[seedIdx].quantity - 1 };
-    setInventory(newInv);
-    await AsyncStorage.setItem(GSK.INVENTORY, JSON.stringify(newInv));
-
-    // Initialize new plot
-    const newPlot: GardenPlotData = {
-      id: plotData.id, plotType: plotData.plotType, upgradeLevel: plotData.upgradeLevel,
-      status: "growing", cropType: "herb", cropAsset: "herbseed",
-      seedItemId: plantConfirmSeed.id,
-      totalGrowthDays: 2, completedGrowthDays: 0, remainingGrowthDays: 2,
-      progressPercent: 0, wateredToday: false, weedsPulledToday: false,
-      fertilizedToday: false, fertilizerTypeUsedToday: null,
-      consecutiveUnwateredDays: 0, baseYield: 5,
-      accumulatedWeedYieldBonus: 0, accumulatedFertilizerYieldBonus: 0,
-      readyToHarvest: false, withered: false,
-    };
-    setPlotData(newPlot);
-    await AsyncStorage.setItem(GSK.PLOT_DATA, JSON.stringify(newPlot));
-    setPlantConfirmSeed(null);
-    if (gtsRef.current === "TUTORIAL_WATER_FETCHED" || gtsRef.current === "GARDEN_REPLANTING_AVAILABLE") {
-      setGardenState("GARDEN_REPLANTING_AVAILABLE");
+      const newInv = latestInventory.map(item => ({ ...item }));
+      newInv[seedIdx] = { ...newInv[seedIdx], quantity: newInv[seedIdx].quantity - 1 };
+      await AsyncStorage.multiSet([
+        [GSK.INVENTORY, JSON.stringify(newInv)],
+        [GSK.PLOT_DATA, JSON.stringify(newPlot)],
+      ]);
+      setInventory(newInv);
+      setPlotData(newPlot);
+      setSeedModalVisible(false);
+      setSelectedSeedId(null);
+      if (gtsRef.current === "TUTORIAL_WATER_FETCHED" || gtsRef.current === "GARDEN_REPLANTING_AVAILABLE") {
+        setGardenState("GARDEN_REPLANTING_AVAILABLE");
+      }
+    } catch {
+      showPlayerBubble('"I can\'t plant this right now."');
+    } finally {
+      setPlantBusy(false);
     }
   }
 
@@ -1929,6 +2006,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
         <Image source={IMG.avTired}     style={{ width: 1, height: 1 }} />
         <Image source={IMG.avSick}      style={{ width: 1, height: 1 }} />
         <Image source={IMG.herbbag}     style={{ width: 1, height: 1 }} />
+        <Image source={IMG.carrotbag}   style={{ width: 1, height: 1 }} />
         <Image source={IMG.bucket}      style={{ width: 1, height: 1 }} />
         <Image source={IMG.bucketwater} style={{ width: 1, height: 1 }} />
       </View>
@@ -2043,12 +2121,13 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
             onFertilize={handleFertilize}
             onHarvest={handleHarvest}
             onCropTap={handleCropTap}
+            onSpendStamina={spendSecondPlotStamina}
             onLockedAction={() => showPlayerBubble('"That won\'t achieve anything."')}
           />
         </Animated.View>
 
         {secondPlotUnlocked && (
-          <View style={styles.secondPlotWrap}>
+          <View ref={secondCropAreaViewRef} style={styles.secondPlotWrap}>
             <Text style={styles.secondPlotLabel}>2nd Plot</Text>
             <GardenPlot
               data={SECOND_PLOT_EMPTY}
@@ -2058,15 +2137,15 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
               onFertilize={() => {}}
               onHarvest={() => {}}
               onCropTap={() => {}}
+              onSpendStamina={spendSecondPlotStamina}
+              onHarvestStored={(item) => {
+                void animateHarvestToPlayerBag(item, "second");
+              }}
               actionCosts={{ water: waterCost, pullWeeds: pullWeedsCost, fertilize: fertilizeCost }}
             />
           </View>
         )}
 
-        {/* Post-tutorial hint */}
-        {(gts === "IDLE" || gts === "GARDEN_TUTORIAL_COMPLETE") && (
-          <Text style={styles.idleHint}>The garden is yours to tend.</Text>
-        )}
       </ScrollView>
 
       {/* ── Activity Bar ── */}
@@ -2315,6 +2394,7 @@ return (
           setPlayerBag(newBag);
           playerBagRef.current = newBag;
           await AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(newBag)).catch(() => {});
+          audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
         }}
         onShowThoughtBubble={(text) => {
           // Show player thought bubble for garden discard protection
@@ -2336,35 +2416,22 @@ return (
         onStatsUpdated={handleStatsUpdated}
       />
 
-      {/* ── Seed planting confirmation Modal ── */}
-      <Modal visible={seedModalVisible} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.tearOutPanel}>
-            <Text style={styles.tearOutTitle}>Plant Seed?</Text>
-            <Text style={styles.tearOutDesc}>
-              {plantConfirmSeed
-                ? `Plant "${plantConfirmSeed.name}"? (${plantConfirmSeed.qty} available)`
-                : "Plant this seed?"}
-            </Text>
-            <View style={styles.tearOutBtns}>
-              <TouchableOpacity
-                style={styles.tearOutBtnNo}
-                onPress={() => { setSeedModalVisible(false); setPlantConfirmSeed(null); }}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.tearOutBtnText}>No</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.tearOutBtnYes}
-                onPress={handleConfirmPlant}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.tearOutBtnText}>Yes</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      <SeedSelectionModal
+        visible={seedModalVisible}
+        seeds={seeds.map(seed => ({
+          id: seed.id,
+          name: seed.name,
+          quantity: seed.quantity,
+        }))}
+        selectedSeedId={selectedSeedId}
+        busy={plantBusy}
+        onSelect={setSelectedSeedId}
+        onClose={() => {
+          setSeedModalVisible(false);
+          setSelectedSeedId(null);
+        }}
+        onConfirm={handleConfirmPlant}
+      />
 
       {/* ── Float message ── */}
       {floatMsg && (
@@ -2584,15 +2651,6 @@ const styles = StyleSheet.create({
     fontFamily: "Oldenburg",
     letterSpacing: 0.8,
     marginBottom: 6,
-  },
-
-  idleHint: {
-    color: "rgba(196,148,58,0.45)",
-    fontStyle: "italic",
-    fontSize: 13,
-    textAlign: "center",
-    marginTop: 20,
-    fontFamily: "Oldenburg",
   },
 
   // Bubbles (Rupert speech)

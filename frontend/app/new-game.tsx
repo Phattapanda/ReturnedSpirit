@@ -99,6 +99,7 @@ export default function NewGame() {
       "@garden:tutorial_complete",
       "@garden:tutorial_state",
       "@garden:plot_01_data",
+      "@garden:plot_02_data",
       "@garden:inventory",
       "@garden:selected_fertilizer",
       // Tuesday garden flags

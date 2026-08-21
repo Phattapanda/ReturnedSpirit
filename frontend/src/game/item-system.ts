@@ -114,6 +114,25 @@ export type AddToBagResult = {
   updatedSlots: (BagItem | null)[];
 };
 
+export type AddToNextFreeSlotResult =
+  | { ok: true; slotIndex: number; updatedSlots: (BagItem | null)[] }
+  | { ok: false; reason: "bag_locked" | "bag_full"; updatedSlots: (BagItem | null)[] };
+
+/** Add one non-stackable item instance to the first empty Player Bag slot. */
+export function planAddToNextFreeBagSlot(
+  item: BagItem,
+  bag: PlayerBagData,
+): AddToNextFreeSlotResult {
+  const updatedSlots = bag.slots.map((slot) => slot ? { ...slot } : null);
+  if (!bag.unlocked) return { ok: false, reason: "bag_locked", updatedSlots };
+
+  const slotIndex = updatedSlots.findIndex((slot) => slot === null);
+  if (slotIndex < 0) return { ok: false, reason: "bag_full", updatedSlots };
+
+  updatedSlots[slotIndex] = { ...item, quantity: 1 };
+  return { ok: true, slotIndex, updatedSlots };
+}
+
 /** Plan + execute adding one item stack to the bag, respecting maxStackSize */
 export function planAddToBag(item: BagItem, bag: PlayerBagData): AddToBagResult {
   const maxStack = bag.maxStackSize;

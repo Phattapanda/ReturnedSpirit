@@ -123,6 +123,12 @@ export const ASSET_REGISTRY: AssetEntry[] = [
     critical: true,
   },
   {
+    key: 'carrotbag',
+    module: require('../../assets/images/carrotbag.png'),
+    group: 'items',
+    critical: true,
+  },
+  {
     key: 'bucket',
     module: require('../../assets/images/bucket.png'),
     group: 'items',

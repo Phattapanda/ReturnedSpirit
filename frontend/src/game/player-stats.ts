@@ -31,7 +31,7 @@ export const UPGRADE_GP_COST = 10;
 /** Central endurance cost formula – always use this, never hardcode reduced costs */
 export function calcEffectiveStaminaCost(baseCost: number, endurance: number): number {
   const reduction = Math.floor(endurance / 5);
-  return Math.max(1, baseCost - reduction);
+  return Math.max(0, baseCost - reduction);
 }
 
 export type UpgradableField =
