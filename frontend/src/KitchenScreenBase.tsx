@@ -1189,7 +1189,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     onMeasured: (center: RootCenter | null) => void,
   ) {
     const root = rootRef.current;
-    const useCachedRect = () => {
+    const fallbackToCachedRect = () => {
       if (!fallback) {
         onMeasured(null);
         return;
@@ -1207,14 +1207,14 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     };
 
     if (!view || !root) {
-      useCachedRect();
+      fallbackToCachedRect();
       return;
     }
 
     view.measureLayout(
       root,
       (x, y, w, h) => onMeasured({ x: x + w / 2, y: y + h / 2, w, h }),
-      useCachedRect,
+      fallbackToCachedRect,
     );
   }
 
