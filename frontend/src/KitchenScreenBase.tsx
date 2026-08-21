@@ -386,6 +386,7 @@ export default function KitchenScreen() {
   // ── Soup
   const [soupSlot, setSoupSlot] = useState<number | null>(null);
   const soupSlotRef = useRef<number | null>(null);
+  const soupReturnTargetSlotRef = useRef(0);
   const [soupDragging, setSoupDragging] = useState(false);
   const consumedOnce = useRef(false);
   const inputLocked = useRef(false);
@@ -597,6 +598,7 @@ export default function KitchenScreen() {
   const diningPulse  = useSharedValue(1);
 
   // ── Layout measurement refs (declared early: used in cookingTablePanGesture worklet below) ──
+  const rootRef            = useRef<View>(null);
   const playerPortraitRef  = useRef<View>(null);
   const rupertPortraitRef  = useRef<View>(null);
   const bagIconRef         = useRef<View>(null);
@@ -1174,6 +1176,48 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     });
   }
 
+  type RootCenter = { x: number; y: number; w: number; h: number };
+
+  /**
+   * The shared flying overlay is positioned relative to the Kitchen root.
+   * measureInWindow values are still cached for pointer hit-testing, while
+   * automatic flights use this root-local center to avoid safe-area offsets.
+   */
+  function measureCenterInRoot(
+    view: View | null,
+    fallback: LRect | null,
+    onMeasured: (center: RootCenter | null) => void,
+  ) {
+    const root = rootRef.current;
+    const useFallback = () => {
+      if (!fallback) {
+        onMeasured(null);
+        return;
+      }
+      const finish = (rootX: number, rootY: number) => {
+        onMeasured({
+          x: fallback.x + fallback.w / 2 - rootX,
+          y: fallback.y + fallback.h / 2 - rootY,
+          w: fallback.w,
+          h: fallback.h,
+        });
+      };
+      if (root) root.measureInWindow((rootX, rootY) => finish(rootX, rootY));
+      else finish(0, 0);
+    };
+
+    if (!view || !root) {
+      useFallback();
+      return;
+    }
+
+    view.measureLayout(
+      root,
+      (x, y, w, h) => onMeasured({ x: x + w / 2, y: y + h / 2, w, h }),
+      useFallback,
+    );
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Tutorial helpers
   // ─────────────────────────────────────────────────────────────────────────
@@ -1319,45 +1363,43 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   }
 
   function flySoupToTable() {
-    const rL = layouts.current.rupert;
-    const s0 = layouts.current.tableSlots[0];
-    if (!rL || !s0) {
-      // Fallback: skip animation
-      setSoupSlot(0); soupSlotRef.current = 0;
-      setTutState("SOUP_AVAILABLE");
-      showBubble(
-        '"Take your time. You can inspect the soup first, if you like."',
-        "Old Innkeeper",
-        "ALLOW_ITEM",
-        BUBBLE_INSPECT_MS,
-        () => setTutState("SOUP_ON_TABLE"),
-      );
-      return;
-    }
-    const fromX = rL.x + rL.w / 2;
-    const fromY = rL.y + rL.h / 2;
-    const toX   = s0.x + s0.w / 2;
-    const toY   = s0.y + s0.h / 2;
+    measureCenterInRoot(
+      rupertPortraitRef.current,
+      layouts.current.rupert,
+      (from) => {
+        measureCenterInRoot(
+          tableSlotRefs.current[0],
+          layouts.current.tableSlots[0],
+          (to) => {
+            if (!from || !to) {
+              onSoupLanded();
+              return;
+            }
 
-    soupX.value = fromX;
-    soupY.value = fromY;
-    soupScale.value = 1;
-    soupVis.value = withTiming(1, { duration: 180 });
-    soupX.value = withTiming(toX, { duration: FLY_MS });
-    soupY.value = withTiming(toY, { duration: FLY_MS }, (done) => {
-      if (done) runOnJS(onSoupLanded)();
-    });
+            if (to.w > 0) soupFlySize.value = to.w * 0.80;
+            soupX.value = from.x;
+            soupY.value = from.y;
+            soupScale.value = 1;
+            soupVis.value = withTiming(1, { duration: 180 });
+            soupX.value = withTiming(to.x, { duration: FLY_MS });
+            soupY.value = withTiming(to.y, { duration: FLY_MS }, (done) => {
+              if (done) runOnJS(onSoupLanded)();
+            });
+          },
+        );
+      },
+    );
   }
 
   function onSoupLanded() {
-    soupVis.value = withTiming(0, { duration: 150 }, () => {
-      runOnJS(afterSoupLanded)();
-    });
-  }
-
-  function afterSoupLanded() {
-    setSoupSlot(0); soupSlotRef.current = 0;
+    // Commit the centered slot image first, then fade the overlay above it.
+    // This avoids the empty frame and visible jump seen on Android/Expo Go.
+    setSoupSlot(0);
+    soupSlotRef.current = 0;
     setTutState("SOUP_AVAILABLE");
+    requestAnimationFrame(() => {
+      soupVis.value = withTiming(0, { duration: 120 });
+    });
     showBubble(
       '"Take your time. You can inspect the soup first, if you like."',
       "Old Innkeeper",
@@ -1788,8 +1830,37 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     });
   }
 
+  function firstFreeTableSlotForReturnedSoup() {
+    const freeSlot = tableItemsRef.current.findIndex((item) => item === null);
+    if (freeSlot >= 0) return freeSlot;
+    const currentSlot = soupSlotRef.current;
+    return currentSlot !== null && currentSlot < 12 ? currentSlot : 0;
+  }
+
+  function holdSoupAtRupert() {
+    measureCenterInRoot(
+      rupertPortraitRef.current,
+      layouts.current.rupert,
+      (center) => {
+        if (!center) return;
+        soupX.value = center.x;
+        soupY.value = center.y;
+        soupScale.value = 1;
+        soupVis.value = withTiming(1, { duration: 120 });
+      },
+    );
+  }
+
   function onDropOnRupert() {
-    endDragClean();
+    // Keep the source slot hidden for the complete rejection/return sequence.
+    // endDragClean() would set soupDragging=false and create the duplicate bowl.
+    setSoupDragging(true);
+    hoveredSlotRef.current = null;
+    setHoveredSlot(null);
+    soupVis.value = withTiming(0, { duration: 100 }, (done) => {
+      if (done) runOnJS(holdSoupAtRupert)();
+    });
+
     setTutState("REJECTION_DIALOG");
     showBubble(
       '"Thanks, but I\'ve already eaten. It\'s for you. You need it, believe me."',
@@ -1804,32 +1875,47 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   }
 
   function returnSoupFromRupert() {
-    const lr = layouts.current.rupert;
-    const curSlot = soupSlotRef.current ?? 0;
-    const rect = layouts.current.tableSlots[curSlot] ?? layouts.current.tableSlots[0];
-    if (!lr || !rect) {
-      setTutState("SOUP_ON_TABLE"); return;
-    }
-    // Hide the slot image during fly-back to prevent double-soup (slot + flying)
+    const targetSlot = firstFreeTableSlotForReturnedSoup();
+    soupReturnTargetSlotRef.current = targetSlot;
     setSoupDragging(true);
-    const fromX = lr.x + lr.w / 2;
-    const fromY = lr.y + lr.h / 2;
-    const toX   = rect.x + rect.w / 2;
-    const toY   = rect.y + rect.h / 2;
-    soupX.value = fromX; soupY.value = fromY; soupScale.value = 1;
-    soupVis.value = withTiming(1, { duration: 150 });
-    soupX.value = withTiming(toX, { duration: RETURN_MS });
-    soupY.value = withTiming(toY, { duration: RETURN_MS }, (done) => {
-      if (done) {
-        soupVis.value = withTiming(0, { duration: 150 });
-        runOnJS(onSoupReturned)();
-      }
-    });
+
+    measureCenterInRoot(
+      rupertPortraitRef.current,
+      layouts.current.rupert,
+      (from) => {
+        measureCenterInRoot(
+          tableSlotRefs.current[targetSlot],
+          layouts.current.tableSlots[targetSlot],
+          (to) => {
+            if (!from || !to) {
+              onSoupReturned(targetSlot);
+              return;
+            }
+
+            if (to.w > 0) soupFlySize.value = to.w * 0.80;
+            soupX.value = from.x;
+            soupY.value = from.y;
+            soupScale.value = 1;
+            soupVis.value = 1;
+            soupX.value = withTiming(to.x, { duration: RETURN_MS });
+            soupY.value = withTiming(to.y, { duration: RETURN_MS }, (done) => {
+              if (done) runOnJS(onSoupReturned)(targetSlot);
+            });
+          },
+        );
+      },
+    );
   }
 
-  function onSoupReturned() {
-    setSoupDragging(false);  // Show soup in slot again after fly-back
+  function onSoupReturned(targetSlot = soupReturnTargetSlotRef.current) {
+    // Restore exactly one centered slot image before removing the fly overlay.
+    setSoupSlot(targetSlot);
+    soupSlotRef.current = targetSlot;
+    setSoupDragging(false);
     setTutState("SOUP_ON_TABLE");
+    requestAnimationFrame(() => {
+      soupVis.value = withTiming(0, { duration: 120 });
+    });
   }
 
   function onDropOnPlayer(absX: number, absY: number) {
@@ -3338,7 +3424,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
 
 
   return (
-    <View style={styles.root}>
+    <View ref={rootRef} style={styles.root}>
       <CurrencyHud />
       {/* ── Hidden portrait preload – forces RN/browser to decode all portrait images
            immediately on mount. Combined with AssetManager preload in game-loading.tsx
