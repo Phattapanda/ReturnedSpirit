@@ -10,7 +10,7 @@ import {
   StyleSheet,
   useWindowDimensions,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -60,7 +60,6 @@ const DSK = {
   LIFE:          "@game:life",
   PLAYER_NAME:   "@game:player_name",
   DAY_INDEX:     "@game:day_index",
-  TIME_OF_DAY:   "@room:time_of_day",
   SAVE_LOCATION: "@game:save_location",
   ACTIVE_SLOT:   "@game:active_slot",
   GAME_SLOTS:    "game_slots",
@@ -150,6 +149,7 @@ export default function DiningScreen() {
   const insets = useSafeAreaInsets();
   const { width: W } = useWindowDimensions();
   const audioManager = useAudioManager();
+  const { crossfadeTo } = audioManager;
 
   const [staminaCurrent, setStaminaCurrent] = useState(40);
   const [lifeCurrent, setLifeCurrent] = useState(15);
@@ -157,7 +157,7 @@ export default function DiningScreen() {
   const [dayIdx, setDayIdx] = useState(0);
   const [playerName, setPlayerName] = useState("Adventurer");
   const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(1);
-  const [timeOfDay, setTimeOfDay] = useState<"morning" | "evening">("evening");
+  const [diningLoaded, setDiningLoaded] = useState(false);
   const [headerH, setHeaderH] = useState(0);
   const [playerBag, setPlayerBag] = useState<PlayerBagData>(DEFAULT_BAG);
   const [mealState, setMealState] = useState<DiningMealState>(DEFAULT_DINING_MEAL_STATE);
@@ -197,7 +197,6 @@ export default function DiningScreen() {
         const rawDay = await AsyncStorage.getItem(DSK.DAY_INDEX);
         const rawName = await AsyncStorage.getItem(DSK.PLAYER_NAME);
         const rawAv = await AsyncStorage.getItem(PLAYER_AVATAR_KEY);
-        const rawTod = await AsyncStorage.getItem(DSK.TIME_OF_DAY);
         const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
         const loadedMeals = await loadDiningMealState();
         const loadedTutorialStep = await loadGuestTutorialIntroStep();
@@ -211,7 +210,6 @@ export default function DiningScreen() {
         setDayIdx(rawDay !== null ? parseInt(rawDay, 10) : 0);
         setPlayerName(resolvedName);
         setPlayerAvatarId(normalizePlayerAvatarId(rawAv));
-        setTimeOfDay(rawTod === "morning" ? "morning" : "evening");
         setMealState(loadedMeals);
         if (rawBag) {
           try { setPlayerBag(JSON.parse(rawBag)); } catch { /* default */ }
@@ -265,6 +263,8 @@ export default function DiningScreen() {
         await AsyncStorage.setItem(DSK.SAVE_LOCATION, "dining");
       } catch (e) {
         if (__DEV__) console.error("[Dining] load failed:", e);
+      } finally {
+        if (active) setDiningLoaded(true);
       }
     })();
     return () => { active = false; };
@@ -383,7 +383,18 @@ export default function DiningScreen() {
   const tutorialInDining = guestTutorialHasReached(tutorialStep, "dining_intro");
   const showDiningServiceUi = !tutorialInDining || guestTutorialHasReached(tutorialStep, "meal_reveal");
   const showRupertInDining = tutorialStep === "meal_reveal" || guestTutorialKeepsRupertInDining(tutorialStep);
-  const useDawnBackground = (tutorialInDining && tutorialStep !== "service_complete") || timeOfDay === "morning";
+  const useDawnBackground = tutorialInDining && tutorialStep !== "service_complete";
+  const diningTheme = useDawnBackground ? "dining-dawn" : "dining";
+
+  // Keep the room music tied to the same mode that selects the background.
+  // Focus-based playback also restores the correct theme when returning from
+  // another screen that remained mounted in the navigation stack.
+  useFocusEffect(
+    React.useCallback(() => {
+      if (!diningLoaded) return;
+      crossfadeTo(diningTheme, 3000);
+    }, [crossfadeTo, diningLoaded, diningTheme]),
+  );
 
   async function handleBagToMealSlot(bagSlotIndex: number) {
     const plan = planBagItemToMealSlot(playerBag, bagSlotIndex, mealState);

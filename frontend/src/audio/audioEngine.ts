@@ -17,8 +17,8 @@ import type { AudioPlayer } from 'expo-audio';
 
 // ─── Theme key types ──────────────────────────────────────────────────────────
 
-export type ThemeKey = 'main-menu' | 'kitchen' | 'garden' | 'dormitory-morning' | 'dormitory-evening' | null;
-export type LocationKey = 'main-menu' | 'kitchen' | 'garden' | 'dormitory' | null;
+export type ThemeKey = 'main-menu' | 'kitchen' | 'garden' | 'dining' | 'dining-dawn' | 'dormitory-morning' | 'dormitory-evening' | null;
+export type LocationKey = 'main-menu' | 'kitchen' | 'garden' | 'dining' | 'dormitory' | null;
 export type TimeOfDayKey = 'morning' | 'evening';
 
 // ─── Audio asset map ──────────────────────────────────────────────────────────
@@ -27,6 +27,8 @@ const THEME_SOURCES: Record<NonNullable<ThemeKey>, number> = {
   'main-menu':          require('../../assets/audio/Main-Page-Theme.mp3'),
   kitchen:              require('../../assets/audio/Kitchen-Theme.mp3'),
   garden:               require('../../assets/audio/Garden-Theme.mp3'),
+  dining:               require('../../assets/audio/dininghall_theme.mp3'),
+  'dining-dawn':        require('../../assets/audio/dininghall_dawn_theme.mp3'),
   'dormitory-morning':  require('../../assets/audio/Room-Morning-Theme.mp3'),
   'dormitory-evening':  require('../../assets/audio/Room-Evening-Theme.mp3'),
 };
@@ -61,6 +63,7 @@ export function getMusicTheme(location: LocationKey, timeOfDay?: TimeOfDayKey): 
   if (location === 'main-menu') return 'main-menu';
   if (location === 'kitchen') return 'kitchen';
   if (location === 'garden') return 'garden';
+  if (location === 'dining') return 'dining';
   if (location === 'dormitory') return timeOfDay === 'morning' ? 'dormitory-morning' : 'dormitory-evening';
   return null;
 }
