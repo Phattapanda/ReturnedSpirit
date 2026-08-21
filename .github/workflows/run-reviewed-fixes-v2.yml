@@ -35,30 +35,34 @@ jobs:
               for line in block.splitlines()
           )
 
-          old_helper = '''def replace(text: str, old: str, new: str, label: str) -> str:
-    if old in text:
-        return text.replace(old, new, 1)
-    if new in text:
-        return text
-    raise SystemExit(f"missing {label}")'''
+          old_helper = (
+              "def replace(text: str, old: str, new: str, label: str) -> str:\n"
+              "    if old in text:\n"
+              "        return text.replace(old, new, 1)\n"
+              "    if new in text:\n"
+              "        return text\n"
+              "    raise SystemExit(f\"missing {label}\")"
+          )
 
-          new_helper = r'''def replace(text: str, old: str, new: str, label: str) -> str:
-    if old in text:
-        return text.replace(old, new, 1)
-    if new in text:
-        return text
-    if label == "Kitchen focus refresh":
-        focus_start = text.find('          const cur = tsRef.current;')
-        guest_start = text.find('          const guestStep = await loadGuestTutorialIntroStep();', focus_start)
-        focus_end = text.find('\n\n          // Refresh stats', guest_start)
-        if focus_start >= 0 and guest_start >= 0 and focus_end >= 0:
-            return text[:focus_start] + new + text[focus_end:]
-    if label == "stable prompt buttons":
-        prompt_start = text.find('          if (enabledInGardenPrompt) {')
-        prompt_end = text.find('          // In Tuesday kitchen state', prompt_start)
-        if prompt_start >= 0 and prompt_end >= 0:
-            return text[:prompt_start] + new + "\n\n" + text[prompt_end:]
-    raise SystemExit(f"missing {label}")'''
+          new_helper = (
+              "def replace(text: str, old: str, new: str, label: str) -> str:\n"
+              "    if old in text:\n"
+              "        return text.replace(old, new, 1)\n"
+              "    if new in text:\n"
+              "        return text\n"
+              "    if label == \"Kitchen focus refresh\":\n"
+              "        focus_start = text.find('          const cur = tsRef.current;')\n"
+              "        guest_start = text.find('          const guestStep = await loadGuestTutorialIntroStep();', focus_start)\n"
+              "        focus_end = text.find('\\n\\n          // Refresh stats', guest_start)\n"
+              "        if focus_start >= 0 and guest_start >= 0 and focus_end >= 0:\n"
+              "            return text[:focus_start] + new + text[focus_end:]\n"
+              "    if label == \"stable prompt buttons\":\n"
+              "        prompt_start = text.find('          if (enabledInGardenPrompt) {')\n"
+              "        prompt_end = text.find('          // In Tuesday kitchen state', prompt_start)\n"
+              "        if prompt_start >= 0 and prompt_end >= 0:\n"
+              "            return text[:prompt_start] + new + '\\n\\n' + text[prompt_end:]\n"
+              "    raise SystemExit(f\"missing {label}\")"
+          )
 
           if old_helper not in script:
               raise SystemExit('reviewed patch helper not found')
