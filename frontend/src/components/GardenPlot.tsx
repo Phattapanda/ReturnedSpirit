@@ -16,18 +16,9 @@ import Animated, {
 } from "react-native-reanimated";
 
 import {
-  DEFAULT_BAG,
-  PLAYER_BAG_KEY,
-  planAddToBag,
   type BagItem,
-  type PlayerBagData,
 } from "@/src/game/item-system";
-import {
-  DEFAULT_PLAYER_STATS,
-  PLAYER_STATS_KEY,
-  calcEffectiveStaminaCost,
-  type PlayerStats,
-} from "@/src/game/player-stats";
+import { commitHarvestBag } from "@/src/game/garden-harvest";
 import {
   createCarrotPlot,
   loadSecondGardenPlot,
@@ -76,6 +67,7 @@ export type GardenPlotProps = {
   onFertilize: () => void;
   onHarvest: () => void;
   onCropTap: () => void;
+  onSpendStamina: (baseCost: number) => Promise<boolean>;
   onLockedAction?: () => void;
   actionCosts?: { water: number; pullWeeds: number; fertilize: number };
 };
@@ -91,8 +83,6 @@ type GardenInventoryItem = {
 
 const GARDEN_INVENTORY_KEY = "@garden:inventory";
 const SELECTED_FERTILIZER_KEY = "@garden:selected_fertilizer";
-const STAMINA_KEY = "@game:stamina";
-const STAMINA_SPENT_KEY = "@game:stamina_spent_today";
 
 // ─── Asset map ────────────────────────────────────────────────────────────────
 
@@ -152,30 +142,6 @@ export function getCropStageAsset(
   return CROP_ASSETS[cfg.growingStageAsset];
 }
 
-async function loadPlayerStats(): Promise<PlayerStats> {
-  try {
-    const raw = await AsyncStorage.getItem(PLAYER_STATS_KEY);
-    return raw ? { ...DEFAULT_PLAYER_STATS, ...JSON.parse(raw) } : DEFAULT_PLAYER_STATS;
-  } catch {
-    return DEFAULT_PLAYER_STATS;
-  }
-}
-
-async function spendStamina(baseCost: number): Promise<boolean> {
-  const stats = await loadPlayerStats();
-  const cost = calcEffectiveStaminaCost(baseCost, stats.endurance);
-  const rawStamina = await AsyncStorage.getItem(STAMINA_KEY);
-  const current = rawStamina !== null ? Math.max(0, parseInt(rawStamina, 10) || 0) : 0;
-  if (current < cost) return false;
-  const rawSpent = await AsyncStorage.getItem(STAMINA_SPENT_KEY);
-  const spent = rawSpent !== null ? Math.max(0, parseInt(rawSpent, 10) || 0) : 0;
-  await AsyncStorage.multiSet([
-    [STAMINA_KEY, String(current - cost)],
-    [STAMINA_SPENT_KEY, String(spent + cost)],
-  ]);
-  return true;
-}
-
 // ─── GardenPlot component ─────────────────────────────────────────────────────
 
 export default function GardenPlot(props: GardenPlotProps) {
@@ -187,6 +153,7 @@ export default function GardenPlot(props: GardenPlotProps) {
     onFertilize,
     onHarvest,
     onCropTap,
+    onSpendStamina,
     onLockedAction,
     actionCosts = { water: 2, pullWeeds: 8, fertilize: 3 },
   } = props;
@@ -267,7 +234,7 @@ export default function GardenPlot(props: GardenPlotProps) {
     if (secondData.wateredToday) { showPlayerThought('"Already watered today."'); return; }
     setSecondBusy(true);
     try {
-      if (!(await spendStamina(2))) { showPlayerThought('"Not enough stamina."'); return; }
+      if (!(await onSpendStamina(2))) { showPlayerThought('"Not enough stamina."'); return; }
       await persistSecond({ ...secondData, wateredToday: true });
       refreshGarden();
     } finally {
@@ -282,7 +249,7 @@ export default function GardenPlot(props: GardenPlotProps) {
     if (secondData.withered) {
       setSecondBusy(true);
       try {
-        if (!(await spendStamina(5))) { showPlayerThought('"Not enough stamina."'); return; }
+        if (!(await onSpendStamina(5))) { showPlayerThought('"Not enough stamina."'); return; }
         await persistSecond({ ...SECOND_GARDEN_PLOT_EMPTY });
         refreshGarden();
       } finally {
@@ -293,7 +260,7 @@ export default function GardenPlot(props: GardenPlotProps) {
     if (secondData.weedsPulledToday) { showPlayerThought('"I already did this today."'); return; }
     setSecondBusy(true);
     try {
-      if (!(await spendStamina(8))) { showPlayerThought('"Not enough stamina."'); return; }
+      if (!(await onSpendStamina(8))) { showPlayerThought('"Not enough stamina."'); return; }
       await persistSecond({
         ...secondData,
         weedsPulledToday: true,
@@ -319,7 +286,7 @@ export default function GardenPlot(props: GardenPlotProps) {
       const inventory: GardenInventoryItem[] = rawInventory ? JSON.parse(rawInventory) : [];
       const fertIndex = inventory.findIndex((item) => item.id === selected && item.itemType === "fertilizer" && item.quantity > 0);
       if (fertIndex < 0) { showPlayerThought('"No fertilizer available."'); return; }
-      if (!(await spendStamina(3))) { showPlayerThought('"Not enough stamina."'); return; }
+      if (!(await onSpendStamina(3))) { showPlayerThought('"Not enough stamina."'); return; }
 
       const nextInventory = inventory.map((item) => ({ ...item }));
       nextInventory[fertIndex] = {
@@ -348,13 +315,6 @@ export default function GardenPlot(props: GardenPlotProps) {
     if (!secondData.readyToHarvest) { showPlayerThought('"Not ready yet."'); return; }
     setSecondBusy(true);
     try {
-      const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
-      let bag: PlayerBagData = DEFAULT_BAG;
-      if (rawBag) {
-        try { bag = { ...DEFAULT_BAG, ...JSON.parse(rawBag) }; } catch { bag = DEFAULT_BAG; }
-      }
-      if (!bag.unlocked) { showPlayerThought('"I need my bag first."'); return; }
-
       const finalYield = secondData.baseYield + secondData.accumulatedWeedYieldBonus + secondData.accumulatedFertilizerYieldBonus;
       const carrotBag: BagItem = {
         id: "carrotbag",
@@ -364,14 +324,16 @@ export default function GardenPlot(props: GardenPlotProps) {
         containedItem: "carrot",
         containedQuantity: finalYield,
       };
-      const plan = planAddToBag(carrotBag, bag);
-      if (!plan.canTransfer) { showPlayerThought('"No free space available."'); return; }
-
-      const nextBag = { ...bag, slots: plan.updatedSlots };
-      await AsyncStorage.multiSet([
-        [PLAYER_BAG_KEY, JSON.stringify(nextBag)],
+      const result = await commitHarvestBag(carrotBag, [
         ["@garden:plot_02_data", JSON.stringify(SECOND_GARDEN_PLOT_EMPTY)],
       ]);
+      if (!result.ok) {
+        showPlayerThought(result.reason === "bag_locked"
+          ? '"I need my bag first."'
+          : '"My bag is full."');
+        return;
+      }
+
       setSecondData({ ...SECOND_GARDEN_PLOT_EMPTY });
       refreshGarden();
     } finally {
