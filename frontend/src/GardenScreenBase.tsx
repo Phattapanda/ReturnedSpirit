@@ -2102,10 +2102,6 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
           </View>
         )}
 
-        {/* Post-tutorial hint */}
-        {(gts === "IDLE" || gts === "GARDEN_TUTORIAL_COMPLETE") && (
-          <Text style={styles.idleHint}>The garden is yours to tend.</Text>
-        )}
       </ScrollView>
 
       {/* ── Activity Bar ── */}
@@ -2610,15 +2606,6 @@ const styles = StyleSheet.create({
     fontFamily: "Oldenburg",
     letterSpacing: 0.8,
     marginBottom: 6,
-  },
-
-  idleHint: {
-    color: "rgba(196,148,58,0.45)",
-    fontStyle: "italic",
-    fontSize: 13,
-    textAlign: "center",
-    marginTop: 20,
-    fontFamily: "Oldenburg",
   },
 
   // Bubbles (Rupert speech)

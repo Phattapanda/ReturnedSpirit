@@ -3679,6 +3679,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         {LOCS.map((loc) => {
           const isGardenPrompt = ts === "WAITING_FOR_GARDEN_LOCATION_CLICK" || ts === "TUESDAY_KITCHEN_GARDEN_PROMPT";
           const isDiningPrompt = ts === "WAITING_FOR_DINING_LOCATION_CLICK";
+          const isCurrent = loc.id === "kitchen";
           const isGardenBtn = loc.id === "garden";
           const isDormBtn = loc.id === "dormitory";
           const isDiningBtn = loc.id === "dining";
@@ -3778,7 +3779,12 @@ const blockedByTutorial = tutActive && !(isDiningBtn && diningUnlocked);
           return (
             <TouchableOpacity
               key={loc.id}
-              style={[styles.locBtn, isEffectivelyActive ? styles.locBtnActive : styles.locBtnLocked]}
+              style={[
+                styles.locBtn,
+                isCurrent
+                  ? styles.locBtnCurrent
+                  : (isEffectivelyActive ? styles.locBtnActive : styles.locBtnLocked),
+              ]}
               disabled={!isEffectivelyActive || blockedByTutorial}
               onPress={locOnPress}
               activeOpacity={0.8}
@@ -4350,6 +4356,7 @@ const styles = StyleSheet.create({
   },
   locBtn: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 6, borderRadius: 10, borderWidth: 1, minHeight: 54 },
   locBtnActive: { backgroundColor: "rgba(196,148,58,0.22)", borderColor: "rgba(196,148,58,0.55)" },
+  locBtnCurrent: { backgroundColor: "rgba(196,148,58,0.22)", borderColor: "#FFFFFF", borderWidth: 2 },
   locBtnLocked: { backgroundColor: "rgba(255,255,255,0.02)", borderColor: "rgba(255,255,255,0.07)" },
   locBtnGardenHighlight: { borderColor: "#C4943A", borderWidth: 2, backgroundColor: "rgba(196,148,58,0.30)" },
   locBtnImg: { width: 42, height: 42 },

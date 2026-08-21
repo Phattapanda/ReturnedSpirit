@@ -1022,7 +1022,7 @@ const styles = StyleSheet.create({
     minHeight: 54,
   },
   locBtnActive: { backgroundColor: "rgba(196,148,58,0.22)", borderColor: "rgba(196,148,58,0.55)" },
-  locBtnCurrent: { backgroundColor: "rgba(196,148,58,0.26)", borderColor: "rgba(196,148,58,0.65)" },
+  locBtnCurrent: { backgroundColor: "rgba(196,148,58,0.22)", borderColor: "#FFFFFF", borderWidth: 2 },
   locBtnLocked: { backgroundColor: "rgba(255,255,255,0.02)", borderColor: "rgba(255,255,255,0.07)" },
   locBtnImg: { width: 42, height: 42 },
   locBtnImgLocked: { opacity: 0.20 },

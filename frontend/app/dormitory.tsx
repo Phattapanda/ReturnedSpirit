@@ -9,7 +9,7 @@ import {
   StyleSheet,
   useWindowDimensions,
 } from "react-native";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -143,7 +143,6 @@ function processPlotDayChange(p: GardenPlotData): GardenPlotData {
 
 export default function DormitoryScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ loadedFromSave?: string }>();
   const insets = useSafeAreaInsets();
   const { width: W } = useWindowDimensions();
   const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(DEFAULT_PLAYER_AVATAR_ID);
@@ -732,8 +731,7 @@ export default function DormitoryScreen() {
   // ─────────────────────────────────────────────────────────────────────────
   function afterDownstairsFade() {
     audioManager.stopSoundEffect('walking-on-wood');
-    if (params.loadedFromSave === "1") router.replace("/kitchen");
-    else router.back();
+    router.replace("/kitchen");
   }
 
   async function handleGoDownstairs() {
