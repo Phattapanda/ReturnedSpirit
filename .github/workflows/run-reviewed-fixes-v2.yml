@@ -42,7 +42,7 @@ jobs:
         return text
     raise SystemExit(f"missing {label}")'''
 
-          new_helper = '''def replace(text: str, old: str, new: str, label: str) -> str:
+          new_helper = r'''def replace(text: str, old: str, new: str, label: str) -> str:
     if old in text:
         return text.replace(old, new, 1)
     if new in text:
