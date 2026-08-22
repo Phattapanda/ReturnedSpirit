@@ -2244,6 +2244,36 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     if (item) setKitchenDetailItem({ ...item });
   }
 
+  /** Split one harvested bag from a compatible stack before it can be unpacked. */
+  function splitHarvestBag(slot: number, bag: BagItem) {
+    if (bag.quantity <= 1) return;
+    const splitTable = tableItemsRef.current.slice();
+    const splitSlot = splitTable.findIndex((entry, index) => index !== slot && entry === null);
+    if (splitSlot < 0) {
+      showPlayerBubble('"No free space available."');
+      return;
+    }
+
+    splitTable[slot] = { ...bag, quantity: bag.quantity - 1 };
+    splitTable[splitSlot] = { ...bag, quantity: 1 };
+    tableItemsRef.current = splitTable;
+    setTableItems(splitTable);
+    AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(splitTable)).catch(() => {});
+    audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
+
+    const contents = bag.containedQuantity ?? 0;
+    const itemName = bag.id === "herbbag" ? "Herb Bag" : "Carrot Bag";
+    const itemLabel = bag.id === "herbbag" ? "herb" : "carrot";
+    if (bag.id === "herbbag") {
+      setSelectedHerbbagSlot(splitSlot);
+      setSelectedCarrotbagSlot(null);
+    } else {
+      setSelectedCarrotbagSlot(splitSlot);
+      setSelectedHerbbagSlot(null);
+    }
+    showCookingTooltip(itemName, "Contains: " + contents + (contents === 1 ? " " + itemLabel : " " + itemLabel + "s"));
+  }
+
   function handleCookingItemTap(slot: number) {
     const item = getCookingItemAtSlot(slot);
     if (!item) return;
@@ -2261,6 +2291,10 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         setSelectedSoupSlot(null);
         showCookingTooltip("Herb Bag", "Contains: " + remaining + (remaining === 1 ? " herb" : " herbs"));
       } else {
+        if (item.quantity > 1) {
+          splitHarvestBag(slot, item);
+          return;
+        }
         unpackOneHerb(slot, item);
         const afterQty = remaining - 1;
         if (afterQty > 0) {
@@ -2282,6 +2316,10 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         setSelectedSoupSlot(null);
         showCookingTooltip("Carrot Bag", "Contains: " + remaining + (remaining === 1 ? " carrot" : " carrots"));
       } else {
+        if (item.quantity > 1) {
+          splitHarvestBag(slot, item);
+          return;
+        }
         unpackOneCarrot(slot, item);
         const afterQty = remaining - 1;
         if (afterQty > 0) {
@@ -3451,12 +3489,12 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
             )}
             {!isBeingDragged && showHerbbagTapHint && (
               <View style={{ position: "absolute", bottom: 2, right: 2, backgroundColor: "#E8B84B", borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1 }}>
-                <Text style={{ color: "#2C1810", fontSize: 8, fontWeight: "700" }}>TAP</Text>
+                <Text style={{ color: "#2C1810", fontSize: 8, fontWeight: "700" }}>{item.quantity > 1 ? "SPLIT" : "TAP"}</Text>
               </View>
             )}
             {!isBeingDragged && showCarrotbagTapHint && (
               <View style={{ position: "absolute", bottom: 2, right: 2, backgroundColor: "#E8B84B", borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1 }}>
-                <Text style={{ color: "#2C1810", fontSize: 8, fontWeight: "700" }}>TAP</Text>
+                <Text style={{ color: "#2C1810", fontSize: 8, fontWeight: "700" }}>{item.quantity > 1 ? "SPLIT" : "TAP"}</Text>
               </View>
             )}
             {!isBeingDragged && item.id === "herbs" && isSelectedHerbs && item.quantity > 1 && (
