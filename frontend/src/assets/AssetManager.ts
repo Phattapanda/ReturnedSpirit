@@ -147,6 +147,9 @@ export const ASSET_REGISTRY: AssetEntry[] = [
   { key: 'herbbed',       module: require('../../assets/images/herbbed.png'),       group: 'items' },
   { key: 'herbbed_young', module: require('../../assets/images/herbbed_young.png'), group: 'items' },
   { key: 'fertilizer',    module: require('../../assets/images/fertilizer.png'),    group: 'items' },
+  { key: 'energydrink',   module: require('../../assets/images/energy Drink.png'),  group: 'items' },
+  { key: 'energypill',    module: require('../../assets/images/energy Pill.png'),   group: 'items' },
+  { key: 'goldenapple',   module: require('../../assets/images/golden apple.png'),  group: 'items' },
   { key: 'bag1',          module: require('../../assets/images/bag1.png'),          group: 'items' },
   // Craft materials / resources
   { key: 'wood',  module: require('../../assets/images/wood.png'),  group: 'items' },

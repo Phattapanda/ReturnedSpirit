@@ -32,6 +32,8 @@ type SaveSlot = {
   name: string | null;
   savedAt: string | null;
   playtime: number;
+  playtimeSeconds?: number;
+  runNumber?: number;
   avatarId?: PlayerAvatarId;
 };
 
@@ -71,7 +73,7 @@ export default function NewGame() {
     if (!name.trim() || selectedSlot === null) return;
     const updated = slots.map((s) =>
       s.slot === selectedSlot
-        ? { ...s, occupied: true, name: name.trim(), avatarId: selectedAvatarId, savedAt: new Date().toISOString(), playtime: 0, tutorialDone: false }
+        ? { ...s, occupied: true, name: name.trim(), avatarId: selectedAvatarId, savedAt: new Date().toISOString(), playtime: 0, playtimeSeconds: 0, runNumber: 1, tutorialDone: false }
         : s
     );
     setSlots(updated);
