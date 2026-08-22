@@ -12,6 +12,7 @@ import {
   Animated as RNAnimated,
   Image,
   useWindowDimensions,
+  type ImageSourcePropType,
 } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -71,6 +72,10 @@ import {
   createHarvestBagForCrop,
   normalizeGardenSeedId,
 } from "@/src/game/garden-crop-system";
+import {
+  getGardenFertilizerConfig,
+  normalizeGardenFertilizerId,
+} from "@/src/game/garden-fertilizer-system";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
   PLAYER_AVATAR_KEY,
@@ -156,19 +161,6 @@ export type InventoryItem = {
   containedQuantity?: number;
 };
 
-// ─── Fertilizer config ────────────────────────────────────────────────────────
-
-type FertilizerConfig = {
-  id: string;
-  name: string;
-  yieldBonus: number;
-  staminaCost: number;
-};
-
-const FERTILIZER_CONFIGS: FertilizerConfig[] = [
-  { id: "standard_fertilizer", name: "Standard Fertilizer", yieldBonus: 1, staminaCost: 3 },
-];
-
 // ─── Location data ────────────────────────────────────────────────────────────
 
 const DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
@@ -203,6 +195,8 @@ const IMG = {
   loc_mail:      require("../assets/images/gotomail.png"),
   loc_explore:   require("../assets/images/goexplore.png"),
   loc_storage:   require("../assets/images/gotostorage.png"),
+  standard_fertilizer: require("../assets/images/fertilizer.png"),
+  premium_fertilizer: require("../assets/premiumfertilizer.png"),
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -221,11 +215,16 @@ const DEFAULT_INVENTORY: InventoryItem[] = [
   { id: "standard_fertilizer", itemType: "fertilizer",  name: "Standard Fertilizer",  quantity: 5 },
 ];
 
-function normalizeInventorySeedIds(items: InventoryItem[]): InventoryItem[] {
-  return items.map((item) => item.itemType === "seed"
-    ? { ...item, id: normalizeGardenSeedId(item.id) ?? item.id }
-    : item,
-  );
+function normalizeGardenInventoryIds(items: InventoryItem[]): InventoryItem[] {
+  return items.map((item) => {
+    if (item.itemType === "seed") {
+      return { ...item, id: normalizeGardenSeedId(item.id) ?? item.id };
+    }
+    if (item.itemType === "fertilizer") {
+      return { ...item, id: normalizeGardenFertilizerId(item.id) ?? item.id };
+    }
+    return item;
+  });
 }
 
 const SECOND_PLOT_EMPTY: GardenPlotData = {
@@ -400,7 +399,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
 
   // Single flying item overlay — always rendered (opacity driven by animation)
   type FlyTarget = { ex: number; ey: number; onDone?: () => void };
-  const [flyImg, setFlyImg] = useState<ReturnType<typeof require> | null>(null);
+  const [flyImg, setFlyImg] = useState<ImageSourcePropType | null>(null);
   const pendingFlyRef = useRef<FlyTarget | null>(null);
   const flyX        = useSharedValue(0);
   const flyY        = useSharedValue(0);
@@ -540,7 +539,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
         }
 
         if (rawInv) {
-          try { setInventory(normalizeInventorySeedIds(JSON.parse(rawInv))); } catch { /* keep current */ }
+          try { setInventory(normalizeGardenInventoryIds(JSON.parse(rawInv))); } catch { /* keep current */ }
         }
 
         if (rawBag) {
@@ -680,12 +679,12 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
         // Load inventory
         const rawInv = await AsyncStorage.getItem(GSK.INVENTORY);
         if (rawInv) {
-          try { setInventory(normalizeInventorySeedIds(JSON.parse(rawInv))); } catch { /* use default */ }
+          try { setInventory(normalizeGardenInventoryIds(JSON.parse(rawInv))); } catch { /* use default */ }
         }
 
         // Load selected fertilizer
         const rawFert = await AsyncStorage.getItem(GSK.SEL_FERTILIZER);
-        if (rawFert) setSelectedFertilizer(rawFert);
+        if (rawFert) setSelectedFertilizer(normalizeGardenFertilizerId(rawFert) ?? "standard_fertilizer");
 
         // Load plot data
         const rawPlot = await AsyncStorage.getItem(GSK.PLOT_DATA);
@@ -829,7 +828,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
   // Actual animation starts in useEffect after React renders the image.
   // ─────────────────────────────────────────────────────────────────────────
   function startFlyAnim(
-    image: ReturnType<typeof require>,
+    image: ImageSourcePropType,
     sx: number, sy: number,
     ex: number, ey: number,
     onDone?: () => void,
@@ -1159,7 +1158,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
       showPlayerBubble('"No fertilizer available."');
       return;
     }
-    const fertConfig = FERTILIZER_CONFIGS.find(f => f.id === selectedFertilizer);
+    const fertConfig = getGardenFertilizerConfig(selectedFertilizer);
     if (!fertConfig) { showPlayerBubble('"No fertilizer available."'); return; }
 
     const fertilizerCost = calcEffectiveStaminaCost(fertConfig.staminaCost, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
@@ -1900,7 +1899,12 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
   const temporaryStaminaReduction = getActiveStaminaBuffReduction(playerStats);
   const waterCost      = calcEffectiveStaminaCost(2, playerStats.endurance, temporaryStaminaReduction);
   const pullWeedsCost  = calcEffectiveStaminaCost(8, playerStats.endurance, temporaryStaminaReduction);
-  const fertilizeCost  = calcEffectiveStaminaCost(3, playerStats.endurance, temporaryStaminaReduction);
+  const selectedFertilizerConfig = getGardenFertilizerConfig(selectedFertilizer);
+  const fertilizeCost = calcEffectiveStaminaCost(
+    selectedFertilizerConfig?.staminaCost ?? 3,
+    playerStats.endurance,
+    temporaryStaminaReduction,
+  );
 
   const plotInteractive =
     gts === "GARDEN_PLOT_INTERACTIVE" ||
@@ -2004,8 +2008,10 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
   const herbbags = inventory.filter(i => i.itemType === "herbbag" && i.quantity > 0);
 
   async function selectFertilizer(id: string) {
-    setSelectedFertilizer(id);
-    await AsyncStorage.setItem(GSK.SEL_FERTILIZER, id);
+    const normalized = normalizeGardenFertilizerId(id);
+    if (!getGardenFertilizerConfig(normalized)) return;
+    setSelectedFertilizer(normalized!);
+    await AsyncStorage.setItem(GSK.SEL_FERTILIZER, normalized!);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -2135,6 +2141,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
           <GardenPlot
             data={plotData}
             interactive={plotInteractive}
+            selectedFertilizerId={selectedFertilizer}
             actionCosts={{ water: waterCost, pullWeeds: pullWeedsCost, fertilize: fertilizeCost }}
             onWater={handleWater}
             onPullWeeds={handlePullWeeds}
@@ -2152,6 +2159,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
             <GardenPlot
               data={SECOND_PLOT_EMPTY}
               interactive={false}
+              selectedFertilizerId={selectedFertilizer}
               onWater={() => {}}
               onPullWeeds={() => {}}
               onFertilize={() => {}}
@@ -2324,6 +2332,12 @@ return (
                     activeOpacity={0.8}
                   >
                     <View style={styles.storeRowLeft}>
+                      <Image
+                        source={item.id === "premium_fertilizer" ? IMG.premium_fertilizer : IMG.standard_fertilizer}
+                        style={styles.storeItemImage}
+                        resizeMode="contain"
+                        resizeMethod="resize"
+                      />
                       {selectedFertilizer === item.id && (
                         <Ionicons name="checkmark-circle" size={16} color="#C4943A" style={{ marginRight: 6 }} />
                       )}
@@ -2773,6 +2787,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(196,148,58,0.10)",
   },
   storeRowLeft: { flexDirection: "row", alignItems: "center" },
+  storeItemImage: { width: 28, height: 28, marginRight: 8 },
   storeItemName: { color: "#F0E8D5", fontSize: 13, fontFamily: "Oldenburg" },
   storeItemQty: { color: "#C4943A", fontSize: 13, fontFamily: "Oldenburg" },
   storeItemQtyZero: { color: "rgba(196,148,58,0.35)" },

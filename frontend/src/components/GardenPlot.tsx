@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   Image,
   StyleSheet,
+  type ImageSourcePropType,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Animated, {
@@ -32,6 +33,10 @@ import {
   loadGuestTutorialIntroStep,
 } from "@/src/game/guest-tutorial";
 import { useGardenRuntime } from "@/src/game/garden-runtime-context";
+import {
+  getGardenFertilizerConfig,
+  normalizeGardenFertilizerId,
+} from "@/src/game/garden-fertilizer-system";
 import SeedSelectionModal, {
   type SeedSelectionOption,
 } from "@/src/components/seed-selection-modal";
@@ -76,6 +81,7 @@ export type GardenPlotProps = {
   onHarvestStored?: (item: BagItem) => void;
   onLockedAction?: () => void;
   actionCosts?: { water: number; pullWeeds: number; fertilize: number };
+  selectedFertilizerId?: string;
 };
 
 type GardenInventoryItem = {
@@ -92,7 +98,7 @@ const SELECTED_FERTILIZER_KEY = "@garden:selected_fertilizer";
 
 // ─── Asset map ────────────────────────────────────────────────────────────────
 
-const CROP_ASSETS: Record<string, ReturnType<typeof require>> = {
+const CROP_ASSETS: Record<string, ImageSourcePropType> = {
   herbbed:       require("../../assets/images/herbbed.png"),
   herbbed_young: require("../../assets/images/herbbed_young.png"),
   seed_herb:     require("../../assets/images/herbseed.png"),
@@ -105,7 +111,8 @@ const CROP_ASSETS: Record<string, ReturnType<typeof require>> = {
 const ACTION_IMG = {
   watering:   require("../../assets/images/watering.png"),
   pullweeds:  require("../../assets/images/pullweeds.png"),
-  fertilizer: require("../../assets/images/fertilizer.png"),
+  standard_fertilizer: require("../../assets/images/fertilizer.png"),
+  premium_fertilizer: require("../../assets/premiumfertilizer.png"),
   harvest:    require("../../assets/images/harvest.png"),
 };
 
@@ -138,7 +145,7 @@ export function getCropStageAsset(
   cropType: string | null,
   progressPercent: number,
   status: GardenPlotStatus,
-): ReturnType<typeof require> | null {
+): ImageSourcePropType | null {
   if (!cropType || status === "empty") return null;
   const cfg = CROP_STAGE_CONFIGS[cropType];
   if (!cfg) return null;
@@ -163,6 +170,7 @@ export default function GardenPlot(props: GardenPlotProps) {
     onHarvestStored,
     onLockedAction,
     actionCosts = { water: 2, pullWeeds: 8, fertilize: 3 },
+    selectedFertilizerId = "standard_fertilizer",
   } = props;
 
   const { refreshGarden, showPlayerThought } = useGardenRuntime();
@@ -297,12 +305,15 @@ export default function GardenPlot(props: GardenPlotProps) {
 
     setSecondBusy(true);
     try {
-      const selected = (await AsyncStorage.getItem(SELECTED_FERTILIZER_KEY)) ?? "standard_fertilizer";
+      const storedSelection = (await AsyncStorage.getItem(SELECTED_FERTILIZER_KEY)) ?? selectedFertilizerId;
+      const selected = normalizeGardenFertilizerId(storedSelection) ?? "standard_fertilizer";
+      const fertilizerConfig = getGardenFertilizerConfig(selected);
+      if (!fertilizerConfig) { showPlayerThought('"No fertilizer available."'); return; }
       const rawInventory = await AsyncStorage.getItem(GARDEN_INVENTORY_KEY);
       const inventory: GardenInventoryItem[] = rawInventory ? JSON.parse(rawInventory) : [];
       const fertIndex = inventory.findIndex((item) => item.id === selected && item.itemType === "fertilizer" && item.quantity > 0);
       if (fertIndex < 0) { showPlayerThought('"No fertilizer available."'); return; }
-      if (!(await onSpendStamina(3))) { showPlayerThought('"Not enough stamina."'); return; }
+      if (!(await onSpendStamina(fertilizerConfig.staminaCost))) { showPlayerThought('"Not enough stamina."'); return; }
 
       const nextInventory = inventory.map((item) => ({ ...item }));
       nextInventory[fertIndex] = {
@@ -313,7 +324,8 @@ export default function GardenPlot(props: GardenPlotProps) {
         ...secondData,
         fertilizedToday: true,
         fertilizerTypeUsedToday: selected,
-        accumulatedFertilizerYieldBonus: secondData.accumulatedFertilizerYieldBonus + 1,
+        accumulatedFertilizerYieldBonus:
+          secondData.accumulatedFertilizerYieldBonus + fertilizerConfig.yieldBonus,
       };
       await AsyncStorage.multiSet([
         [GARDEN_INVENTORY_KEY, JSON.stringify(nextInventory)],
@@ -422,6 +434,9 @@ export default function GardenPlot(props: GardenPlotProps) {
   const lockedAction = isSecondPlot
     ? () => showPlayerThought('"That won\'t achieve anything."')
     : (onLockedAction ?? onWater);
+  const fertilizerImage = normalizeGardenFertilizerId(selectedFertilizerId) === "premium_fertilizer"
+    ? ACTION_IMG.premium_fertilizer
+    : ACTION_IMG.standard_fertilizer;
 
   return (
     <>
@@ -472,7 +487,7 @@ export default function GardenPlot(props: GardenPlotProps) {
         <View style={styles.actionsRow}>
           <ActionBtn img={ACTION_IMG.watering} label="Water" cost={isEmpty ? "" : `-${actionCosts.water}`} done={effectiveData.wateredToday} disabled={waterDisabled} locked={!waterDisabled && waterLocked} onPress={waterLocked ? lockedAction : effectiveWater} />
           <ActionBtn img={ACTION_IMG.pullweeds} label="Weeds" cost={isEmpty ? "" : `-${actionCosts.pullWeeds}`} done={effectiveData.weedsPulledToday && !effectiveData.withered} disabled={weedsDisabled} locked={!weedsDisabled && weedsLocked} onPress={weedsLocked ? lockedAction : effectiveWeeds} />
-          <ActionBtn img={ACTION_IMG.fertilizer} label="Fertilize" cost={isEmpty ? "" : `-${actionCosts.fertilize}`} done={effectiveData.fertilizedToday} disabled={fertilizeDisabled} locked={!fertilizeDisabled && fertilizeLocked} onPress={fertilizeLocked ? lockedAction : effectiveFertilize} />
+          <ActionBtn img={fertilizerImage} label="Fertilize" cost={isEmpty ? "" : `-${actionCosts.fertilize}`} done={effectiveData.fertilizedToday} disabled={fertilizeDisabled} locked={!fertilizeDisabled && fertilizeLocked} onPress={fertilizeLocked ? lockedAction : effectiveFertilize} />
           <ActionBtn img={ACTION_IMG.harvest} label="Harvest" cost="" done={false} disabled={harvestDisabled} locked={harvestNotReady && effectiveInteractive} onPress={effectiveHarvest} isHarvest />
         </View>
       </View>
@@ -494,7 +509,7 @@ export default function GardenPlot(props: GardenPlotProps) {
 }
 
 type ActionBtnProps = {
-  img: ReturnType<typeof require>;
+  img: ImageSourcePropType;
   label: string;
   cost: string;
   done: boolean;
