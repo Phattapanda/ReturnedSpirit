@@ -22,9 +22,19 @@ import {
   ITEM_CATALOG,
   KITCHEN_TABLE_KEY,
   PLAYER_BAG_KEY,
+  isConsumable,
+  removeBagItem,
   type PlayerBagData,
   type BagItem,
 } from "@/src/game/item-system";
+import {
+  PLAYER_STATS_KEY,
+  activateStaminaBuff,
+  hasStaminaBuff,
+  normalizePlayerStats,
+  type PlayerStats,
+  type StaminaBuffItemId,
+} from "@/src/game/player-stats";
 import { useKitchenRuntime } from "@/src/game/kitchen-runtime-context";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 
@@ -45,6 +55,11 @@ const ITEM_IMAGES: Record<string, ReturnType<typeof require>> = {
   cloth:       require("../../assets/images/cloth.png"),
   nails:       require("../../assets/images/nails.png"),
   paint:       require("../../assets/images/paint.png"),
+  potato:      require("../../assets/images/potato.png"),
+  standardfertilizer: require("../../assets/images/fertilizer.png"),
+  energydrink: require("../../assets/images/energy Drink.png"),
+  energypill:  require("../../assets/images/energy Pill.png"),
+  goldenapple: require("../../assets/images/golden apple.png"),
 };
 
 export type BagContext = "kitchen" | "garden" | "room" | "none";
@@ -58,10 +73,14 @@ type Props = {
   onTransferItem: (slotIdx: number, item: BagItem) => void;
   onDiscardItem?: (slotIdx: number, item: BagItem) => void;
   onShowThoughtBubble?: (text: string) => void;
+  onBagUpdated?: (bag: PlayerBagData) => void;
+  onStatsUpdated?: (stats: PlayerStats) => void;
+  onStaminaUpdated?: (stamina: number) => void;
 };
 
 export default function PlayerBag({
   bag, visible, context, dayIdx, onClose, onTransferItem, onDiscardItem, onShowThoughtBubble,
+  onBagUpdated, onStatsUpdated, onStaminaUpdated,
 }: Props) {
   const { width: W } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -71,6 +90,7 @@ export default function PlayerBag({
   const [discardTarget, setDiscardTarget] = useState<{ slotIdx: number; item: BagItem } | null>(null);
   const [selectedCarrotBagSlot, setSelectedCarrotBagSlot] = useState<number | null>(null);
   const [carrotBagOverride, setCarrotBagOverride] = useState<PlayerBagData | null>(null);
+  const [buffResetTarget, setBuffResetTarget] = useState<{ slotIdx: number; item: BagItem } | null>(null);
   const carrotEditsPending = useRef(false);
   const longPressDidFire = useRef(false);
   const transferLocked = useRef(false);
@@ -158,6 +178,11 @@ export default function PlayerBag({
       return;
     }
 
+    if (isConsumable(item)) {
+      await handleConsumablePress(slotIdx, item);
+      return;
+    }
+
     // Carrot Bag transfers to the Kitchen Table like Herb Bag; unpacking happens there.
     setSelectedCarrotBagSlot(null);
     if (context === "garden" || context === "none") {
@@ -168,6 +193,61 @@ export default function PlayerBag({
     transferLocked.current = true;
     onTransferItem(slotIdx, item);
     setTimeout(() => { transferLocked.current = false; }, 400);
+  }
+
+  async function handleConsumablePress(slotIdx: number, item: BagItem) {
+    try {
+      const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
+      const stats = normalizePlayerStats(rawStats ? JSON.parse(rawStats) : null);
+      if ((item.id === "energydrink" || item.id === "energypill") && hasStaminaBuff(stats, item.id)) {
+        setBuffResetTarget({ slotIdx, item });
+        return;
+      }
+      await consumeItem(slotIdx, item, stats);
+    } catch {
+      onShowThoughtBubble?.('"I can\'t use this right now."');
+    }
+  }
+
+  async function consumeItem(slotIdx: number, item: BagItem, loadedStats?: PlayerStats) {
+    const sourceBag = carrotBagOverride ?? bag;
+    const sourceItem = sourceBag.slots[slotIdx];
+    if (!sourceItem || sourceItem.id !== item.id || sourceItem.quantity <= 0) return;
+
+    const rawStats = loadedStats ? null : await AsyncStorage.getItem(PLAYER_STATS_KEY);
+    const stats = loadedStats ?? normalizePlayerStats(rawStats ? JSON.parse(rawStats) : null);
+    const rawStamina = await AsyncStorage.getItem("@game:stamina");
+    const currentStamina = Math.max(0, Number.parseInt(rawStamina ?? "40", 10) || 0);
+    let nextStats = stats;
+    let nextStamina = currentStamina;
+
+    if (item.id === "healthymuffin" && currentStamina >= stats.maximumStamina) {
+      onShowThoughtBubble?.('"My Stamina is already full."');
+      return;
+    }
+
+    if (item.id === "energydrink" || item.id === "energypill") {
+      nextStats = activateStaminaBuff(stats, item.id as StaminaBuffItemId);
+    } else if (item.id === "healthymuffin") {
+      nextStamina = Math.min(stats.maximumStamina, currentStamina + 50);
+    } else if (item.id === "goldenapple") {
+      nextStamina = currentStamina + 50;
+    } else {
+      return;
+    }
+
+    const nextBag = removeBagItem(sourceBag, slotIdx, 1);
+    await AsyncStorage.multiSet([
+      [PLAYER_BAG_KEY, JSON.stringify(nextBag)],
+      [PLAYER_STATS_KEY, JSON.stringify(nextStats)],
+      ["@game:stamina", String(nextStamina)],
+    ]);
+    setCarrotBagOverride(nextBag);
+    setBuffResetTarget(null);
+    onBagUpdated?.(nextBag);
+    onStatsUpdated?.(nextStats);
+    onStaminaUpdated?.(nextStamina);
+    audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
   }
 
   function handleDiscardNo() {
@@ -312,6 +392,33 @@ export default function PlayerBag({
           </TouchableOpacity>
         </Modal>
       )}
+
+      {buffResetTarget && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setBuffResetTarget(null)}>
+          <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setBuffResetTarget(null)}>
+            <TouchableOpacity activeOpacity={1} onPress={() => {}}>
+              <View style={styles.discardPanel}>
+                <TouchableOpacity
+                  style={styles.resetCloseBtn}
+                  onPress={() => setBuffResetTarget(null)}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <Text style={styles.closeText}>✕</Text>
+                </TouchableOpacity>
+                <Text style={styles.discardTitle}>{ITEM_CATALOG[buffResetTarget.item.id]?.name}</Text>
+                <Text style={styles.discardMsg}>The effect is already present. Do you want to reset it?</Text>
+                <TouchableOpacity
+                  style={[styles.discardBtn, styles.confirmResetBtn]}
+                  onPress={() => { void consumeItem(buffResetTarget.slotIdx, buffResetTarget.item); }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.confirmResetText}>Confirm</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Modal>
+      )}
     </Modal>
   );
 }
@@ -347,6 +454,10 @@ function BagSlot({ item, size, selected, onPressIn, onLongPress, onPress }: Slot
           )}
           {item && item.quantity > 1 && <Text style={styles.stackText}>{item.quantity}</Text>}
         </>
+      ) : item ? (
+        <Text style={styles.slotFallbackText} numberOfLines={2}>
+          {ITEM_CATALOG[item.id]?.name ?? item.name}
+        </Text>
       ) : (
         <View style={styles.slotEmpty} />
       )}
@@ -416,6 +527,7 @@ const styles = StyleSheet.create({
   slotSelected: { borderWidth: 2, borderColor: "#7EC87E" },
   slotImg: { width: "78%", height: "78%" },
   slotEmpty: { width: "100%", height: "100%", backgroundColor: "rgba(0,0,0,0)" },
+  slotFallbackText: { color: "#C4943A", fontSize: 9, lineHeight: 11, fontFamily: "Oldenburg", textAlign: "center", paddingHorizontal: 3 },
   contentsCircle: {
     position: "absolute", top: -4, right: -4, backgroundColor: "#1A3A1A", borderRadius: 9,
     minWidth: 18, height: 18, alignItems: "center", justifyContent: "center",
@@ -443,6 +555,9 @@ const styles = StyleSheet.create({
   infoDismiss: { marginTop: 6, paddingHorizontal: 20, paddingVertical: 8, borderRadius: 8, backgroundColor: "rgba(196,148,58,0.18)", borderWidth: 1, borderColor: "rgba(196,148,58,0.4)" },
   infoDismissText: { color: "#C4943A", fontSize: 13, fontFamily: "Oldenburg" },
   discardPanel: { backgroundColor: "#1A0E05", borderRadius: 16, borderWidth: 1.5, borderColor: "rgba(196,148,58,0.55)", padding: 22, maxWidth: 300, alignItems: "center", gap: 10 },
+  resetCloseBtn: { position: "absolute", right: 10, top: 8, padding: 4, zIndex: 2 },
+  confirmResetBtn: { backgroundColor: "rgba(196,148,58,0.22)", borderWidth: 1, borderColor: "rgba(196,148,58,0.55)", marginTop: 4 },
+  confirmResetText: { color: "#F0E8D5", fontSize: 13, fontFamily: "Oldenburg" },
   discardTitle: { color: "#C4943A", fontSize: 15, fontFamily: "Oldenburg", textAlign: "center", marginBottom: 2 },
   discardMsg: { color: "rgba(240,232,213,0.8)", fontSize: 12, fontFamily: "Oldenburg", textAlign: "center", lineHeight: 20 },
   discardBtns: { flexDirection: "row", gap: 12, marginTop: 4 },

@@ -18,6 +18,7 @@ import {
   type BagItem,
 } from "@/src/game/item-system";
 import { commitHarvestBag } from "@/src/game/garden-harvest";
+import { addKarmaPoints } from "@/src/game/progression";
 import {
   createGardenPlotFromSeed,
   createHarvestBagForCrop,
@@ -345,6 +346,8 @@ export default function GardenPlot(props: GardenPlotProps) {
           : '"My bag is full."');
         return;
       }
+
+      await addKarmaPoints(1);
 
       setSecondData({ ...SECOND_GARDEN_PLOT_EMPTY });
       onHarvestStored?.(harvestBag);

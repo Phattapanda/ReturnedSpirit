@@ -22,6 +22,7 @@ type Props = {
   /** Which activity IDs are currently enabled (rest remain tutorial-locked) */
   enabledActivities: ActivityId[];
   endurance: number;
+  temporaryStaminaReduction?: number;
   onActivity: (id: ActivityId) => void;
   /** Show thought bubble for locked activities */
   onLockedTap: (id: ActivityId) => void;
@@ -31,6 +32,7 @@ export default function ActivityBar({
   visible,
   enabledActivities,
   endurance,
+  temporaryStaminaReduction = 0,
   onActivity,
   onLockedTap,
 }: Props) {
@@ -68,7 +70,7 @@ export default function ActivityBar({
         // actions only unlock once the first guest tutorial is fully complete.
         const storyUnlocked = act.id === "well" || guestTutorialComplete;
         const isEnabled = storyUnlocked && enabledActivities.includes(act.id);
-        const cost = calcEffectiveStaminaCost(act.baseStaminaCost, endurance);
+        const cost = calcEffectiveStaminaCost(act.baseStaminaCost, endurance, temporaryStaminaReduction);
 
         const handlePress = () => {
           if (isEnabled) {

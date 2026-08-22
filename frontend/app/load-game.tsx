@@ -21,6 +21,8 @@ type SaveSlot = {
   name: string | null;
   savedAt: string | null;
   playtime: number;
+  playtimeSeconds?: number;
+  runNumber?: number;
   tutorialDone?: boolean;
 };
 
@@ -35,6 +37,15 @@ function formatDate(iso: string | null): string {
   const d = new Date(iso);
   return d.toLocaleDateString("de-DE", { day: "2-digit", month: "long" }) + " · " +
     d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatPlaytime(slot: SaveSlot): string {
+  const totalSeconds = Number.isFinite(Number(slot.playtimeSeconds))
+    ? Math.max(0, Math.floor(Number(slot.playtimeSeconds)))
+    : Math.max(0, Math.floor(Number(slot.playtime) || 0)) * 60;
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
 export default function LoadGame() {
@@ -55,7 +66,7 @@ export default function LoadGame() {
   const handleDelete = async (slotNum: number) => {
     const updated = slots.map((s) =>
       s.slot === slotNum
-        ? { ...s, occupied: false, name: null, savedAt: null, playtime: 0 }
+        ? { ...s, occupied: false, name: null, savedAt: null, playtime: 0, playtimeSeconds: 0, runNumber: 1 }
         : s
     );
     setSlots(updated);
@@ -116,7 +127,7 @@ export default function LoadGame() {
               {slot.occupied ? (
                 <>
                   <Text style={styles.slotSub}>Saved · {formatDate(slot.savedAt)}</Text>
-                  <Text style={styles.slotSub}>Playtime · {slot.playtime}m</Text>
+                  <Text style={styles.slotSub}>Run {slot.runNumber ?? 1} · Playtime {formatPlaytime(slot)}</Text>
                 </>
               ) : (
                 <Text style={styles.slotSub}>Start a new game to fill this slot.</Text>

@@ -87,11 +87,24 @@ export default function StatusModal({
           {/* Growth Points */}
           <View style={styles.gpRow}>
             <View>
+              <Text style={styles.levelLabel}>Level {stats.level}</Text>
               <Text style={styles.gpLabel}>Growth Points</Text>
               <Text style={styles.gpHint}>10 Growth Points needed.</Text>
             </View>
             <Text style={styles.gpValue}>{stats.growthPoints}</Text>
           </View>
+
+          {(stats.activeStaminaBuffs.energyDrinkDays > 0 || stats.activeStaminaBuffs.energyPillDays > 0) && (
+            <View style={styles.effectsBox}>
+              <Text style={styles.effectsTitle}>Active Effects</Text>
+              {stats.activeStaminaBuffs.energyDrinkDays > 0 && (
+                <Text style={styles.effectText}>Energy Drink · {stats.activeStaminaBuffs.energyDrinkDays} days</Text>
+              )}
+              {stats.activeStaminaBuffs.energyPillDays > 0 && (
+                <Text style={styles.effectText}>Energy Pill · {stats.activeStaminaBuffs.energyPillDays} days</Text>
+              )}
+            </View>
+          )}
 
           {/* Stats */}
           <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
@@ -191,8 +204,12 @@ const styles = StyleSheet.create({
     borderColor: "rgba(196,148,58,0.30)",
   },
   gpHint: { color: "rgba(196,148,58,0.45)", fontSize: 10, fontFamily: "Oldenburg", marginTop: 2 },
+  levelLabel: { color: "#F0E8D5", fontSize: 14, fontFamily: "Oldenburg", marginBottom: 4 },
   gpLabel: { color: "#C4943A", fontSize: 13, fontFamily: "Oldenburg" },
   gpValue: { color: "#F0E8D5", fontSize: 16, fontFamily: "Oldenburg" },
+  effectsBox: { backgroundColor: "rgba(87,130,68,0.12)", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10, gap: 3 },
+  effectsTitle: { color: "#9EC781", fontSize: 11, fontFamily: "Oldenburg" },
+  effectText: { color: "rgba(240,232,213,0.75)", fontSize: 10, fontFamily: "Oldenburg" },
 
   scroll: { maxHeight: 320 },
   statRow: {
