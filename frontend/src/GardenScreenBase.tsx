@@ -12,6 +12,7 @@ import {
   Animated as RNAnimated,
   Image,
   useWindowDimensions,
+  type ImageSourcePropType,
 } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -40,6 +41,7 @@ import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import { loadLogbook, type LogEntry, LOGBOOK_KEY } from "@/src/game/logbook";
 import ActivityBar from "@/src/components/ActivityBar";
 import StatusModal from "@/src/components/StatusModal";
+import PortraitBubble from "@/src/components/portrait-bubble";
 import {
   PLAYER_BAG_KEY, DEFAULT_BAG, planAddToBag,
   BAG_INSPECTED_KEY,
@@ -62,7 +64,10 @@ import {
 } from "@/src/game/guest-tutorial";
 import { loadPostGuestTutorialState } from "@/src/game/post-guest-tutorial";
 import { ensureAssetReady } from "@/src/assets/AssetManager";
-import { subscribeGardenRuntimeRefresh } from "@/src/game/garden-runtime-context";
+import {
+  subscribeGardenPlayerThought,
+  subscribeGardenRuntimeRefresh,
+} from "@/src/game/garden-runtime-context";
 import { commitHarvestBag } from "@/src/game/garden-harvest";
 import { addKarmaPoints } from "@/src/game/progression";
 import { setPlaytimePaused } from "@/src/game/playtime-tracker";
@@ -71,6 +76,10 @@ import {
   createHarvestBagForCrop,
   normalizeGardenSeedId,
 } from "@/src/game/garden-crop-system";
+import {
+  getGardenFertilizerConfig,
+  normalizeGardenFertilizerId,
+} from "@/src/game/garden-fertilizer-system";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
   PLAYER_AVATAR_KEY,
@@ -156,19 +165,6 @@ export type InventoryItem = {
   containedQuantity?: number;
 };
 
-// ─── Fertilizer config ────────────────────────────────────────────────────────
-
-type FertilizerConfig = {
-  id: string;
-  name: string;
-  yieldBonus: number;
-  staminaCost: number;
-};
-
-const FERTILIZER_CONFIGS: FertilizerConfig[] = [
-  { id: "standard_fertilizer", name: "Standard Fertilizer", yieldBonus: 1, staminaCost: 3 },
-];
-
 // ─── Location data ────────────────────────────────────────────────────────────
 
 const DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
@@ -203,6 +199,8 @@ const IMG = {
   loc_mail:      require("../assets/images/gotomail.png"),
   loc_explore:   require("../assets/images/goexplore.png"),
   loc_storage:   require("../assets/images/gotostorage.png"),
+  standard_fertilizer: require("../assets/images/fertilizer.png"),
+  premium_fertilizer: require("../assets/premiumfertilizer.png"),
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -221,11 +219,16 @@ const DEFAULT_INVENTORY: InventoryItem[] = [
   { id: "standard_fertilizer", itemType: "fertilizer",  name: "Standard Fertilizer",  quantity: 5 },
 ];
 
-function normalizeInventorySeedIds(items: InventoryItem[]): InventoryItem[] {
-  return items.map((item) => item.itemType === "seed"
-    ? { ...item, id: normalizeGardenSeedId(item.id) ?? item.id }
-    : item,
-  );
+function normalizeGardenInventoryIds(items: InventoryItem[]): InventoryItem[] {
+  return items.map((item) => {
+    if (item.itemType === "seed") {
+      return { ...item, id: normalizeGardenSeedId(item.id) ?? item.id };
+    }
+    if (item.itemType === "fertilizer") {
+      return { ...item, id: normalizeGardenFertilizerId(item.id) ?? item.id };
+    }
+    return item;
+  });
 }
 
 const SECOND_PLOT_EMPTY: GardenPlotData = {
@@ -400,7 +403,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
 
   // Single flying item overlay — always rendered (opacity driven by animation)
   type FlyTarget = { ex: number; ey: number; onDone?: () => void };
-  const [flyImg, setFlyImg] = useState<ReturnType<typeof require> | null>(null);
+  const [flyImg, setFlyImg] = useState<ImageSourcePropType | null>(null);
   const pendingFlyRef = useRef<FlyTarget | null>(null);
   const flyX        = useSharedValue(0);
   const flyY        = useSharedValue(0);
@@ -540,7 +543,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
         }
 
         if (rawInv) {
-          try { setInventory(normalizeInventorySeedIds(JSON.parse(rawInv))); } catch { /* keep current */ }
+          try { setInventory(normalizeGardenInventoryIds(JSON.parse(rawInv))); } catch { /* keep current */ }
         }
 
         if (rawBag) {
@@ -680,12 +683,12 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
         // Load inventory
         const rawInv = await AsyncStorage.getItem(GSK.INVENTORY);
         if (rawInv) {
-          try { setInventory(normalizeInventorySeedIds(JSON.parse(rawInv))); } catch { /* use default */ }
+          try { setInventory(normalizeGardenInventoryIds(JSON.parse(rawInv))); } catch { /* use default */ }
         }
 
         // Load selected fertilizer
         const rawFert = await AsyncStorage.getItem(GSK.SEL_FERTILIZER);
-        if (rawFert) setSelectedFertilizer(rawFert);
+        if (rawFert) setSelectedFertilizer(normalizeGardenFertilizerId(rawFert) ?? "standard_fertilizer");
 
         // Load plot data
         const rawPlot = await AsyncStorage.getItem(GSK.PLOT_DATA);
@@ -829,7 +832,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
   // Actual animation starts in useEffect after React renders the image.
   // ─────────────────────────────────────────────────────────────────────────
   function startFlyAnim(
-    image: ReturnType<typeof require>,
+    image: ImageSourcePropType,
     sx: number, sy: number,
     ex: number, ey: number,
     onDone?: () => void,
@@ -962,6 +965,16 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
       playerBubbleTimer.current = null;
     }, 2500);
   }
+
+  useEffect(() => subscribeGardenPlayerThought((text) => {
+    if (playerBubbleTimer.current) clearTimeout(playerBubbleTimer.current);
+    const thought = text.trim().replace(/^["“”]+|["“”]+$/g, "");
+    setPlayerBubble(thought);
+    playerBubbleTimer.current = setTimeout(() => {
+      setPlayerBubble(null);
+      playerBubbleTimer.current = null;
+    }, 2600);
+  }), []);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Tutorial: intro bubble sequence
@@ -1159,7 +1172,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
       showPlayerBubble('"No fertilizer available."');
       return;
     }
-    const fertConfig = FERTILIZER_CONFIGS.find(f => f.id === selectedFertilizer);
+    const fertConfig = getGardenFertilizerConfig(selectedFertilizer);
     if (!fertConfig) { showPlayerBubble('"No fertilizer available."'); return; }
 
     const fertilizerCost = calcEffectiveStaminaCost(fertConfig.staminaCost, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
@@ -1900,7 +1913,12 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
   const temporaryStaminaReduction = getActiveStaminaBuffReduction(playerStats);
   const waterCost      = calcEffectiveStaminaCost(2, playerStats.endurance, temporaryStaminaReduction);
   const pullWeedsCost  = calcEffectiveStaminaCost(8, playerStats.endurance, temporaryStaminaReduction);
-  const fertilizeCost  = calcEffectiveStaminaCost(3, playerStats.endurance, temporaryStaminaReduction);
+  const selectedFertilizerConfig = getGardenFertilizerConfig(selectedFertilizer);
+  const fertilizeCost = calcEffectiveStaminaCost(
+    selectedFertilizerConfig?.staminaCost ?? 3,
+    playerStats.endurance,
+    temporaryStaminaReduction,
+  );
 
   const plotInteractive =
     gts === "GARDEN_PLOT_INTERACTIVE" ||
@@ -1936,41 +1954,20 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
     if (!bubble) return null;
     const rupertL = portraitLayouts.current.rupert;
     const bubbleTopPos = rupertL
-      ? rupertL.y + rupertL.h + 8
-      : (headerH > 0 ? headerH + 128 : insets.top + 190);
+      ? rupertL.y + rupertL.h + 12
+      : (headerH > 0 ? headerH + 140 : insets.top + 202);
     const arrowCenterX = rupertL ? rupertL.x + rupertL.w / 2 : W / 2;
-    const bubbleWidthTarget = Math.min(
-      W - 32,
-      Math.max(180, Math.min(W * 0.78, Math.max(bubble.text.length * 7.2, bubble.speaker.length * 9) + 48)),
-    );
-    const bubbleLeftCalc = Math.max(16, Math.min(arrowCenterX - bubbleWidthTarget / 2, W - bubbleWidthTarget - 16));
-    const bubbleRightCalc = Math.max(16, W - bubbleLeftCalc - bubbleWidthTarget);
-    const arrowOffset = Math.max(12, Math.min(
-      arrowCenterX - bubbleLeftCalc - 10,
-      W - bubbleLeftCalc - bubbleRightCalc - 32,
-    ));
 
-    const bubbleInner = (
-      <TouchableOpacity
-        style={{ position: "absolute", top: bubbleTopPos, left: bubbleLeftCalc, right: bubbleRightCalc }}
-        onPress={dismissBubble}
-        activeOpacity={0.88}
-      >
-        <View style={{ position: "relative" }}>
-          <View style={[styles.bubbleArrowBorder, { left: arrowOffset }]} />
-          <View style={[styles.bubbleArrowFill, { left: arrowOffset + 2 }]} />
-          <View style={styles.bubbleCardInner}>
-            <Text style={styles.bubbleSpeaker}>{bubble.speaker}</Text>
-            <Text style={styles.bubbleText}>{bubble.text}</Text>
-          </View>
-        </View>
-      </TouchableOpacity>
-    );
-
-    // All policies: global dismiss via full-screen Pressable
     return (
       <Pressable style={[StyleSheet.absoluteFill, { zIndex: 401 }]} onPress={dismissBubble} key="bubble-global">
-        {bubbleInner}
+        <PortraitBubble
+          anchorX={arrowCenterX}
+          screenWidth={W}
+          speaker={bubble.speaker}
+          text={bubble.text}
+          top={bubbleTopPos}
+          variant="speech"
+        />
       </Pressable>
     );
   }
@@ -1982,16 +1979,12 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
     if (!playerBubble) return null;
     const playerL = portraitLayouts.current.player;
     const topPos = playerL
-      ? playerL.y + playerL.h + 8
-      : (headerH > 0 ? headerH + 128 : insets.top + 190);
+      ? playerL.y + playerL.h + 12
+      : (headerH > 0 ? headerH + 140 : insets.top + 202);
+    const anchorX = playerL ? playerL.x + playerL.w / 2 : W * 0.18;
     return (
       <View style={[StyleSheet.absoluteFill, { zIndex: 410 }]} pointerEvents="none" key="player-bubble">
-        <View style={{ position: "absolute", top: topPos, left: 10, right: Math.max(10, W - Math.min(W * 0.75, 420) - 10) }}>
-          <View style={styles.playerBubbleArrow} />
-          <View style={styles.playerBubbleCard}>
-            <Text style={styles.playerBubbleText}>{playerBubble}</Text>
-          </View>
-        </View>
+        <PortraitBubble anchorX={anchorX} screenWidth={W} text={playerBubble} top={topPos} />
       </View>
     );
   }
@@ -2004,8 +1997,10 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
   const herbbags = inventory.filter(i => i.itemType === "herbbag" && i.quantity > 0);
 
   async function selectFertilizer(id: string) {
-    setSelectedFertilizer(id);
-    await AsyncStorage.setItem(GSK.SEL_FERTILIZER, id);
+    const normalized = normalizeGardenFertilizerId(id);
+    if (!getGardenFertilizerConfig(normalized)) return;
+    setSelectedFertilizer(normalized!);
+    await AsyncStorage.setItem(GSK.SEL_FERTILIZER, normalized!);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -2135,6 +2130,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
           <GardenPlot
             data={plotData}
             interactive={plotInteractive}
+            selectedFertilizerId={selectedFertilizer}
             actionCosts={{ water: waterCost, pullWeeds: pullWeedsCost, fertilize: fertilizeCost }}
             onWater={handleWater}
             onPullWeeds={handlePullWeeds}
@@ -2152,6 +2148,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
             <GardenPlot
               data={SECOND_PLOT_EMPTY}
               interactive={false}
+              selectedFertilizerId={selectedFertilizer}
               onWater={() => {}}
               onPullWeeds={() => {}}
               onFertilize={() => {}}
@@ -2324,6 +2321,12 @@ return (
                     activeOpacity={0.8}
                   >
                     <View style={styles.storeRowLeft}>
+                      <Image
+                        source={item.id === "premium_fertilizer" ? IMG.premium_fertilizer : IMG.standard_fertilizer}
+                        style={styles.storeItemImage}
+                        resizeMode="contain"
+                        resizeMethod="resize"
+                      />
                       {selectedFertilizer === item.id && (
                         <Ionicons name="checkmark-circle" size={16} color="#C4943A" style={{ marginRight: 6 }} />
                       )}
@@ -2685,50 +2688,6 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
 
-  // Bubbles (Rupert speech)
-  bubbleArrowBorder: {
-    position: "absolute", top: -11,
-    width: 0, height: 0, borderStyle: "solid",
-    borderLeftWidth: 11, borderRightWidth: 11, borderBottomWidth: 11, borderTopWidth: 0,
-    borderLeftColor: "transparent", borderRightColor: "transparent",
-    borderBottomColor: "rgba(196,148,58,0.55)",
-  },
-  bubbleArrowFill: {
-    position: "absolute", top: -7,
-    width: 0, height: 0, borderStyle: "solid",
-    borderLeftWidth: 9, borderRightWidth: 9, borderBottomWidth: 9, borderTopWidth: 0,
-    borderLeftColor: "transparent", borderRightColor: "transparent",
-    borderBottomColor: "rgba(250, 242, 218, 0.97)",
-  },
-  bubbleCardInner: {
-    backgroundColor: "rgba(250, 242, 218, 0.97)", borderRadius: 14,
-    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 14,
-    borderWidth: 1.5, borderColor: "rgba(196,148,58,0.55)",
-    shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.28, shadowRadius: 8,
-    elevation: 12, gap: 6,
-  },
-  bubbleSpeaker: { color: "#7A4800", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 1 },
-  bubbleText: { color: "#2A1000", fontSize: 15, lineHeight: 22, fontFamily: "RobotoRegular" },
-
-  // Player thought bubble
-  playerBubbleCard: {
-    backgroundColor: "rgba(240,230,200,0.95)", borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 10,
-    borderWidth: 1.5, borderColor: "rgba(196,148,58,0.50)",
-    shadowColor: "#000", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.4, shadowRadius: 7,
-    elevation: 14,
-    alignSelf: "flex-start" as const,
-  },
-  playerBubbleText: { color: "#2A1000", fontSize: 13, fontFamily: "RobotoItalic", lineHeight: 20 },
-  playerBubbleArrow: {
-    width: 0, height: 0, borderStyle: "solid",
-    borderLeftWidth: 8, borderRightWidth: 8,
-    borderBottomWidth: 9, borderTopWidth: 0,
-    borderLeftColor: "transparent", borderRightColor: "transparent",
-    borderBottomColor: "rgba(240,230,200,0.95)",
-    alignSelf: "flex-start", marginLeft: 20,
-  },
-
   // Tear-out modal
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.76)", alignItems: "center", justifyContent: "center" },
   tearOutPanel: {
@@ -2773,6 +2732,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(196,148,58,0.10)",
   },
   storeRowLeft: { flexDirection: "row", alignItems: "center" },
+  storeItemImage: { width: 28, height: 28, marginRight: 8 },
   storeItemName: { color: "#F0E8D5", fontSize: 13, fontFamily: "Oldenburg" },
   storeItemQty: { color: "#C4943A", fontSize: 13, fontFamily: "Oldenburg" },
   storeItemQtyZero: { color: "rgba(196,148,58,0.35)" },

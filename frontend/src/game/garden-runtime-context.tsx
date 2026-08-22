@@ -1,4 +1,4 @@
-import React, { createContext, useContext } from "react";
+import { createContext, useContext } from "react";
 
 export type GardenRuntimeContextValue = {
   refreshGarden: () => void;
@@ -6,6 +6,7 @@ export type GardenRuntimeContextValue = {
 };
 
 const runtimeRefreshListeners = new Set<() => void>();
+const playerThoughtListeners = new Set<(text: string) => void>();
 
 /**
  * Notify the mounted Garden screen that persistent values changed outside its
@@ -21,9 +22,18 @@ export function subscribeGardenRuntimeRefresh(listener: () => void): () => void 
   return () => runtimeRefreshListeners.delete(listener);
 }
 
+export function notifyGardenPlayerThought(text: string): void {
+  playerThoughtListeners.forEach((listener) => listener(text));
+}
+
+export function subscribeGardenPlayerThought(listener: (text: string) => void): () => void {
+  playerThoughtListeners.add(listener);
+  return () => playerThoughtListeners.delete(listener);
+}
+
 const DEFAULT_VALUE: GardenRuntimeContextValue = {
   refreshGarden: notifyGardenRuntimeRefresh,
-  showPlayerThought: () => {},
+  showPlayerThought: notifyGardenPlayerThought,
 };
 
 export const GardenRuntimeContext = createContext<GardenRuntimeContextValue>(DEFAULT_VALUE);

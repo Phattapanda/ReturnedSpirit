@@ -37,7 +37,6 @@ export type AssetGroup =
 export type AssetEntry = {
   key: string;
   // Static require() return value — typed as any by Metro bundler conventions
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   module: any;
   group: AssetGroup;
   /** If true: failure shows retry/main-menu error screen */
@@ -144,9 +143,16 @@ export const ASSET_REGISTRY: AssetEntry[] = [
   // ── Other item images ───────────────────────────────────────────────────────
   { key: 'herbs',         module: require('../../assets/images/herbs.png'),         group: 'items' },
   { key: 'seed_herb',     module: require('../../assets/images/herbseed.png'),      group: 'items' },
+  { key: 'seed_potato',   module: require('../../assets/images/seed_potato.png'),  group: 'items' },
+  { key: 'seed_carrot',   module: require('../../assets/images/seed_carrot.png'),  group: 'items' },
+  { key: 'seed_onion',    module: require('../../assets/images/seed_onion.png'),   group: 'items' },
+  { key: 'potato',        module: require('../../assets/images/potato.png'),       group: 'items' },
+  { key: 'carrot',        module: require('../../assets/images/carrot.png'),       group: 'items' },
   { key: 'herbbed',       module: require('../../assets/images/herbbed.png'),       group: 'items' },
   { key: 'herbbed_young', module: require('../../assets/images/herbbed_young.png'), group: 'items' },
   { key: 'fertilizer',    module: require('../../assets/images/fertilizer.png'),    group: 'items' },
+  { key: 'premium_fertilizer', module: require('../../assets/premiumfertilizer.png'), group: 'items' },
+  { key: 'healthymuffin', module: require('../../assets/images/healthy muffin.png'), group: 'items' },
   { key: 'energydrink',   module: require('../../assets/images/energy Drink.png'),  group: 'items' },
   { key: 'energypill',    module: require('../../assets/images/energy Pill.png'),   group: 'items' },
   { key: 'goldenapple',   module: require('../../assets/images/golden apple.png'),  group: 'items' },

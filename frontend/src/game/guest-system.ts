@@ -51,6 +51,7 @@ export type GuestProfile = {
 export type GuestVisitTrade = {
   daySerial: number;
   offer: GuestExchangeOffer;
+  claimed: boolean;
 };
 
 export type PendingFavorGift = {
@@ -99,6 +100,19 @@ function exchangeOffer(itemId: string, name: string, quantity: number, weight: n
   return { itemId, name, quantity, weight };
 }
 
+const LEGACY_EXCHANGE_ITEM_IDS: Record<string, string> = {
+  carrotseed: "seed_carrot",
+  herbseed: "seed_herb",
+  onionseed: "seed_onion",
+  potatoseed: "seed_potato",
+  standardfertilizer: "standard_fertilizer",
+  premiumfertilizer: "premium_fertilizer",
+};
+
+export function normalizeGuestExchangeItemId(itemId: string): string {
+  return LEGACY_EXCHANGE_ITEM_IDS[itemId] ?? itemId;
+}
+
 const OLD_FARMER_VISIT_DAYS = [1, 2, 4, 5, 6] as const;
 const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6] as const;
 
@@ -113,8 +127,8 @@ export const OLD_FARMER_PROFILE: GuestProfile = {
       exchangePool: [
         exchangeOffer("potato", "Potato", 1, 25),
         exchangeOffer("carrot", "Carrot", 1, 25),
-        exchangeOffer("standardfertilizer", "Standard Fertilizer", 2, 25),
-        exchangeOffer("carrotseed", "Carrot Seed", 1, 25),
+        exchangeOffer("standard_fertilizer", "Standard Fertilizer", 2, 25),
+        exchangeOffer("seed_carrot", "Carrot Seed", 1, 25),
       ],
     },
     {
@@ -123,39 +137,39 @@ export const OLD_FARMER_PROFILE: GuestProfile = {
         exchangeOffer("potato", "Potato", 2, 12.5),
         exchangeOffer("carrot", "Carrot", 2, 12.5),
         exchangeOffer("onion", "Onion", 2, 12.5),
-        exchangeOffer("standardfertilizer", "Standard Fertilizer", 3, 25),
-        exchangeOffer("potatoseed", "Potato Seed", 1, 12.5),
-        exchangeOffer("carrotseed", "Carrot Seed", 1, 12.5),
-        exchangeOffer("onionseed", "Onion Seed", 1, 12.5),
+        exchangeOffer("standard_fertilizer", "Standard Fertilizer", 3, 25),
+        exchangeOffer("seed_potato", "Potato Seed", 1, 12.5),
+        exchangeOffer("seed_carrot", "Carrot Seed", 1, 12.5),
+        exchangeOffer("seed_onion", "Onion Seed", 1, 12.5),
       ],
     },
     {
       minFavor: 50, maxFavor: 74, visitDays: OLD_FARMER_VISIT_DAYS,
       exchangePool: [
-        exchangeOffer("premiumfertilizer", "Premium Fertilizer", 2, 25),
-        exchangeOffer("potatoseed", "Potato Seed", 1, 18.75),
-        exchangeOffer("carrotseed", "Carrot Seed", 1, 18.75),
-        exchangeOffer("onionseed", "Onion Seed", 1, 18.75),
+        exchangeOffer("premium_fertilizer", "Premium Fertilizer", 2, 25),
+        exchangeOffer("seed_potato", "Potato Seed", 1, 18.75),
+        exchangeOffer("seed_carrot", "Carrot Seed", 1, 18.75),
+        exchangeOffer("seed_onion", "Onion Seed", 1, 18.75),
         exchangeOffer("healthymuffin", "Healthy Muffin", 1, 18.75),
       ],
     },
     {
       minFavor: 75, maxFavor: 99, visitDays: EVERY_DAY,
       exchangePool: [
-        exchangeOffer("premiumfertilizer", "Premium Fertilizer", 3, 25),
-        exchangeOffer("potatoseed", "Potato Seed", 2, 18.75),
-        exchangeOffer("carrotseed", "Carrot Seed", 2, 18.75),
-        exchangeOffer("onionseed", "Onion Seed", 2, 18.75),
+        exchangeOffer("premium_fertilizer", "Premium Fertilizer", 3, 25),
+        exchangeOffer("seed_potato", "Potato Seed", 2, 18.75),
+        exchangeOffer("seed_carrot", "Carrot Seed", 2, 18.75),
+        exchangeOffer("seed_onion", "Onion Seed", 2, 18.75),
         exchangeOffer("healthymuffin", "Healthy Muffin", 1, 18.75),
       ],
     },
     {
       minFavor: 100, maxFavor: 100, visitDays: EVERY_DAY,
       exchangePool: [
-        exchangeOffer("premiumfertilizer", "Premium Fertilizer", 3, 25),
-        exchangeOffer("potatoseed", "Potato Seed", 2, 17.5),
-        exchangeOffer("carrotseed", "Carrot Seed", 2, 17.5),
-        exchangeOffer("onionseed", "Onion Seed", 2, 17.5),
+        exchangeOffer("premium_fertilizer", "Premium Fertilizer", 3, 25),
+        exchangeOffer("seed_potato", "Potato Seed", 2, 17.5),
+        exchangeOffer("seed_carrot", "Carrot Seed", 2, 17.5),
+        exchangeOffer("seed_onion", "Onion Seed", 2, 17.5),
         exchangeOffer("healthymuffin", "Healthy Muffin", 1, 17.5),
         exchangeOffer("goldenapple", "Golden Apple", 1, 5),
       ],
@@ -238,8 +252,9 @@ function normalizeGuestState(raw: unknown): GuestState {
         if (typeof offer.itemId === "string" && Number(offer.quantity) > 0) {
           visitTrades[guestId] = {
             daySerial,
+            claimed: Boolean(t.claimed),
             offer: {
-              itemId: offer.itemId,
+              itemId: normalizeGuestExchangeItemId(offer.itemId),
               name: String(offer.name || offer.itemId),
               quantity: Math.max(1, Math.floor(Number(offer.quantity) || 1)),
               weight: Math.max(0, Number(offer.weight) || 0),
@@ -442,6 +457,7 @@ export async function prepareGuestsForDay(dayIndex: number): Promise<GuestVisitV
           nextTrades[profile.id] = {
             daySerial: state.calendarDaySerial,
             offer,
+            claimed: false,
           };
           changed = true;
         }
@@ -489,7 +505,9 @@ export async function prepareGuestsForDay(dayIndex: number): Promise<GuestVisitV
       profile,
       favor,
       exchangeOffer: getGuestExchangePool(profile, favor).length > 0
-        ? state.visitTrades[profile.id]?.offer ?? null
+        ? state.visitTrades[profile.id]?.claimed
+          ? null
+          : state.visitTrades[profile.id]?.offer ?? null
         : null,
       transportDiscountPercent: getGuestTransportDiscountPercent(profile, favor),
       selected: state.activeGuestId === profile.id,

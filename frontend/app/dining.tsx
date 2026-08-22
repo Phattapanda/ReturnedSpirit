@@ -9,6 +9,7 @@ import {
   Image,
   StyleSheet,
   useWindowDimensions,
+  type ImageSourcePropType,
 } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -18,12 +19,18 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import SceneBackground from "@/src/components/SceneBackground";
 import CurrencyHud from "@/src/components/CurrencyHud";
-import DiningGuestArea, { type GuestServiceAction } from "@/src/components/GuestCard";
+import DiningGuestArea, {
+  getGuestExchangeImage,
+  type GuestServiceAction,
+  type GuestServiceSourcePoint,
+} from "@/src/components/GuestCard";
 import GuestTutorialDialog, { type GuestTutorialDialogLine } from "@/src/components/GuestTutorialDialog";
 import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import StatusModal from "@/src/components/StatusModal";
+import PortraitBubble from "@/src/components/portrait-bubble";
 import {
   DEFAULT_DINING_MEAL_STATE,
+  DINING_MEAL_STATE_KEY,
   DINING_MEAL_SLOT_COUNT,
   loadDiningMealState,
   planBagItemToMealSlot,
@@ -42,6 +49,7 @@ import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type Play
 import { DEFAULT_BAG, PLAYER_BAG_KEY, type PlayerBagData } from "@/src/game/item-system";
 import { addCurrencyCopper } from "@/src/game/currency-system";
 import { setActiveGuest, type GuestVisitView } from "@/src/game/guest-system";
+import { completeGuestExchange } from "@/src/game/guest-exchange";
 import {
   grantFarmerCarrotSeedOnce,
   loadPostGuestTutorialState,
@@ -76,6 +84,7 @@ const IMG = {
   old_farmer:    require("../assets/images/old_farmer.png"),
   coin_copper:   require("../assets/images/coin_copper.png"),
   seed_carrot:   require("../assets/images/carrotseed.png"),
+  bag1:          require("../assets/images/bag1.png"),
   loc_kitchen:   require("../assets/images/gotokitchen.png"),
   loc_garden:    require("../assets/images/gotogarden.png"),
   loc_dining:    require("../assets/images/gotodining.png"),
@@ -84,7 +93,7 @@ const IMG = {
   loc_explore:   require("../assets/images/goexplore.png"),
 };
 
-const MEAL_IMAGES: Record<string, ReturnType<typeof require>> = {
+const MEAL_IMAGES: Record<string, ImageSourcePropType> = {
   herbsoup: IMG.herbsoup,
 };
 
@@ -148,7 +157,7 @@ function rupertServingExplanation(playerName: string): TutorialLine[] {
 export default function DiningScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { width: W } = useWindowDimensions();
+  const { width: W, height: H } = useWindowDimensions();
   const audioManager = useAudioManager();
   const { crossfadeTo } = audioManager;
 
@@ -174,11 +183,15 @@ export default function DiningScreen() {
   const [serviceBusy, setServiceBusy] = useState(false);
   const [departingGuestId, setDepartingGuestId] = useState<"old_farmer" | null>(null);
 
-  const [transferImage, setTransferImage] = useState<ReturnType<typeof require> | null>(null);
+  const [transferImage, setTransferImage] = useState<ImageSourcePropType | null>(null);
   const transferX = useRef(new RNAnimated.Value(0)).current;
   const transferY = useRef(new RNAnimated.Value(0)).current;
   const transferScale = useRef(new RNAnimated.Value(1)).current;
   const transferOpacity = useRef(new RNAnimated.Value(0)).current;
+  const bagButtonRef = useRef<View>(null);
+  const gardenNavButtonRef = useRef<View>(null);
+  const [portraitRowWidth, setPortraitRowWidth] = useState(W);
+  const [playerPortraitFrame, setPlayerPortraitFrame] = useState({ x: 0, y: 0, width: 96, height: 96 });
 
   const [statusOpen, setStatusOpen] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -305,7 +318,7 @@ export default function DiningScreen() {
   }, [audioManager]);
 
   function runTransfer(
-    image: ReturnType<typeof require>,
+    image: ImageSourcePropType,
     fromX: number,
     fromY: number,
     toX: number,
@@ -325,6 +338,22 @@ export default function DiningScreen() {
       transferOpacity.setValue(0);
       setTransferImage(null);
       onDone();
+    });
+  }
+
+  function measureViewCenter(
+    ref: React.RefObject<View | null>,
+    fallback: GuestServiceSourcePoint,
+  ): Promise<GuestServiceSourcePoint> {
+    return new Promise((resolve) => {
+      const view = ref.current;
+      if (!view) {
+        resolve(fallback);
+        return;
+      }
+      view.measureInWindow((x, y, width, height) => {
+        resolve(width > 0 && height > 0 ? { x: x + width / 2, y: y + height / 2 } : fallback);
+      });
     });
   }
 
@@ -385,7 +414,7 @@ export default function DiningScreen() {
     }
   }
 
-  function tutorialPortraitSource(portrait: TutorialPortrait): ReturnType<typeof require> {
+  function tutorialPortraitSource(portrait: TutorialPortrait): ImageSourcePropType {
     if (portrait === "player") return getPlayerAvatarForStamina(playerAvatarId, staminaCurrent);
     if (portrait === "old_farmer") return IMG.old_farmer;
     if (portrait === "rupert_sad") return IMG.rupertsad;
@@ -451,7 +480,11 @@ export default function DiningScreen() {
     }
   }
 
-  async function handleGuestService(guest: GuestVisitView, action: GuestServiceAction) {
+  async function handleGuestService(
+    guest: GuestVisitView,
+    action: GuestServiceAction,
+    source?: GuestServiceSourcePoint,
+  ): Promise<boolean | void> {
     if (serviceBusy || guest.profile.id !== "old_farmer") return;
 
     if (tutorialStep === "service_sell" && action === "sell") {
@@ -519,6 +552,70 @@ export default function DiningScreen() {
       setTutorialStep("service_reaction");
       setTutorialLines(serviceReaction());
       setTutorialLineIndex(0);
+      return;
+    }
+
+    if (guestTutorialHasReached(tutorialStep, "service_complete") && action === "exchange") {
+      const offer = guest.exchangeOffer;
+      if (!offer) {
+        showPlayerThought("That offer is no longer available.");
+        return false;
+      }
+
+      const activeIndex = mealState.activeSlotIndex;
+      const activeMeal = activeIndex !== null ? mealState.slots[activeIndex] : null;
+      if (activeIndex === null || !activeMeal) {
+        showPlayerThought("I need to select a meal first.");
+        return false;
+      }
+
+      setServiceBusy(true);
+      const nextSlots = [...mealState.slots];
+      nextSlots[activeIndex] = null;
+      const nextMealState: DiningMealState = {
+        ...mealState,
+        slots: nextSlots,
+        activeSlotIndex: null,
+      };
+      const result = await completeGuestExchange(guest.profile.id, offer, [
+        [DINING_MEAL_STATE_KEY, JSON.stringify(nextMealState)],
+      ]);
+
+      if (!result.ok) {
+        setServiceBusy(false);
+        showPlayerThought(
+          result.reason === "bag_locked"
+            ? "I need my bag first."
+            : result.reason === "bag_full"
+              ? "My bag is full."
+              : result.reason === "offer_unavailable"
+                ? "That offer is no longer available."
+                : "I can't complete this exchange right now.",
+        );
+        return false;
+      }
+
+      setMealState(nextMealState);
+      if (result.playerBag) setPlayerBag(result.playerBag);
+
+      const start = source ?? { x: W * 0.5, y: headerH + 360 };
+      const target = result.destination === "garden_storage"
+        ? await measureViewCenter(gardenNavButtonRef, { x: W * 0.25, y: H - insets.bottom - 42 })
+        : await measureViewCenter(bagButtonRef, { x: W - 54, y: insets.top + 150 });
+      const image = getGuestExchangeImage(result.item.id) ?? IMG.bag1;
+
+      runTransfer(
+        image,
+        start.x - 18,
+        start.y - 18,
+        target.x - 18,
+        target.y - 18,
+        () => {
+          audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
+          setServiceBusy(false);
+        },
+      );
+      return true;
     }
   }
 
@@ -632,10 +729,14 @@ export default function DiningScreen() {
         bounces={false}
         scrollEnabled={!dialogLine}
       >
-        <View style={styles.portraitRow}>
+        <View
+          style={styles.portraitRow}
+          onLayout={(event) => setPortraitRowWidth(event.nativeEvent.layout.width)}
+        >
           <TouchableOpacity
             style={styles.circleWrap}
             onPress={() => setStatusOpen(true)}
+            onLayout={(event) => setPlayerPortraitFrame(event.nativeEvent.layout)}
             activeOpacity={0.8}
           >
             <Image
@@ -652,21 +753,20 @@ export default function DiningScreen() {
             )}
           </View>
 
-          <BagIconButton
-            unlocked={playerBag.unlocked}
-            onPress={() => setBagOpen(true)}
-          />
+          <View ref={bagButtonRef} collapsable={false}>
+            <BagIconButton
+              unlocked={playerBag.unlocked}
+              onPress={() => setBagOpen(true)}
+            />
+          </View>
 
           {playerThought && (
-            <View
-              style={[styles.playerThoughtWrap, { width: Math.min(W * 0.72, Math.max(150, playerThought.length * 6.6 + 32)) }]}
-              pointerEvents="none"
-            >
-              <View style={styles.playerThoughtArrow} />
-              <View style={styles.playerThoughtCard}>
-                <Text style={styles.playerThoughtText}>{playerThought}</Text>
-              </View>
-            </View>
+            <PortraitBubble
+              anchorX={playerPortraitFrame.x + playerPortraitFrame.width / 2}
+              screenWidth={portraitRowWidth}
+              text={playerThought}
+              top={playerPortraitFrame.y + playerPortraitFrame.height + 12}
+            />
           )}
         </View>
 
@@ -708,7 +808,8 @@ export default function DiningScreen() {
                 tutorialStep === "service_sell" ? "sell" :
                 tutorialStep === "service_exchange" ? "exchange" :
                 tutorialStep === "service_water" ? "water" :
-                tutorialStep === "service_talk" ? "talk" : null
+                tutorialStep === "service_talk" ? "talk" :
+                guestTutorialHasReached(tutorialStep, "service_complete") ? "exchange" : null
               }
               sellPriceCopper={OLD_FARMER_SELL_PRICE_COPPER}
               departingGuestId={departingGuestId}
@@ -759,6 +860,7 @@ const locationAction = guestDormitoryBlocked
 
           return (
             <TouchableOpacity
+              ref={loc.id === "garden" ? gardenNavButtonRef : undefined}
               key={loc.id}
               style={[
                 styles.locBtn,
@@ -955,44 +1057,6 @@ const styles = StyleSheet.create({
     borderColor: "transparent",
     backgroundColor: "transparent",
   },
-  playerThoughtWrap: {
-    position: "absolute",
-    left: 14,
-    top: 104,
-    maxWidth: 280,
-    zIndex: 30,
-  },
-  playerThoughtArrow: {
-    width: 0,
-    height: 0,
-    borderLeftWidth: 8,
-    borderRightWidth: 8,
-    borderBottomWidth: 10,
-    borderLeftColor: "transparent",
-    borderRightColor: "transparent",
-    borderBottomColor: "rgba(240,230,200,0.97)",
-    marginLeft: 34,
-  },
-  playerThoughtCard: {
-    backgroundColor: "rgba(240,230,200,0.97)",
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: "rgba(196,148,58,0.50)",
-    paddingHorizontal: 13,
-    paddingVertical: 9,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.35,
-    shadowRadius: 7,
-    elevation: 14,
-  },
-  playerThoughtText: {
-    color: "#2A1000",
-    fontSize: 12,
-    lineHeight: 18,
-    fontFamily: "RobotoItalic",
-  },
-
   mealBar: {
     marginHorizontal: 8,
     marginVertical: 5,
