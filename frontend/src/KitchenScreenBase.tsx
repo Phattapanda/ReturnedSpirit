@@ -3736,9 +3736,14 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                   ) : null}
                 </View>
                 {/* Result / Recipe slot — output only, never a drag target */}
-                <View ref={craftResultSlotRef} collapsable={false}>
+                <View ref={craftResultSlotRef} collapsable={false} style={styles.craftResultSlotFrame}>
                   <TouchableOpacity
-                    style={[styles.craftSlot, styles.craftSlotRecipe, craftResult ? { borderColor: "#5A9F5A", borderWidth: 1.5 } : {}]}
+                    style={[
+                      styles.craftSlot,
+                      styles.craftResultSlotFill,
+                      styles.craftSlotRecipe,
+                      craftResult ? { borderColor: "#5A9F5A", borderWidth: 1.5 } : {},
+                    ]}
                     activeOpacity={0.7}
                     onPress={() => !craftResult && !tutActive && setShowRecipes(true)}
                     disabled={!!craftResult}
@@ -4395,10 +4400,12 @@ const styles = StyleSheet.create({
   gridContainer: {
     marginHorizontal: 8, marginVertical: 5,
     backgroundColor: "rgba(10,6,1,0.90)", borderRadius: 12,
-    borderWidth: 1, borderColor: "rgba(90,65,30,0.35)", padding: 5, overflow: "hidden",
+    borderWidth: 1, borderColor: "rgba(90,65,30,0.35)",
+    paddingTop: 5, paddingHorizontal: 5, paddingBottom: 7,
+    overflow: "visible",
   },
   tableContainer: { gap: 4 },
-  gridRow: { flexDirection: "row", gap: 4 },
+  gridRow: { flexDirection: "row", alignItems: "stretch", gap: 4 },
   craftSlot: {
     flex: 1, aspectRatio: 1,
     backgroundColor: "rgba(20,11,3,0.93)", borderRadius: 8,
@@ -4412,6 +4419,8 @@ const styles = StyleSheet.create({
     minHeight: 44, alignItems: "center", justifyContent: "center",
   },
   craftSlotTool: { borderColor: "rgba(130,95,45,0.55)", backgroundColor: "rgba(25,14,4,0.95)" },
+  craftResultSlotFrame: { flex: 1, aspectRatio: 1, minHeight: 44 },
+  craftResultSlotFill: { flex: 0, width: "100%", height: "100%" },
   craftSlotRecipe: { borderColor: "rgba(130,95,45,0.55)", backgroundColor: "rgba(25,14,4,0.95)" },
   craftSlotCraft: { borderWidth: 2, borderColor: "#C4943A", backgroundColor: "rgba(30,17,4,0.97)" },
   craftSlotText: { color: "rgba(200,165,90,0.70)", fontSize: 10, fontFamily: "Oldenburg", textAlign: "center" },
