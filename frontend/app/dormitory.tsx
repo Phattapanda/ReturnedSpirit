@@ -40,8 +40,8 @@ import {
 import SceneBackground from "@/src/components/SceneBackground";
 import CurrencyHud from "@/src/components/CurrencyHud";
 import StatusModal from "@/src/components/StatusModal";
+import PortraitBubble from "@/src/components/portrait-bubble";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
-import { PLAYER_BAG_KEY, DEFAULT_BAG } from "@/src/game/item-system";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
 import { setPlaytimePaused } from "@/src/game/playtime-tracker";
 import { loadGuestTutorialIntroStep } from "@/src/game/guest-tutorial";
@@ -162,7 +162,6 @@ export default function DormitoryScreen() {
   const [lifeCurrent, setLifeCurrent]       = useState(15);
   const [playerStats, setPlayerStats]       = useState<PlayerStats>(DEFAULT_PLAYER_STATS);
   const [dayIdx, setDayIdx]                 = useState(0);
-  const [barWidth, setBarWidth]             = useState(0);
 
   // ── Room state
   const [roomState, setRoomState]   = useState<RoomState>("LOADING");
@@ -828,7 +827,8 @@ export default function DormitoryScreen() {
   function renderPlayerBubble() {
     if (!playerBubble) return null;
     const L = playerPortraitLayout.current;
-    const topPos = L ? L.y + L.h + 8 : (headerH > 0 ? headerH + 128 : insets.top + 200);
+    const topPos = L ? L.y + L.h + 12 : (headerH > 0 ? headerH + 140 : insets.top + 212);
+    const anchorX = L ? L.x + L.w / 2 : W * 0.32;
     const isEveningIntroState = roomState === "ROOM_EVENING_INTRO";
     return (
       <TouchableOpacity
@@ -836,20 +836,7 @@ export default function DormitoryScreen() {
         onPress={() => isEveningIntroState ? dismissPlayerBubble(true) : dismissPlayerBubble(false)}
         activeOpacity={1}
       >
-        <View
-          style={{
-            position: "absolute",
-            top: topPos,
-            left: W * 0.18,
-            width: Math.min(W * 0.75, Math.max(150, playerBubble.length * 6.6 + 32)),
-          }}
-          pointerEvents="none"
-        >
-          <View style={styles.playerBubbleArrow} />
-          <View style={styles.playerBubbleCard}>
-            <Text style={styles.playerBubbleText}>{playerBubble}</Text>
-          </View>
-        </View>
+        <PortraitBubble anchorX={anchorX} screenWidth={W} text={playerBubble} top={topPos} />
       </TouchableOpacity>
     );
   }
@@ -880,7 +867,6 @@ export default function DormitoryScreen() {
                   onLayout={(e) => {
                     const w = e.nativeEvent.layout.width;
                     barWidthSV.value = w;
-                    setBarWidth(w);
                   }}
                 >
                   <Animated.View style={[styles.statBarFill, styles.staminaFill, staminaFillStyle]}>
@@ -1304,24 +1290,6 @@ const styles = StyleSheet.create({
   morningGreet: {
     textAlign: "center", color: "rgba(196,148,58,0.55)", fontStyle: "italic",
     fontFamily: "Oldenburg", fontSize: 14, marginTop: 20,
-  },
-
-  // Player bubble
-  playerBubbleCard: {
-    backgroundColor: "rgba(240,230,200,0.95)", borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 10,
-    borderWidth: 1.5, borderColor: "rgba(196,148,58,0.50)",
-    shadowColor: "#000", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.4, shadowRadius: 7, elevation: 14,
-    alignSelf: "flex-start" as const,
-  },
-  playerBubbleText:  { color: "#2A1000", fontSize: 13, fontFamily: "RobotoItalic", lineHeight: 20 },
-  playerBubbleArrow: {
-    width: 0, height: 0, borderStyle: "solid",
-    borderLeftWidth: 8, borderRightWidth: 8,
-    borderBottomWidth: 9, borderTopWidth: 0,
-    borderLeftColor: "transparent", borderRightColor: "transparent",
-    borderBottomColor: "rgba(240,230,200,0.95)",
-    alignSelf: "flex-start", marginLeft: 20,
   },
 
   // Modals

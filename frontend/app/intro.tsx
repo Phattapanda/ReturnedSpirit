@@ -464,7 +464,9 @@ export default function IntroScreen() {
         >
           <View style={styles.bubble}>
             <Text style={styles.bubbleText}>{'"Are you awake?"'}</Text>
-            <View style={styles.bubbleTail} />
+            <View style={styles.bubbleTailBorder} />
+            <View style={styles.bubbleTailFill} />
+            <View style={styles.bubbleTailBridge} />
           </View>
         </Animated.View>
       )}
@@ -593,19 +595,44 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 6,
   },
-  bubbleTail: {
+  bubbleTailBorder: {
     position: "absolute",
-    bottom: -9,
+    bottom: -12,
+    alignSelf: "center",
+    width: 0,
+    height: 0,
+    borderLeftWidth: 11,
+    borderRightWidth: 11,
+    borderTopWidth: 12,
+    borderStyle: "solid",
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    borderTopColor: "rgba(196,148,58,0.58)",
+    zIndex: 2,
+  },
+  bubbleTailFill: {
+    position: "absolute",
+    bottom: -8,
     alignSelf: "center",
     width: 0,
     height: 0,
     borderLeftWidth: 9,
     borderRightWidth: 9,
-    borderTopWidth: 9,
+    borderTopWidth: 10,
     borderStyle: "solid",
     borderLeftColor: "transparent",
     borderRightColor: "transparent",
-    borderTopColor: "rgba(18, 10, 4, 0.93)",
+    borderTopColor: "rgba(18,10,4,0.93)",
+    zIndex: 3,
+  },
+  bubbleTailBridge: {
+    position: "absolute",
+    bottom: -1,
+    alignSelf: "center",
+    width: 18,
+    height: 4,
+    backgroundColor: "rgba(18,10,4,0.93)",
+    zIndex: 4,
   },
   bubbleText: {
     color: "#F5E6C8",

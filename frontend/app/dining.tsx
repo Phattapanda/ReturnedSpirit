@@ -27,6 +27,7 @@ import DiningGuestArea, {
 import GuestTutorialDialog, { type GuestTutorialDialogLine } from "@/src/components/GuestTutorialDialog";
 import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import StatusModal from "@/src/components/StatusModal";
+import PortraitBubble from "@/src/components/portrait-bubble";
 import {
   DEFAULT_DINING_MEAL_STATE,
   DINING_MEAL_STATE_KEY,
@@ -189,6 +190,8 @@ export default function DiningScreen() {
   const transferOpacity = useRef(new RNAnimated.Value(0)).current;
   const bagButtonRef = useRef<View>(null);
   const gardenNavButtonRef = useRef<View>(null);
+  const [portraitRowWidth, setPortraitRowWidth] = useState(W);
+  const [playerPortraitFrame, setPlayerPortraitFrame] = useState({ x: 0, y: 0, width: 96, height: 96 });
 
   const [statusOpen, setStatusOpen] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -726,10 +729,14 @@ export default function DiningScreen() {
         bounces={false}
         scrollEnabled={!dialogLine}
       >
-        <View style={styles.portraitRow}>
+        <View
+          style={styles.portraitRow}
+          onLayout={(event) => setPortraitRowWidth(event.nativeEvent.layout.width)}
+        >
           <TouchableOpacity
             style={styles.circleWrap}
             onPress={() => setStatusOpen(true)}
+            onLayout={(event) => setPlayerPortraitFrame(event.nativeEvent.layout)}
             activeOpacity={0.8}
           >
             <Image
@@ -754,15 +761,12 @@ export default function DiningScreen() {
           </View>
 
           {playerThought && (
-            <View
-              style={[styles.playerThoughtWrap, { width: Math.min(W * 0.72, Math.max(150, playerThought.length * 6.6 + 32)) }]}
-              pointerEvents="none"
-            >
-              <View style={styles.playerThoughtArrow} />
-              <View style={styles.playerThoughtCard}>
-                <Text style={styles.playerThoughtText}>{playerThought}</Text>
-              </View>
-            </View>
+            <PortraitBubble
+              anchorX={playerPortraitFrame.x + playerPortraitFrame.width / 2}
+              screenWidth={portraitRowWidth}
+              text={playerThought}
+              top={playerPortraitFrame.y + playerPortraitFrame.height + 12}
+            />
           )}
         </View>
 
@@ -1053,44 +1057,6 @@ const styles = StyleSheet.create({
     borderColor: "transparent",
     backgroundColor: "transparent",
   },
-  playerThoughtWrap: {
-    position: "absolute",
-    left: 14,
-    top: 104,
-    maxWidth: 280,
-    zIndex: 30,
-  },
-  playerThoughtArrow: {
-    width: 0,
-    height: 0,
-    borderLeftWidth: 8,
-    borderRightWidth: 8,
-    borderBottomWidth: 10,
-    borderLeftColor: "transparent",
-    borderRightColor: "transparent",
-    borderBottomColor: "rgba(240,230,200,0.97)",
-    marginLeft: 34,
-  },
-  playerThoughtCard: {
-    backgroundColor: "rgba(240,230,200,0.97)",
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: "rgba(196,148,58,0.50)",
-    paddingHorizontal: 13,
-    paddingVertical: 9,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.35,
-    shadowRadius: 7,
-    elevation: 14,
-  },
-  playerThoughtText: {
-    color: "#2A1000",
-    fontSize: 12,
-    lineHeight: 18,
-    fontFamily: "RobotoItalic",
-  },
-
   mealBar: {
     marginHorizontal: 8,
     marginVertical: 5,

@@ -41,6 +41,7 @@ import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import { loadLogbook, type LogEntry, LOGBOOK_KEY } from "@/src/game/logbook";
 import ActivityBar from "@/src/components/ActivityBar";
 import StatusModal from "@/src/components/StatusModal";
+import PortraitBubble from "@/src/components/portrait-bubble";
 import {
   PLAYER_BAG_KEY, DEFAULT_BAG, planAddToBag,
   BAG_INSPECTED_KEY,
@@ -63,7 +64,10 @@ import {
 } from "@/src/game/guest-tutorial";
 import { loadPostGuestTutorialState } from "@/src/game/post-guest-tutorial";
 import { ensureAssetReady } from "@/src/assets/AssetManager";
-import { subscribeGardenRuntimeRefresh } from "@/src/game/garden-runtime-context";
+import {
+  subscribeGardenPlayerThought,
+  subscribeGardenRuntimeRefresh,
+} from "@/src/game/garden-runtime-context";
 import { commitHarvestBag } from "@/src/game/garden-harvest";
 import { addKarmaPoints } from "@/src/game/progression";
 import { setPlaytimePaused } from "@/src/game/playtime-tracker";
@@ -961,6 +965,16 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
       playerBubbleTimer.current = null;
     }, 2500);
   }
+
+  useEffect(() => subscribeGardenPlayerThought((text) => {
+    if (playerBubbleTimer.current) clearTimeout(playerBubbleTimer.current);
+    const thought = text.trim().replace(/^["“”]+|["“”]+$/g, "");
+    setPlayerBubble(thought);
+    playerBubbleTimer.current = setTimeout(() => {
+      setPlayerBubble(null);
+      playerBubbleTimer.current = null;
+    }, 2600);
+  }), []);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Tutorial: intro bubble sequence
@@ -1940,41 +1954,20 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
     if (!bubble) return null;
     const rupertL = portraitLayouts.current.rupert;
     const bubbleTopPos = rupertL
-      ? rupertL.y + rupertL.h + 8
-      : (headerH > 0 ? headerH + 128 : insets.top + 190);
+      ? rupertL.y + rupertL.h + 12
+      : (headerH > 0 ? headerH + 140 : insets.top + 202);
     const arrowCenterX = rupertL ? rupertL.x + rupertL.w / 2 : W / 2;
-    const bubbleWidthTarget = Math.min(
-      W - 32,
-      Math.max(180, Math.min(W * 0.78, Math.max(bubble.text.length * 7.2, bubble.speaker.length * 9) + 48)),
-    );
-    const bubbleLeftCalc = Math.max(16, Math.min(arrowCenterX - bubbleWidthTarget / 2, W - bubbleWidthTarget - 16));
-    const bubbleRightCalc = Math.max(16, W - bubbleLeftCalc - bubbleWidthTarget);
-    const arrowOffset = Math.max(12, Math.min(
-      arrowCenterX - bubbleLeftCalc - 10,
-      W - bubbleLeftCalc - bubbleRightCalc - 32,
-    ));
 
-    const bubbleInner = (
-      <TouchableOpacity
-        style={{ position: "absolute", top: bubbleTopPos, left: bubbleLeftCalc, right: bubbleRightCalc }}
-        onPress={dismissBubble}
-        activeOpacity={0.88}
-      >
-        <View style={{ position: "relative" }}>
-          <View style={[styles.bubbleArrowBorder, { left: arrowOffset }]} />
-          <View style={[styles.bubbleArrowFill, { left: arrowOffset + 2 }]} />
-          <View style={styles.bubbleCardInner}>
-            <Text style={styles.bubbleSpeaker}>{bubble.speaker}</Text>
-            <Text style={styles.bubbleText}>{bubble.text}</Text>
-          </View>
-        </View>
-      </TouchableOpacity>
-    );
-
-    // All policies: global dismiss via full-screen Pressable
     return (
       <Pressable style={[StyleSheet.absoluteFill, { zIndex: 401 }]} onPress={dismissBubble} key="bubble-global">
-        {bubbleInner}
+        <PortraitBubble
+          anchorX={arrowCenterX}
+          screenWidth={W}
+          speaker={bubble.speaker}
+          text={bubble.text}
+          top={bubbleTopPos}
+          variant="speech"
+        />
       </Pressable>
     );
   }
@@ -1986,16 +1979,12 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
     if (!playerBubble) return null;
     const playerL = portraitLayouts.current.player;
     const topPos = playerL
-      ? playerL.y + playerL.h + 8
-      : (headerH > 0 ? headerH + 128 : insets.top + 190);
+      ? playerL.y + playerL.h + 12
+      : (headerH > 0 ? headerH + 140 : insets.top + 202);
+    const anchorX = playerL ? playerL.x + playerL.w / 2 : W * 0.18;
     return (
       <View style={[StyleSheet.absoluteFill, { zIndex: 410 }]} pointerEvents="none" key="player-bubble">
-        <View style={{ position: "absolute", top: topPos, left: 10, right: Math.max(10, W - Math.min(W * 0.75, 420) - 10) }}>
-          <View style={styles.playerBubbleArrow} />
-          <View style={styles.playerBubbleCard}>
-            <Text style={styles.playerBubbleText}>{playerBubble}</Text>
-          </View>
-        </View>
+        <PortraitBubble anchorX={anchorX} screenWidth={W} text={playerBubble} top={topPos} />
       </View>
     );
   }
@@ -2697,50 +2686,6 @@ const styles = StyleSheet.create({
     fontFamily: "Oldenburg",
     letterSpacing: 0.8,
     marginBottom: 6,
-  },
-
-  // Bubbles (Rupert speech)
-  bubbleArrowBorder: {
-    position: "absolute", top: -11,
-    width: 0, height: 0, borderStyle: "solid",
-    borderLeftWidth: 11, borderRightWidth: 11, borderBottomWidth: 11, borderTopWidth: 0,
-    borderLeftColor: "transparent", borderRightColor: "transparent",
-    borderBottomColor: "rgba(196,148,58,0.55)",
-  },
-  bubbleArrowFill: {
-    position: "absolute", top: -7,
-    width: 0, height: 0, borderStyle: "solid",
-    borderLeftWidth: 9, borderRightWidth: 9, borderBottomWidth: 9, borderTopWidth: 0,
-    borderLeftColor: "transparent", borderRightColor: "transparent",
-    borderBottomColor: "rgba(250, 242, 218, 0.97)",
-  },
-  bubbleCardInner: {
-    backgroundColor: "rgba(250, 242, 218, 0.97)", borderRadius: 14,
-    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 14,
-    borderWidth: 1.5, borderColor: "rgba(196,148,58,0.55)",
-    shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.28, shadowRadius: 8,
-    elevation: 12, gap: 6,
-  },
-  bubbleSpeaker: { color: "#7A4800", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 1 },
-  bubbleText: { color: "#2A1000", fontSize: 15, lineHeight: 22, fontFamily: "RobotoRegular" },
-
-  // Player thought bubble
-  playerBubbleCard: {
-    backgroundColor: "rgba(240,230,200,0.95)", borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 10,
-    borderWidth: 1.5, borderColor: "rgba(196,148,58,0.50)",
-    shadowColor: "#000", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.4, shadowRadius: 7,
-    elevation: 14,
-    alignSelf: "flex-start" as const,
-  },
-  playerBubbleText: { color: "#2A1000", fontSize: 13, fontFamily: "RobotoItalic", lineHeight: 20 },
-  playerBubbleArrow: {
-    width: 0, height: 0, borderStyle: "solid",
-    borderLeftWidth: 8, borderRightWidth: 8,
-    borderBottomWidth: 9, borderTopWidth: 0,
-    borderLeftColor: "transparent", borderRightColor: "transparent",
-    borderBottomColor: "rgba(240,230,200,0.95)",
-    alignSelf: "flex-start", marginLeft: 20,
   },
 
   // Tear-out modal
