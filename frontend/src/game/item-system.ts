@@ -285,8 +285,8 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
   carrot:      { name: "Carrot",           description: "A fresh carrot harvested from the garden.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   bucket:      { name: "Empty Bucket",     description: "A sturdy wooden bucket. It needs to be filled.", attributes: [ITEM_ATTRIBUTE.VESSEL] },
   bucketwater: { name: "Bucket of Water", description: "A bucket filled with fresh water from the well.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
-  herbseed:    { name: "Herb Seed",        description: "Seeds for growing herbs.", attributes: [] },
-  carrotseed:  { name: "Carrot Seed",      description: "Seeds for growing carrots.", attributes: [] },
+  seed_herb:   { name: "Herb Seed",        description: "Seeds for growing herbs.", attributes: [] },
+  seed_carrot: { name: "Carrot Seed",      description: "Seeds for growing carrots.", attributes: [] },
   // Resources
   wood:        { name: "Wood",             description: "Cut timber. Useful for repairs and construction.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   stone:       { name: "Stone",            description: "A piece of solid rock. Used for building and crafting.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },

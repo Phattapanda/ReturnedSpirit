@@ -74,7 +74,7 @@ const IMG = {
   rupertlaugh:   require("../assets/images/rupertlaugh.png"),
   old_farmer:    require("../assets/images/old_farmer.png"),
   coin_copper:   require("../assets/images/coin_copper.png"),
-  carrotseed:    require("../assets/images/carrotseed.png"),
+  seed_carrot:   require("../assets/images/carrotseed.png"),
   loc_kitchen:   require("../assets/images/gotokitchen.png"),
   loc_garden:    require("../assets/images/gotogarden.png"),
   loc_dining:    require("../assets/images/gotodining.png"),

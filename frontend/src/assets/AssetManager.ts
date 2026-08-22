@@ -143,7 +143,7 @@ export const ASSET_REGISTRY: AssetEntry[] = [
 
   // ── Other item images ───────────────────────────────────────────────────────
   { key: 'herbs',         module: require('../../assets/images/herbs.png'),         group: 'items' },
-  { key: 'herbseed',      module: require('../../assets/images/herbseed.png'),      group: 'items' },
+  { key: 'seed_herb',     module: require('../../assets/images/herbseed.png'),      group: 'items' },
   { key: 'herbbed',       module: require('../../assets/images/herbbed.png'),       group: 'items' },
   { key: 'herbbed_young', module: require('../../assets/images/herbbed_young.png'), group: 'items' },
   { key: 'fertilizer',    module: require('../../assets/images/fertilizer.png'),    group: 'items' },

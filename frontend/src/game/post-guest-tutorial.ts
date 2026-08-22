@@ -5,6 +5,7 @@ import {
   SHARED_RESOURCES_KEY,
   type SharedResources,
 } from "@/src/game/shared-resources";
+import { normalizeGardenSeedId } from "@/src/game/garden-crop-system";
 
 export const POST_GUEST_TUTORIAL_STATE_KEY = "@tutorial:post_guest_state";
 const GARDEN_INVENTORY_KEY = "@garden:inventory";
@@ -76,30 +77,35 @@ export async function grantFarmerCarrotSeedOnce(): Promise<PostGuestTutorialStat
   if (state.farmerGiftClaimed) return state;
 
   let inventory: GardenInventoryItem[] = [
-    { id: "herbseed", itemType: "seed", name: "Herb Seed", quantity: 5 },
+    { id: "seed_herb", itemType: "seed", name: "Herb Seed", quantity: 5 },
     { id: "standard_fertilizer", itemType: "fertilizer", name: "Standard Fertilizer", quantity: 5 },
   ];
   try {
     const raw = await AsyncStorage.getItem(GARDEN_INVENTORY_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) inventory = parsed;
+      if (Array.isArray(parsed)) {
+        inventory = parsed.map((item) => item?.itemType === "seed"
+          ? { ...item, id: normalizeGardenSeedId(item.id) ?? item.id }
+          : item,
+        );
+      }
     }
   } catch {
     inventory = [
-      { id: "herbseed", itemType: "seed", name: "Herb Seed", quantity: 5 },
+      { id: "seed_herb", itemType: "seed", name: "Herb Seed", quantity: 5 },
       { id: "standard_fertilizer", itemType: "fertilizer", name: "Standard Fertilizer", quantity: 5 },
     ];
   }
 
-  const carrotIndex = inventory.findIndex((item) => item?.id === "carrotseed" && item.itemType === "seed");
+  const carrotIndex = inventory.findIndex((item) => item?.id === "seed_carrot" && item.itemType === "seed");
   const nextInventory = inventory.map((item) => ({ ...item }));
   if (carrotIndex >= 0) {
     const current = nextInventory[carrotIndex];
     nextInventory[carrotIndex] = { ...current, quantity: Math.max(0, current.quantity) + 1 };
   } else {
     nextInventory.push({
-      id: "carrotseed",
+      id: "seed_carrot",
       itemType: "seed",
       name: "Carrot Seed",
       quantity: 1,

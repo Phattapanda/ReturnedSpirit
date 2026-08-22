@@ -193,7 +193,7 @@ const ITEM_IMAGES: Record<string, ReturnType<typeof require>> = {
   herbsoup:    require("../assets/images/herbsoup.png"),
   bucket:      require("../assets/images/bucket.png"),
   bucketwater: require("../assets/images/bucketwater.png"),
-  herbseed:    require("../assets/images/herbseed.png"),
+  seed_herb:   require("../assets/images/herbseed.png"),
   herbs:       require("../assets/images/herbs.png"),
   oldpot:      require("../assets/images/oldpot.png"),
 };
