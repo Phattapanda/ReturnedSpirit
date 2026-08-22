@@ -95,9 +95,9 @@ const SELECTED_FERTILIZER_KEY = "@garden:selected_fertilizer";
 const CROP_ASSETS: Record<string, ReturnType<typeof require>> = {
   herbbed:       require("../../assets/images/herbbed.png"),
   herbbed_young: require("../../assets/images/herbbed_young.png"),
-  herbseed:      require("../../assets/images/herbseed.png"),
+  seed_herb:     require("../../assets/images/herbseed.png"),
   herbs:         require("../../assets/images/herbs.png"),
-  carrotseed:    require("../../assets/images/carrotseed.png"),
+  seed_carrot:   require("../../assets/images/carrotseed.png"),
   carrotyoung:   require("../../assets/images/carrotyoung.png"),
   carrotbed:     require("../../assets/images/carrotbed.png"),
 };
@@ -119,12 +119,12 @@ type CropStageConfig = {
 
 const CROP_STAGE_CONFIGS: Record<string, CropStageConfig> = {
   herb: {
-    seedStageAsset: "herbseed",
+    seedStageAsset: "seed_herb",
     growingStageAsset: "herbbed_young",
     readyStageAsset: "herbbed",
   },
   carrot: {
-    seedStageAsset: "carrotseed",
+    seedStageAsset: "seed_carrot",
     growingStageAsset: "carrotyoung",
     readyStageAsset: "carrotbed",
   },
@@ -132,7 +132,7 @@ const CROP_STAGE_CONFIGS: Record<string, CropStageConfig> = {
 
 /**
  * Carrot visual calendar:
- * Day 1 = carrotseed, Day 2–3 = carrotyoung, Day 4 = carrotbed.
+ * Day 1 = seed_carrot, Day 2–3 = carrotyoung, Day 4 = carrotbed.
  */
 export function getCropStageAsset(
   cropType: string | null,

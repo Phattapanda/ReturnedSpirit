@@ -105,8 +105,8 @@ const styles = StyleSheet.create({
   dialogText: {
     color: "#F0E8D5",
     fontFamily: "RobotoRegular",
-    fontSize: 14,
-    lineHeight: 21,
+    fontSize: 16,
+    lineHeight: 25,
     textAlign: "center",
   },
   continueBtn: {

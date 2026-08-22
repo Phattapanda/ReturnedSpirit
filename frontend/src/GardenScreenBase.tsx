@@ -69,6 +69,7 @@ import { setPlaytimePaused } from "@/src/game/playtime-tracker";
 import {
   createGardenPlotFromSeed,
   createHarvestBagForCrop,
+  normalizeGardenSeedId,
 } from "@/src/game/garden-crop-system";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
@@ -216,9 +217,16 @@ function rupertSrc(p: "normal" | "sad" | "laugh") {
 // ─── Default data ─────────────────────────────────────────────────────────────
 
 const DEFAULT_INVENTORY: InventoryItem[] = [
-  { id: "herbseed",            itemType: "seed",        name: "Herb Seed",            quantity: 5 },
+  { id: "seed_herb",           itemType: "seed",        name: "Herb Seed",            quantity: 5 },
   { id: "standard_fertilizer", itemType: "fertilizer",  name: "Standard Fertilizer",  quantity: 5 },
 ];
+
+function normalizeInventorySeedIds(items: InventoryItem[]): InventoryItem[] {
+  return items.map((item) => item.itemType === "seed"
+    ? { ...item, id: normalizeGardenSeedId(item.id) ?? item.id }
+    : item,
+  );
+}
 
 const SECOND_PLOT_EMPTY: GardenPlotData = {
   id: "garden_plot_02",
@@ -251,7 +259,7 @@ const TUTORIAL_PLOT_INITIAL: GardenPlotData = {
   status: "growing",
   cropType: "herb",
   cropAsset: "herbbed",
-  seedItemId: "herbseed",
+  seedItemId: "seed_herb",
   totalGrowthDays: 2,
   completedGrowthDays: 1,
   remainingGrowthDays: 1,
@@ -532,7 +540,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
         }
 
         if (rawInv) {
-          try { setInventory(JSON.parse(rawInv)); } catch { /* keep current */ }
+          try { setInventory(normalizeInventorySeedIds(JSON.parse(rawInv))); } catch { /* keep current */ }
         }
 
         if (rawBag) {
@@ -672,7 +680,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
         // Load inventory
         const rawInv = await AsyncStorage.getItem(GSK.INVENTORY);
         if (rawInv) {
-          try { setInventory(JSON.parse(rawInv)); } catch { /* use default */ }
+          try { setInventory(normalizeInventorySeedIds(JSON.parse(rawInv))); } catch { /* use default */ }
         }
 
         // Load selected fertilizer

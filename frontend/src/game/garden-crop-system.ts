@@ -40,11 +40,16 @@ export type GardenSeedConfig = {
   harvestBag: Omit<BagItem, "containedQuantity">;
 };
 
+const LEGACY_SEED_IDS: Record<string, string> = {
+  herbseed: "seed_herb",
+  carrotseed: "seed_carrot",
+};
+
 const GARDEN_SEED_CONFIGS: Record<string, GardenSeedConfig> = {
-  herbseed: {
-    seedItemId: "herbseed",
+  seed_herb: {
+    seedItemId: "seed_herb",
     cropType: "herb",
-    cropAsset: "herbseed",
+    cropAsset: "seed_herb",
     totalGrowthDays: 2,
     completedGrowthDaysAtPlanting: 0,
     baseYield: 5,
@@ -57,10 +62,10 @@ const GARDEN_SEED_CONFIGS: Record<string, GardenSeedConfig> = {
       containedItem: "herbs",
     },
   },
-  carrotseed: {
-    seedItemId: "carrotseed",
+  seed_carrot: {
+    seedItemId: "seed_carrot",
     cropType: "carrot",
-    cropAsset: "carrotseed",
+    cropAsset: "seed_carrot",
     totalGrowthDays: 4,
     completedGrowthDaysAtPlanting: 1,
     baseYield: 5,
@@ -75,8 +80,14 @@ const GARDEN_SEED_CONFIGS: Record<string, GardenSeedConfig> = {
   },
 };
 
+/** Converts legacy save data to the canonical seed IDs. */
+export function normalizeGardenSeedId(seedItemId: string | null): string | null {
+  return seedItemId ? (LEGACY_SEED_IDS[seedItemId] ?? seedItemId) : null;
+}
+
 export function getGardenSeedConfig(seedItemId: string | null): GardenSeedConfig | null {
-  return seedItemId ? (GARDEN_SEED_CONFIGS[seedItemId] ?? null) : null;
+  const normalizedSeedId = normalizeGardenSeedId(seedItemId);
+  return normalizedSeedId ? (GARDEN_SEED_CONFIGS[normalizedSeedId] ?? null) : null;
 }
 
 export function createGardenPlotFromSeed(
@@ -123,13 +134,13 @@ export function getCropYieldLabel(seedItemId: string | null): string {
 
 /**
  * Carrot calendar:
- * Day 1 planting = carrotseed (completedGrowthDays 1, visual progress 0)
+ * Day 1 planting = seed_carrot (completedGrowthDays 1, visual progress 0)
  * Day 2 = carrotyoung
  * Day 3 = carrotyoung
  * Day 4 = carrotbed / ready to harvest
  */
 export function createCarrotPlot(): GardenPlotData {
-  return createGardenPlotFromSeed(SECOND_GARDEN_PLOT_EMPTY, "carrotseed")!;
+  return createGardenPlotFromSeed(SECOND_GARDEN_PLOT_EMPTY, "seed_carrot")!;
 }
 
 export function processGardenPlotDayChange(plot: GardenPlotData): GardenPlotData {
