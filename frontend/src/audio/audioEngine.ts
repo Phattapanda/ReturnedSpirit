@@ -47,6 +47,7 @@ const SFX_SOURCES: Record<string, number> = {
   getwater:           require('../../assets/audio/getwater.mp3'),
   confirm:            require('../../assets/audio/confirm.mp3'),
   moveitem:           require('../../assets/audio/moveitem.mp3'),
+  money:              require('../../assets/audio/money.mp3'),
   getwood:            require('../../assets/audio/getwood.mp3'),
   getstone:           require('../../assets/audio/getstone.mp3'),
   notification:       require('../../assets/audio/notification.mp3'),

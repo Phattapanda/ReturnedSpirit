@@ -1,12 +1,12 @@
 import React from "react";
-import { Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Image, StyleSheet, Text, TouchableOpacity, View, type ImageSourcePropType } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export type GuestTutorialDialogLine = {
   speaker: string;
   text: string;
-  portrait: ReturnType<typeof require>;
+  portrait: ImageSourcePropType;
   playerPortrait?: boolean;
 };
 

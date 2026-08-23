@@ -37,7 +37,6 @@ export type AssetGroup =
 export type AssetEntry = {
   key: string;
   // Static require() return value — typed as any by Metro bundler conventions
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   module: any;
   group: AssetGroup;
   /** If true: failure shows retry/main-menu error screen */
@@ -108,6 +107,8 @@ export const ASSET_REGISTRY: AssetEntry[] = [
     module: require('../../assets/images/rupertsad.png'),
     group: 'portraits_rupert',
   },
+  { key: 'coachman', module: require('../../assets/images/coachman.png'), group: 'portraits_rupert' },
+  { key: 'civil_servant', module: require('../../assets/images/civil_servant.png'), group: 'portraits_rupert' },
 
   // ── Flying-critical items (must be ready before FIRST flying animation) ────
   {
@@ -117,14 +118,14 @@ export const ASSET_REGISTRY: AssetEntry[] = [
     critical: true,
   },
   {
-    key: 'herbbag',
-    module: require('../../assets/images/herbbag.png'),
+    key: 'bag_herb',
+    module: require('../../assets/images/bag_herb.png'),
     group: 'items',
     critical: true,
   },
   {
-    key: 'carrotbag',
-    module: require('../../assets/images/carrotbag.png'),
+    key: 'bag_carrot',
+    module: require('../../assets/images/bag_carrot.png'),
     group: 'items',
     critical: true,
   },
@@ -143,10 +144,26 @@ export const ASSET_REGISTRY: AssetEntry[] = [
 
   // ── Other item images ───────────────────────────────────────────────────────
   { key: 'herbs',         module: require('../../assets/images/herbs.png'),         group: 'items' },
-  { key: 'seed_herb',     module: require('../../assets/images/herbseed.png'),      group: 'items' },
-  { key: 'herbbed',       module: require('../../assets/images/herbbed.png'),       group: 'items' },
-  { key: 'herbbed_young', module: require('../../assets/images/herbbed_young.png'), group: 'items' },
+  { key: 'seed_herb',     module: require('../../assets/images/seed_herb.png'),     group: 'items' },
+  { key: 'seed_potato',   module: require('../../assets/images/seed_potato.png'),  group: 'items' },
+  { key: 'seed_carrot',   module: require('../../assets/images/seed_carrot.png'),  group: 'items' },
+  { key: 'seed_onion',    module: require('../../assets/images/seed_onion.png'),   group: 'items' },
+  { key: 'potato',        module: require('../../assets/images/potato.png'),       group: 'items' },
+  { key: 'carrot',        module: require('../../assets/images/carrot.png'),       group: 'items' },
+  { key: 'bag_onion',     module: require('../../assets/images/bag_onion.png'),     group: 'items' },
+  { key: 'bag_potato',    module: require('../../assets/images/bag_potato.png'),    group: 'items' },
+  { key: 'onion',         module: require('../../assets/images/onion.png'),         group: 'items' },
+  { key: 'bed_herb',      module: require('../../assets/images/bed_herb.png'),       group: 'items' },
+  { key: 'bed_herb_young', module: require('../../assets/images/bed_herb_young.png'), group: 'items' },
+  { key: 'bed_carrot',    module: require('../../assets/images/bed_carrot.png'),     group: 'items' },
+  { key: 'bed_carrot_young', module: require('../../assets/images/bed_carrot_young.png'), group: 'items' },
+  { key: 'bed_onion',     module: require('../../assets/images/bed_onion.png'),      group: 'items' },
+  { key: 'bed_onion_young', module: require('../../assets/images/bed_onion_young.png'), group: 'items' },
+  { key: 'bed_potato',    module: require('../../assets/images/bed_potato.png'),     group: 'items' },
+  { key: 'bed_potato_young', module: require('../../assets/images/bed_potato_young.png'), group: 'items' },
   { key: 'fertilizer',    module: require('../../assets/images/fertilizer.png'),    group: 'items' },
+  { key: 'premium_fertilizer', module: require('../../assets/premiumfertilizer.png'), group: 'items' },
+  { key: 'healthymuffin', module: require('../../assets/images/healthy muffin.png'), group: 'items' },
   { key: 'energydrink',   module: require('../../assets/images/energy Drink.png'),  group: 'items' },
   { key: 'energypill',    module: require('../../assets/images/energy Pill.png'),   group: 'items' },
   { key: 'goldenapple',   module: require('../../assets/images/golden apple.png'),  group: 'items' },
@@ -168,6 +185,9 @@ export const ASSET_REGISTRY: AssetEntry[] = [
   { key: 'bg_garden',       module: require('../../assets/images/garden1.jpg'),       group: 'backgrounds' },
   { key: 'bg_room_morning', module: require('../../assets/images/room1_morning.jpg'), group: 'backgrounds' },
   { key: 'bg_room_evening', module: require('../../assets/images/room1_evening.jpg'), group: 'backgrounds' },
+  { key: 'outside_tavern', module: require('../../assets/images/outsidetavern1.png'), group: 'backgrounds' },
+  { key: 'market', module: require('../../assets/images/market.png'), group: 'backgrounds' },
+  { key: 'forest_entrance', module: require('../../assets/images/forestentrance.png'), group: 'backgrounds' },
 
   // ── Navigation / location-bar icons ────────────────────────────────────────
   { key: 'goto_kitchen',   module: require('../../assets/images/gotokitchen.png'),   group: 'navigation' },

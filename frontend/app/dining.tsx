@@ -9,6 +9,7 @@ import {
   Image,
   StyleSheet,
   useWindowDimensions,
+  type ImageSourcePropType,
 } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -18,12 +19,20 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import SceneBackground from "@/src/components/SceneBackground";
 import CurrencyHud from "@/src/components/CurrencyHud";
-import DiningGuestArea, { type GuestServiceAction } from "@/src/components/GuestCard";
+import DiningGuestArea, {
+  getGuestExchangeImage,
+  type GuestServiceAction,
+  type GuestServiceSourcePoint,
+} from "@/src/components/GuestCard";
 import GuestTutorialDialog, { type GuestTutorialDialogLine } from "@/src/components/GuestTutorialDialog";
 import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import StatusModal from "@/src/components/StatusModal";
+import PortraitBubble from "@/src/components/portrait-bubble";
+import CivilServantDialog from "@/src/components/CivilServantDialog";
+import RunEndingOverlay from "@/src/components/RunEndingOverlay";
 import {
   DEFAULT_DINING_MEAL_STATE,
+  DINING_MEAL_STATE_KEY,
   DINING_MEAL_SLOT_COUNT,
   loadDiningMealState,
   planBagItemToMealSlot,
@@ -39,9 +48,24 @@ import {
   type GuestTutorialIntroStep,
 } from "@/src/game/guest-tutorial";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
-import { DEFAULT_BAG, PLAYER_BAG_KEY, type PlayerBagData } from "@/src/game/item-system";
+import {
+  DEFAULT_BAG,
+  PLAYER_BAG_KEY,
+  getMealBaseSellPriceCopper,
+  normalizePlayerBagData,
+  type PlayerBagData,
+} from "@/src/game/item-system";
 import { addCurrencyCopper } from "@/src/game/currency-system";
-import { setActiveGuest, type GuestVisitView } from "@/src/game/guest-system";
+import {
+  addGuestFavor,
+  evaluateGuestMealFavor,
+  markGuestServed,
+  setActiveGuest,
+  type GuestId,
+  type GuestMealReaction,
+  type GuestVisitView,
+} from "@/src/game/guest-system";
+import { completeGuestExchange } from "@/src/game/guest-exchange";
 import {
   grantFarmerCarrotSeedOnce,
   loadPostGuestTutorialState,
@@ -55,6 +79,14 @@ import {
   normalizePlayerAvatarId,
   type PlayerAvatarId,
 } from "@/src/game/player-avatar";
+import { prepareNextRun } from "@/src/game/next-run";
+import {
+  formatHarvestCount,
+  loadTitheState,
+  resolveCurrentTithe,
+  type TitheState,
+} from "@/src/game/tithe-system";
+import { loadTravelState, unlockExploreFromCoachman } from "@/src/game/travel-system";
 
 const DSK = {
   STAMINA:       "@game:stamina",
@@ -70,12 +102,18 @@ const IMG = {
   dining:        require("../assets/images/dining.png"),
   dining_dawn:   require("../assets/images/dining_dawn.png"),
   herbsoup:      require("../assets/images/herbsoup.png"),
+  carrotsoup:    require("../assets/images/carrot soup.png"),
+  carrotpotatosoup: require("../assets/images/carrot and potato soup.png"),
+  boiledpotato:  require("../assets/images/boiled_potatoes.png"),
   rupert:        require("../assets/images/rupert.png"),
   rupertsad:     require("../assets/images/rupertsad.png"),
   rupertlaugh:   require("../assets/images/rupertlaugh.png"),
   old_farmer:    require("../assets/images/old_farmer.png"),
+  coachman:       require("../assets/images/coachman.png"),
+  civil_servant: require("../assets/images/civil_servant.png"),
   coin_copper:   require("../assets/images/coin_copper.png"),
-  seed_carrot:   require("../assets/images/carrotseed.png"),
+  seed_carrot:   require("../assets/images/seed_carrot.png"),
+  bag1:          require("../assets/images/bag1.png"),
   loc_kitchen:   require("../assets/images/gotokitchen.png"),
   loc_garden:    require("../assets/images/gotogarden.png"),
   loc_dining:    require("../assets/images/gotodining.png"),
@@ -84,12 +122,15 @@ const IMG = {
   loc_explore:   require("../assets/images/goexplore.png"),
 };
 
-const MEAL_IMAGES: Record<string, ReturnType<typeof require>> = {
+const MEAL_IMAGES: Record<string, ImageSourcePropType> = {
   herbsoup: IMG.herbsoup,
+  carrotsoup: IMG.carrotsoup,
+  carrotpotatosoup: IMG.carrotpotatosoup,
+  boiledpotato: IMG.boiledpotato,
 };
 
 const DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
-const OLD_FARMER_SELL_PRICE_COPPER = 8;
+const OLD_FARMER_SELL_PRICE_COPPER = 9;
 
 const LOCS = [
   { id: "kitchen",   nav: true  },
@@ -100,12 +141,24 @@ const LOCS = [
   { id: "explore",   nav: false },
 ] as const;
 
-type TutorialPortrait = "rupert" | "rupert_sad" | "rupert_laugh" | "old_farmer" | "player";
+type TutorialPortrait = "rupert" | "rupert_sad" | "rupert_laugh" | "old_farmer" | "coachman" | "player";
 type TutorialLine = {
   speaker: string;
   text: string;
   portrait: TutorialPortrait;
 };
+
+type CivilDialogStage = "introduction" | "paid" | "deferred" | "warning";
+
+function coachmanIntroduction(playerName: string): TutorialLine[] {
+  return [
+    { speaker: "Coachman", portrait: "coachman", text: '"Good morning. A new face?"' },
+    { speaker: playerName, portrait: "player", text: '"Good morning, nice to meet you. I\'m staying here for the time being."' },
+    { speaker: "Coachman", portrait: "coachman", text: '"Nice to meet you, too. I’m the local carriage driver. I currently come by here every Wednesday, Friday, and Saturday. I can take you along for a fee, but the further away the destination, the higher the fee."' },
+    { speaker: playerName, portrait: "player", text: '"Thanks for the information. Then we\'ll be seeing each other more often."' },
+    { speaker: "Coachman", portrait: "coachman", text: '"Yes. But first, I’d like something hot to eat. I’ll wait outside the door after I’ve eaten, in case you want to come along."' },
+  ];
+}
 
 function farmerIntroduction(playerName: string): TutorialLine[] {
   return [
@@ -148,7 +201,7 @@ function rupertServingExplanation(playerName: string): TutorialLine[] {
 export default function DiningScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { width: W } = useWindowDimensions();
+  const { width: W, height: H } = useWindowDimensions();
   const audioManager = useAudioManager();
   const { crossfadeTo } = audioManager;
 
@@ -171,14 +224,23 @@ export default function DiningScreen() {
   const [serviceDialogLine, setServiceDialogLine] = useState<TutorialLine | null>(null);
   const [favorDialogLine, setFavorDialogLine] = useState<TutorialLine | null>(null);
   const serviceDialogNextStep = useRef<GuestTutorialIntroStep | null>(null);
+  const serviceDialogDoneRef = useRef<(() => void) | null>(null);
+  const [coachmanIntroLines, setCoachmanIntroLines] = useState<TutorialLine[]>([]);
+  const [coachmanIntroIndex, setCoachmanIntroIndex] = useState(0);
+  const [exploreUnlocked, setExploreUnlocked] = useState(false);
   const [serviceBusy, setServiceBusy] = useState(false);
-  const [departingGuestId, setDepartingGuestId] = useState<"old_farmer" | null>(null);
+  const [departingGuestId, setDepartingGuestId] = useState<GuestId | null>(null);
+  const [hiddenGuestIds, setHiddenGuestIds] = useState<GuestId[]>([]);
 
-  const [transferImage, setTransferImage] = useState<ReturnType<typeof require> | null>(null);
+  const [transferImage, setTransferImage] = useState<ImageSourcePropType | null>(null);
   const transferX = useRef(new RNAnimated.Value(0)).current;
   const transferY = useRef(new RNAnimated.Value(0)).current;
   const transferScale = useRef(new RNAnimated.Value(1)).current;
   const transferOpacity = useRef(new RNAnimated.Value(0)).current;
+  const bagButtonRef = useRef<View>(null);
+  const gardenNavButtonRef = useRef<View>(null);
+  const [portraitRowWidth, setPortraitRowWidth] = useState(W);
+  const [playerPortraitFrame, setPlayerPortraitFrame] = useState({ x: 0, y: 0, width: 96, height: 96 });
 
   const [statusOpen, setStatusOpen] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -188,6 +250,10 @@ export default function DiningScreen() {
     return () => { void setPlaytimePaused(false); };
   }, [showMenu]);
   const [bagOpen, setBagOpen] = useState(false);
+  const [titheState, setTitheState] = useState<TitheState | null>(null);
+  const [civilDialogStage, setCivilDialogStage] = useState<CivilDialogStage | null>(null);
+  const [titheBusy, setTitheBusy] = useState(false);
+  const [runTransitionBusy, setRunTransitionBusy] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -207,6 +273,8 @@ export default function DiningScreen() {
         const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
         const loadedMeals = await loadDiningMealState();
         const loadedTutorialStep = await loadGuestTutorialIntroStep();
+        const loadedTithe = await loadTitheState();
+        const loadedTravel = await loadTravelState();
         const resolvedName = rawName?.trim() || "Adventurer";
 
         if (!active) return;
@@ -218,8 +286,11 @@ export default function DiningScreen() {
         setPlayerName(resolvedName);
         setPlayerAvatarId(normalizePlayerAvatarId(rawAv));
         setMealState(loadedMeals);
+        setTitheState(loadedTithe);
+        setExploreUnlocked(loadedTravel.exploreUnlocked);
+        if (loadedTithe.phase === "in_dining") setCivilDialogStage("introduction");
         if (rawBag) {
-          try { setPlayerBag(JSON.parse(rawBag)); } catch { /* default */ }
+          try { setPlayerBag(normalizePlayerBagData(JSON.parse(rawBag))); } catch { /* default */ }
         }
 
         if (loadedTutorialStep === "dining_intro" || loadedTutorialStep === "farmer_intro") {
@@ -263,6 +334,11 @@ export default function DiningScreen() {
             setTimeout(() => showPlayerThought("I could use a second garden bed for the carrot seed."), 450);
             await markSecondPlotThoughtSeen();
           }
+          const loadedDay = rawDay !== null ? parseInt(rawDay, 10) : 0;
+          if (!loadedTravel.exploreUnlocked && (loadedDay === 2 || loadedDay === 4 || loadedDay === 5)) {
+            setCoachmanIntroLines(coachmanIntroduction(resolvedName));
+            setCoachmanIntroIndex(0);
+          }
         } else {
           setTutorialStep(loadedTutorialStep);
         }
@@ -297,7 +373,7 @@ export default function DiningScreen() {
       text: `"${text}"`,
     });
     AsyncStorage.getItem(PLAYER_BAG_KEY).then((rawBag) => {
-      if (rawBag) setPlayerBag(JSON.parse(rawBag));
+      if (rawBag) setPlayerBag(normalizePlayerBagData(JSON.parse(rawBag)));
     }).catch(() => {});
     if (text.includes("Here, take this.")) {
       audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
@@ -305,7 +381,7 @@ export default function DiningScreen() {
   }, [audioManager]);
 
   function runTransfer(
-    image: ReturnType<typeof require>,
+    image: ImageSourcePropType,
     fromX: number,
     fromY: number,
     toX: number,
@@ -328,16 +404,44 @@ export default function DiningScreen() {
     });
   }
 
+  function measureViewCenter(
+    ref: React.RefObject<View | null>,
+    fallback: GuestServiceSourcePoint,
+  ): Promise<GuestServiceSourcePoint> {
+    return new Promise((resolve) => {
+      const view = ref.current;
+      if (!view) {
+        resolve(fallback);
+        return;
+      }
+      view.measureInWindow((x, y, width, height) => {
+        resolve(width > 0 && height > 0 ? { x: x + width / 2, y: y + height / 2 } : fallback);
+      });
+    });
+  }
+
   function showServiceDialog(line: TutorialLine, nextStep: GuestTutorialIntroStep) {
     serviceDialogNextStep.current = nextStep;
+    serviceDialogDoneRef.current = null;
+    setServiceDialogLine(line);
+  }
+
+  function showStandaloneServiceDialog(line: TutorialLine, onClose?: () => void) {
+    serviceDialogNextStep.current = null;
+    serviceDialogDoneRef.current = onClose ?? null;
     setServiceDialogLine(line);
   }
 
   async function closeServiceDialog() {
     const next = serviceDialogNextStep.current;
+    const done = serviceDialogDoneRef.current;
     serviceDialogNextStep.current = null;
+    serviceDialogDoneRef.current = null;
     setServiceDialogLine(null);
-    if (!next) return;
+    if (!next) {
+      done?.();
+      return;
+    }
     await saveGuestTutorialIntroStep(next);
     setTutorialStep(next);
   }
@@ -385,15 +489,17 @@ export default function DiningScreen() {
     }
   }
 
-  function tutorialPortraitSource(portrait: TutorialPortrait): ReturnType<typeof require> {
+  function tutorialPortraitSource(portrait: TutorialPortrait): ImageSourcePropType {
     if (portrait === "player") return getPlayerAvatarForStamina(playerAvatarId, staminaCurrent);
     if (portrait === "old_farmer") return IMG.old_farmer;
+    if (portrait === "coachman") return IMG.coachman;
     if (portrait === "rupert_sad") return IMG.rupertsad;
     if (portrait === "rupert_laugh") return IMG.rupertlaugh;
     return IMG.rupert;
   }
 
-  const currentTutorialLine = favorDialogLine ?? serviceDialogLine ?? tutorialLines[tutorialLineIndex] ?? null;
+  const coachmanIntroLine = coachmanIntroLines[coachmanIntroIndex] ?? null;
+  const currentTutorialLine = favorDialogLine ?? serviceDialogLine ?? coachmanIntroLine ?? tutorialLines[tutorialLineIndex] ?? null;
   const dialogLine: GuestTutorialDialogLine | null = currentTutorialLine ? {
     speaker: currentTutorialLine.speaker,
     text: currentTutorialLine.text,
@@ -402,9 +508,14 @@ export default function DiningScreen() {
   } : null;
 
   const tutorialInDining = guestTutorialHasReached(tutorialStep, "dining_intro");
-  const showDiningServiceUi = !tutorialInDining || guestTutorialHasReached(tutorialStep, "meal_reveal");
-  const showRupertInDining = tutorialStep === "meal_reveal" || guestTutorialKeepsRupertInDining(tutorialStep);
-  const useDawnBackground = tutorialInDining && tutorialStep !== "service_complete";
+  const titheEventActive = titheState?.phase === "in_dining" || titheState?.phase === "bad_ending";
+  // Do not mount the guest list against the temporary default tutorial state.
+  // Otherwise a persisted, completed tutorial can briefly render today's guest
+  // before the stored step is loaded and its visibility rules take effect.
+  const showDiningServiceUi = diningLoaded && !titheEventActive &&
+    (!tutorialInDining || guestTutorialHasReached(tutorialStep, "meal_reveal"));
+  const showRupertInDining = titheEventActive || tutorialStep === "meal_reveal" || guestTutorialKeepsRupertInDining(tutorialStep);
+  const useDawnBackground = titheEventActive || (tutorialInDining && tutorialStep !== "service_complete");
   const diningTheme = useDawnBackground ? "dining-dawn" : "dining";
 
   // Keep the room music tied to the same mode that selects the background.
@@ -415,6 +526,27 @@ export default function DiningScreen() {
       if (!diningLoaded) return;
       crossfadeTo(diningTheme, 3000);
     }, [crossfadeTo, diningLoaded, diningTheme]),
+  );
+
+  useFocusEffect(
+    React.useCallback(() => {
+      if (!diningLoaded || !guestTutorialHasReached(tutorialStep, "service_complete")) return;
+      let active = true;
+      (async () => {
+        const [travel, rawDay] = await Promise.all([
+          loadTravelState(),
+          AsyncStorage.getItem(DSK.DAY_INDEX),
+        ]);
+        if (!active) return;
+        setExploreUnlocked(travel.exploreUnlocked);
+        const currentDay = Math.max(0, Number.parseInt(rawDay ?? "0", 10) || 0) % 7;
+        if (!travel.exploreUnlocked && (currentDay === 2 || currentDay === 4 || currentDay === 5)) {
+          setCoachmanIntroLines((current) => current.length > 0 ? current : coachmanIntroduction(playerName));
+          setCoachmanIntroIndex(0);
+        }
+      })().catch(() => {});
+      return () => { active = false; };
+    }, [diningLoaded, playerName, tutorialStep]),
   );
 
   async function handleBagToMealSlot(bagSlotIndex: number) {
@@ -451,8 +583,110 @@ export default function DiningScreen() {
     }
   }
 
-  async function handleGuestService(guest: GuestVisitView, action: GuestServiceAction) {
-    if (serviceBusy || guest.profile.id !== "old_farmer") return;
+  function coachmanMealReaction(reaction: GuestMealReaction): string {
+    if (reaction === "favorite") return '"Beef Stew. Now that is exactly what a long day on the road calls for."';
+    if (reaction === "favored") return '"Hot and filling. You know how to welcome a tired traveler."';
+    if (reaction === "disliked") return '"A cold meal after a day outside? Not quite what I was hoping for."';
+    if (reaction === "least_favorite") return '"Snowberry Sherbet? I’ll be honest, this really is not for me."';
+    return '"Thank you. That will keep me going for the road ahead."';
+  }
+
+  function coachmanTalkLine(favor: number): string {
+    if (favor >= 75) return '"There are roads I only recommend to people I trust. You’re getting close."';
+    if (favor >= 50) return '"The farther the destination, the more carefully you should prepare for the journey."';
+    if (favor >= 25) return '"I don’t have a sweet tooth, but I do eat sweets occasionally."';
+    return '"Nothing beats a hot meal after a long day of work."';
+  }
+
+  function farmerMealReaction(reaction: GuestMealReaction): string {
+    if (reaction === "favorite") return '"Carrot Soup. You remembered my favorite."';
+    if (reaction === "favored") return '"That was a fine meal. Thank you."';
+    if (reaction === "disliked" || reaction === "least_favorite") return '"Not quite to my taste, but I appreciate the effort."';
+    return '"That hit the spot. Thank you."';
+  }
+
+  function farmerTalkLine(favor: number): string {
+    if (favor >= 75) return '"You have turned this old place into a welcoming tavern again."';
+    if (favor >= 50) return '"Good soil and patience—that is what makes a harvest."';
+    if (favor >= 25) return '"Carrots make an excellent soup, if you ask me."';
+    return '"The fields have kept me busy today."';
+  }
+
+  function departGuest(guestId: GuestId) {
+    setDepartingGuestId(guestId);
+    setTimeout(() => {
+      setDepartingGuestId(null);
+      setHiddenGuestIds((current) => current.includes(guestId) ? current : [...current, guestId]);
+    }, 720);
+  }
+
+  async function handleGuestService(
+    guest: GuestVisitView,
+    action: GuestServiceAction,
+    source?: GuestServiceSourcePoint,
+  ): Promise<boolean | void> {
+    if (serviceBusy) return;
+
+    if (guest.profile.id === "coachman" && guestTutorialHasReached(tutorialStep, "service_complete")) {
+      if (action === "talk") {
+        showStandaloneServiceDialog({ speaker: "Coachman", portrait: "coachman", text: coachmanTalkLine(guest.favor) });
+        return;
+      }
+
+      if (action === "water") {
+        setServiceBusy(true);
+        await markGuestServed("coachman");
+        await addCurrencyCopper(1);
+        setServiceBusy(false);
+        showStandaloneServiceDialog(
+          { speaker: "Coachman", portrait: "coachman", text: '"Nothing to eat today? Then I\'ll go to the next place."' },
+          () => departGuest("coachman"),
+        );
+        return;
+      }
+
+      if (action === "sell") {
+        const activeIndex = mealState.activeSlotIndex;
+        const activeMeal = activeIndex !== null ? mealState.slots[activeIndex] : null;
+        if (activeIndex === null || !activeMeal) {
+          showPlayerThought("I need to select a meal first.");
+          return;
+        }
+        const price = getMealBaseSellPriceCopper(activeMeal);
+        if (price === null) {
+          showPlayerThought("This meal does not have a price yet.");
+          return;
+        }
+
+        setServiceBusy(true);
+        const reaction = evaluateGuestMealFavor(guest.profile, activeMeal);
+        const nextSlots = [...mealState.slots];
+        nextSlots[activeIndex] = null;
+        const nextMealState: DiningMealState = { ...mealState, slots: nextSlots, activeSlotIndex: null };
+        setMealState(nextMealState);
+        await saveDiningMealState(nextMealState);
+        if (reaction.favorDelta !== 0) await addGuestFavor("coachman", reaction.favorDelta);
+        await markGuestServed("coachman");
+
+        const start = source ?? { x: W * 0.3, y: headerH + 350 };
+        const mealImage = MEAL_IMAGES[activeMeal.id] ?? IMG.herbsoup;
+        runTransfer(mealImage, W * 0.5 - 18, headerH + 165, start.x - 18, start.y - 18, () => {
+          audioManager.playSoundEffect("bling", { maxDurationMs: 2000 });
+          runTransfer(IMG.coin_copper, start.x - 14, start.y - 14, W - 70, insets.top + 68, async () => {
+            await addCurrencyCopper(price);
+            setServiceBusy(false);
+            showStandaloneServiceDialog(
+              { speaker: "Coachman", portrait: "coachman", text: coachmanMealReaction(reaction.reaction) },
+              () => departGuest("coachman"),
+            );
+          });
+        });
+        return;
+      }
+      return;
+    }
+
+    if (guest.profile.id !== "old_farmer") return;
 
     if (tutorialStep === "service_sell" && action === "sell") {
       const activeIndex = mealState.activeSlotIndex;
@@ -488,7 +722,7 @@ export default function DiningScreen() {
               await addCurrencyCopper(OLD_FARMER_SELL_PRICE_COPPER);
               setServiceBusy(false);
               showServiceDialog(
-                { speaker: "Old Farmer", portrait: "old_farmer", text: '"Delicious. Here are 8 Copper."' },
+                { speaker: "Old Farmer", portrait: "old_farmer", text: '"Delicious. Here are 9 Copper."' },
                 "service_exchange",
               );
             },
@@ -519,7 +753,145 @@ export default function DiningScreen() {
       setTutorialStep("service_reaction");
       setTutorialLines(serviceReaction());
       setTutorialLineIndex(0);
+      return;
     }
+
+    if (guestTutorialHasReached(tutorialStep, "service_complete") && action === "exchange") {
+      const offer = guest.exchangeOffer;
+      if (!offer) {
+        showPlayerThought("That offer is no longer available.");
+        return false;
+      }
+
+      const activeIndex = mealState.activeSlotIndex;
+      const activeMeal = activeIndex !== null ? mealState.slots[activeIndex] : null;
+      if (activeIndex === null || !activeMeal) {
+        showPlayerThought("I need to select a meal first.");
+        return false;
+      }
+
+      setServiceBusy(true);
+      const reaction = evaluateGuestMealFavor(guest.profile, activeMeal);
+      const nextSlots = [...mealState.slots];
+      nextSlots[activeIndex] = null;
+      const nextMealState: DiningMealState = {
+        ...mealState,
+        slots: nextSlots,
+        activeSlotIndex: null,
+      };
+      const result = await completeGuestExchange(guest.profile.id, offer, [
+        [DINING_MEAL_STATE_KEY, JSON.stringify(nextMealState)],
+      ]);
+
+      if (!result.ok) {
+        setServiceBusy(false);
+        showPlayerThought(
+          result.reason === "bag_locked"
+            ? "I need my bag first."
+            : result.reason === "bag_full"
+              ? "My bag is full."
+              : result.reason === "offer_unavailable"
+                ? "That offer is no longer available."
+                : "I can't complete this exchange right now.",
+        );
+        return false;
+      }
+
+      setMealState(nextMealState);
+      if (result.playerBag) setPlayerBag(result.playerBag);
+      if (reaction.favorDelta !== 0) await addGuestFavor("old_farmer", reaction.favorDelta);
+      await markGuestServed("old_farmer");
+
+      const start = source ?? { x: W * 0.5, y: headerH + 360 };
+      const target = result.destination === "garden_storage"
+        ? await measureViewCenter(gardenNavButtonRef, { x: W * 0.25, y: H - insets.bottom - 42 })
+        : await measureViewCenter(bagButtonRef, { x: W - 54, y: insets.top + 150 });
+      const image = getGuestExchangeImage(result.item.id) ?? IMG.bag1;
+
+      runTransfer(
+        image,
+        start.x - 18,
+        start.y - 18,
+        target.x - 18,
+        target.y - 18,
+        () => {
+          audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
+          setServiceBusy(false);
+          showStandaloneServiceDialog(
+            { speaker: "Old Farmer", portrait: "old_farmer", text: farmerMealReaction(reaction.reaction) },
+            () => departGuest("old_farmer"),
+          );
+        },
+      );
+      return true;
+    }
+
+    if (guestTutorialHasReached(tutorialStep, "service_complete") && action === "talk") {
+      showStandaloneServiceDialog({ speaker: "Old Farmer", portrait: "old_farmer", text: farmerTalkLine(guest.favor) });
+      return;
+    }
+
+    if (guestTutorialHasReached(tutorialStep, "service_complete") && action === "water") {
+      setServiceBusy(true);
+      await markGuestServed("old_farmer");
+      await addCurrencyCopper(1);
+      setServiceBusy(false);
+      showStandaloneServiceDialog(
+        { speaker: "Old Farmer", portrait: "old_farmer", text: '"Nothing to eat today? Then I\'ll go to the next place."' },
+        () => departGuest("old_farmer"),
+      );
+      return;
+    }
+
+    if (guestTutorialHasReached(tutorialStep, "service_complete") && action === "sell") {
+      const activeIndex = mealState.activeSlotIndex;
+      const activeMeal = activeIndex !== null ? mealState.slots[activeIndex] : null;
+      if (activeIndex === null || !activeMeal) {
+        showPlayerThought("I need to select a meal first.");
+        return;
+      }
+      const price = getMealBaseSellPriceCopper(activeMeal);
+      if (price === null) {
+        showPlayerThought("This meal does not have a price yet.");
+        return;
+      }
+
+      setServiceBusy(true);
+      const reaction = evaluateGuestMealFavor(guest.profile, activeMeal);
+      const nextSlots = [...mealState.slots];
+      nextSlots[activeIndex] = null;
+      const nextMealState: DiningMealState = { ...mealState, slots: nextSlots, activeSlotIndex: null };
+      setMealState(nextMealState);
+      await saveDiningMealState(nextMealState);
+      if (reaction.favorDelta !== 0) await addGuestFavor("old_farmer", reaction.favorDelta);
+      await markGuestServed("old_farmer");
+
+      const start = source ?? { x: W * 0.3, y: headerH + 350 };
+      const mealImage = MEAL_IMAGES[activeMeal.id] ?? IMG.herbsoup;
+      runTransfer(mealImage, W * 0.5 - 18, headerH + 165, start.x - 18, start.y - 18, () => {
+        audioManager.playSoundEffect("bling", { maxDurationMs: 2000 });
+        runTransfer(IMG.coin_copper, start.x - 14, start.y - 14, W - 70, insets.top + 68, async () => {
+          await addCurrencyCopper(price);
+          setServiceBusy(false);
+          showStandaloneServiceDialog(
+            { speaker: "Old Farmer", portrait: "old_farmer", text: farmerMealReaction(reaction.reaction) },
+            () => departGuest("old_farmer"),
+          );
+        });
+      });
+      return;
+    }
+  }
+
+  async function advanceCoachmanIntroduction() {
+    if (coachmanIntroIndex < coachmanIntroLines.length - 1) {
+      setCoachmanIntroIndex((current) => current + 1);
+      return;
+    }
+    const travel = await unlockExploreFromCoachman();
+    setExploreUnlocked(travel.exploreUnlocked);
+    setCoachmanIntroLines([]);
+    setCoachmanIntroIndex(0);
   }
 
   async function handleMealSlotTap(slotIndex: number) {
@@ -579,8 +951,70 @@ export default function DiningScreen() {
     router.replace("/kitchen");
   }
 
+  function civilDialogText(): string {
+    if (!titheState) return "";
+    if (civilDialogStage === "introduction") {
+      return "Good day, I am here to collect the tithe. Each harvest costs 10 copper coins. Let's see how many times you have harvested.";
+    }
+    if (civilDialogStage === "paid") {
+      const count = titheState.currentHarvestCount;
+      const countText = formatHarvestCount(count);
+      const debtText = titheState.currentHadDeferredDebt ? " Including the deferred tithe," : "";
+      return `Oh, ${countText} ${count === 1 ? "time" : "times"}?${debtText} That makes ${titheState.currentChargeCopper} copper coins. Thanks, see you in two weeks.`;
+    }
+    if (civilDialogStage === "deferred") {
+      return "You don't have enough? I can defer the payment this one time, but next time you'd have to pay me the tithe for today as well as for the next visit.";
+    }
+    return "Prepare yourself well for this. I do not want to have to resort to harsher measures.";
+  }
+
+  async function continueCivilServantDialog() {
+    if (!titheState || titheBusy) return;
+    if (civilDialogStage === "introduction") {
+      setTitheBusy(true);
+      const original = titheState;
+      const result = await resolveCurrentTithe();
+      setTitheState(result.resolution === "death" ? result.state : original);
+      setTitheBusy(false);
+      if (result.resolution === "paid") setCivilDialogStage("paid");
+      else if (result.resolution === "deferred") setCivilDialogStage("deferred");
+      else setCivilDialogStage(null);
+      return;
+    }
+    if (civilDialogStage === "deferred") {
+      setCivilDialogStage("warning");
+      return;
+    }
+    setCivilDialogStage(null);
+    setTitheState(await loadTitheState());
+  }
+
+  async function startFollowingRun(takeBreak: boolean) {
+    if (runTransitionBusy) return;
+    setRunTransitionBusy(true);
+    try {
+      const rawSlot = await AsyncStorage.getItem(DSK.ACTIVE_SLOT);
+      const slotNumber = Math.max(1, Number.parseInt(rawSlot ?? "1", 10) || 1);
+      const next = await prepareNextRun(slotNumber);
+      audioManager.stopGameplayMusic(1000);
+      if (takeBreak) {
+        router.replace("/");
+      } else {
+        router.replace({
+          pathname: "/intro",
+          params: { characterName: next.playerName, slotId: String(slotNumber) },
+        });
+      }
+    } catch (error) {
+      if (__DEV__) console.error("[Dining] next-run transition failed:", error);
+      setRunTransitionBusy(false);
+    }
+  }
+
   const staminaPct = Math.max(0, Math.min(1, staminaCurrent / (playerStats.maximumStamina || 1)));
   const lifePct = Math.max(0, Math.min(1, lifeCurrent / (playerStats.maximumLife || 1)));
+  const selectedMeal = mealState.activeSlotIndex !== null ? mealState.slots[mealState.activeSlotIndex] : null;
+  const selectedMealPrice = selectedMeal ? getMealBaseSellPriceCopper(selectedMeal) : null;
 
   return (
     <View style={styles.root}>
@@ -630,12 +1064,16 @@ export default function DiningScreen() {
         contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
         showsVerticalScrollIndicator={false}
         bounces={false}
-        scrollEnabled={!dialogLine}
+        scrollEnabled={!dialogLine && !titheEventActive}
       >
-        <View style={styles.portraitRow}>
+        <View
+          style={styles.portraitRow}
+          onLayout={(event) => setPortraitRowWidth(event.nativeEvent.layout.width)}
+        >
           <TouchableOpacity
             style={styles.circleWrap}
             onPress={() => setStatusOpen(true)}
+            onLayout={(event) => setPlayerPortraitFrame(event.nativeEvent.layout)}
             activeOpacity={0.8}
           >
             <Image
@@ -652,21 +1090,20 @@ export default function DiningScreen() {
             )}
           </View>
 
-          <BagIconButton
-            unlocked={playerBag.unlocked}
-            onPress={() => setBagOpen(true)}
-          />
+          <View ref={bagButtonRef} collapsable={false}>
+            <BagIconButton
+              unlocked={playerBag.unlocked}
+              onPress={() => setBagOpen(true)}
+            />
+          </View>
 
           {playerThought && (
-            <View
-              style={[styles.playerThoughtWrap, { width: Math.min(W * 0.72, Math.max(150, playerThought.length * 6.6 + 32)) }]}
-              pointerEvents="none"
-            >
-              <View style={styles.playerThoughtArrow} />
-              <View style={styles.playerThoughtCard}>
-                <Text style={styles.playerThoughtText}>{playerThought}</Text>
-              </View>
-            </View>
+            <PortraitBubble
+              anchorX={playerPortraitFrame.x + playerPortraitFrame.width / 2}
+              screenWidth={portraitRowWidth}
+              text={playerThought}
+              top={playerPortraitFrame.y + playerPortraitFrame.height + 12}
+            />
           )}
         </View>
 
@@ -708,11 +1145,24 @@ export default function DiningScreen() {
                 tutorialStep === "service_sell" ? "sell" :
                 tutorialStep === "service_exchange" ? "exchange" :
                 tutorialStep === "service_water" ? "water" :
-                tutorialStep === "service_talk" ? "talk" : null
+                tutorialStep === "service_talk" ? "talk" :
+                guestTutorialHasReached(tutorialStep, "service_complete") ? "exchange" : null
               }
-              sellPriceCopper={OLD_FARMER_SELL_PRICE_COPPER}
+              enabledServicesForGuest={(guest) => {
+                if (serviceBusy) return [];
+                if (!guestTutorialHasReached(tutorialStep, "service_complete")) return null;
+                return guest.profile.id === "coachman"
+                  ? ["sell", "water", "talk"]
+                  : ["sell", "exchange", "water", "talk"];
+              }}
+              sellPriceCopper={guestTutorialHasReached(tutorialStep, "service_complete")
+                ? selectedMealPrice
+                : OLD_FARMER_SELL_PRICE_COPPER}
               departingGuestId={departingGuestId}
-              hiddenGuestIds={tutorialStep === "service_complete" ? ["old_farmer"] : []}
+              hiddenGuestIds={[
+                ...(tutorialStep === "service_complete" && dayIdx === 1 ? ["old_farmer" as const] : []),
+                ...hiddenGuestIds,
+              ]}
               onService={handleGuestService}
               onFavorRewardDialog={showFavorRewardDialog}
             />
@@ -728,7 +1178,7 @@ const guestDormitoryBlocked = guestTutorialKeepsRupertInDining(tutorialStep) && 
 const coreDestination = coreTravelUnlocked &&
   (loc.id === "kitchen" || loc.id === "garden" || loc.id === "dormitory");
 const locImg = IMG[`loc_${loc.id}` as keyof typeof IMG] as number | undefined;
-const active = loc.id === "kitchen" || isCurrent || coreDestination || guestDormitoryBlocked;
+const active = loc.id === "kitchen" || isCurrent || coreDestination || guestDormitoryBlocked || (loc.id === "explore" && exploreUnlocked);
 
 const content = locImg ? (
   <Image
@@ -755,16 +1205,22 @@ const locationAction = guestDormitoryBlocked
             audioManager.playSoundEffect("walking-on-wood", { maxDurationMs: 5000 });
             router.replace("/dormitory");
           }
+        : loc.id === "explore" && exploreUnlocked
+          ? () => {
+              audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });
+              router.push({ pathname: "/outside-tavern", params: { returnTo: "dining" } });
+            }
         : undefined;
 
           return (
             <TouchableOpacity
+              ref={loc.id === "garden" ? gardenNavButtonRef : undefined}
               key={loc.id}
               style={[
                 styles.locBtn,
                 isCurrent ? styles.locBtnCurrent : (active ? styles.locBtnActive : styles.locBtnLocked),
               ]}
-              disabled={!locationAction || !!dialogLine}
+              disabled={!locationAction || !!dialogLine || titheEventActive}
               onPress={locationAction}
               activeOpacity={0.8}
             >
@@ -779,7 +1235,26 @@ const locationAction = guestDormitoryBlocked
         line={dialogLine}
         onContinue={favorDialogLine
           ? () => setFavorDialogLine(null)
-          : serviceDialogLine ? closeServiceDialog : advanceTutorialDialog}
+          : serviceDialogLine
+            ? closeServiceDialog
+            : coachmanIntroLine
+              ? () => { void advanceCoachmanIntroduction(); }
+              : advanceTutorialDialog}
+      />
+
+      <CivilServantDialog
+        visible={titheEventActive && titheState?.phase === "in_dining" && civilDialogStage !== null}
+        image={IMG.civil_servant}
+        text={civilDialogText()}
+        busy={titheBusy}
+        onContinue={() => { void continueCivilServantDialog(); }}
+      />
+
+      <RunEndingOverlay
+        visible={titheState?.phase === "bad_ending"}
+        busy={runTransitionBusy}
+        onNewRun={() => { void startFollowingRun(false); }}
+        onTakeBreak={() => { void startFollowingRun(true); }}
       />
 
       {transferImage && (
@@ -955,44 +1430,6 @@ const styles = StyleSheet.create({
     borderColor: "transparent",
     backgroundColor: "transparent",
   },
-  playerThoughtWrap: {
-    position: "absolute",
-    left: 14,
-    top: 104,
-    maxWidth: 280,
-    zIndex: 30,
-  },
-  playerThoughtArrow: {
-    width: 0,
-    height: 0,
-    borderLeftWidth: 8,
-    borderRightWidth: 8,
-    borderBottomWidth: 10,
-    borderLeftColor: "transparent",
-    borderRightColor: "transparent",
-    borderBottomColor: "rgba(240,230,200,0.97)",
-    marginLeft: 34,
-  },
-  playerThoughtCard: {
-    backgroundColor: "rgba(240,230,200,0.97)",
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: "rgba(196,148,58,0.50)",
-    paddingHorizontal: 13,
-    paddingVertical: 9,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.35,
-    shadowRadius: 7,
-    elevation: 14,
-  },
-  playerThoughtText: {
-    color: "#2A1000",
-    fontSize: 12,
-    lineHeight: 18,
-    fontFamily: "RobotoItalic",
-  },
-
   mealBar: {
     marginHorizontal: 8,
     marginVertical: 5,

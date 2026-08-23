@@ -8,6 +8,7 @@ import {
   Modal,
   StyleSheet,
   useWindowDimensions,
+  type ImageSourcePropType,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -22,8 +23,11 @@ import {
   ITEM_CATALOG,
   KITCHEN_TABLE_KEY,
   PLAYER_BAG_KEY,
+  applyStaminaRecovery,
+  canConsumeForStamina,
   isConsumable,
   removeBagItem,
+  normalizeItemId,
   type PlayerBagData,
   type BagItem,
 } from "@/src/game/item-system";
@@ -38,16 +42,22 @@ import {
 import { useKitchenRuntime } from "@/src/game/kitchen-runtime-context";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 
-const ITEM_IMAGES: Record<string, ReturnType<typeof require>> = {
-  herbbag:     require("../../assets/images/herbbag.png"),
-  carrotbag:   require("../../assets/images/carrotbag.png"),
+const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
+  bag_herb:    require("../../assets/images/bag_herb.png"),
+  bag_carrot:  require("../../assets/images/bag_carrot.png"),
+  bag_onion:   require("../../assets/images/bag_onion.png"),
+  bag_potato:  require("../../assets/images/bag_potato.png"),
   carrot:      require("../../assets/images/carrot.png"),
+  onion:       require("../../assets/images/onion.png"),
   bucket:      require("../../assets/images/bucket.png"),
   bucketwater: require("../../assets/images/bucketwater.png"),
-  seed_herb:   require("../../assets/images/herbseed.png"),
-  seed_carrot: require("../../assets/images/carrotseed.png"),
+  seed_herb:   require("../../assets/images/seed_herb.png"),
+  seed_carrot: require("../../assets/images/seed_carrot.png"),
   herbs:       require("../../assets/images/herbs.png"),
   herbsoup:    require("../../assets/images/herbsoup.png"),
+  carrotsoup:  require("../../assets/images/carrot soup.png"),
+  carrotpotatosoup: require("../../assets/images/carrot and potato soup.png"),
+  boiledpotato: require("../../assets/images/boiled_potatoes.png"),
   oldpot:      require("../../assets/images/oldpot.png"),
   bag1:        require("../../assets/images/bag1.png"),
   wood:        require("../../assets/images/wood.png"),
@@ -59,6 +69,7 @@ const ITEM_IMAGES: Record<string, ReturnType<typeof require>> = {
   standardfertilizer: require("../../assets/images/fertilizer.png"),
   energydrink: require("../../assets/images/energy Drink.png"),
   energypill:  require("../../assets/images/energy Pill.png"),
+  healthymuffin: require("../../assets/images/healthy muffin.png"),
   goldenapple: require("../../assets/images/golden apple.png"),
 };
 
@@ -149,7 +160,7 @@ export default function PlayerBag({
       const sourceBag = carrotBagOverride ?? bag;
       const nextSlots = sourceBag.slots.map((entry) => entry ? { ...entry } : null);
       const source = nextSlots[slotIdx];
-      if (!source || source.id !== "carrotbag") return;
+      if (!source || source.id !== "bag_carrot") return;
       const remaining = Math.max(0, (source.containedQuantity ?? 0) - 1);
       nextSlots[slotIdx] = remaining > 0 ? { ...source, containedQuantity: remaining } : null;
       const nextBag = { ...sourceBag, slots: nextSlots };
@@ -221,17 +232,15 @@ export default function PlayerBag({
     let nextStats = stats;
     let nextStamina = currentStamina;
 
-    if (item.id === "healthymuffin" && currentStamina >= stats.maximumStamina) {
-      onShowThoughtBubble?.('"My Stamina is already full."');
+    if (!canConsumeForStamina(item, currentStamina, stats.maximumStamina)) {
+      onShowThoughtBubble?.('"I\'m not hungry."');
       return;
     }
 
     if (item.id === "energydrink" || item.id === "energypill") {
       nextStats = activateStaminaBuff(stats, item.id as StaminaBuffItemId);
-    } else if (item.id === "healthymuffin") {
-      nextStamina = Math.min(stats.maximumStamina, currentStamina + 50);
-    } else if (item.id === "goldenapple") {
-      nextStamina = currentStamina + 50;
+    } else if (item.id === "healthymuffin" || item.id === "goldenapple") {
+      nextStamina = applyStaminaRecovery(item, currentStamina, stats.maximumStamina);
     } else {
       return;
     }
@@ -304,7 +313,7 @@ export default function PlayerBag({
                         slotIdx={slotIdx}
                         item={item}
                         size={SLOT_SIZE}
-                        selected={item?.id === "carrotbag" && selectedCarrotBagSlot === slotIdx}
+                        selected={item?.id === "bag_carrot" && selectedCarrotBagSlot === slotIdx}
                         onPressIn={() => handleSlotPressIn()}
                         onLongPress={() => handleSlotLongPress(slotIdx, item)}
                         onPress={() => { void handleSlotPress(slotIdx, item); }}
@@ -434,7 +443,7 @@ type SlotProps = {
 };
 
 function BagSlot({ item, size, selected, onPressIn, onLongPress, onPress }: SlotProps) {
-  const imgSrc = item ? ITEM_IMAGES[item.id] : null;
+  const imgSrc = item ? ITEM_IMAGES[normalizeItemId(item.id)] : null;
   return (
     <Pressable
       style={[styles.slot, { width: size, height: size }, selected && styles.slotSelected]}

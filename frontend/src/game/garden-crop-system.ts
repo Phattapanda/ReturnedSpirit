@@ -43,6 +43,8 @@ export type GardenSeedConfig = {
 const LEGACY_SEED_IDS: Record<string, string> = {
   herbseed: "seed_herb",
   carrotseed: "seed_carrot",
+  onionseed: "seed_onion",
+  potatoseed: "seed_potato",
 };
 
 const GARDEN_SEED_CONFIGS: Record<string, GardenSeedConfig> = {
@@ -55,8 +57,8 @@ const GARDEN_SEED_CONFIGS: Record<string, GardenSeedConfig> = {
     baseYield: 5,
     yieldLabel: "herbs",
     harvestBag: {
-      id: "herbbag",
-      itemType: "herbbag",
+      id: "bag_herb",
+      itemType: "bag_herb",
       name: "Herb Bag",
       quantity: 1,
       containedItem: "herbs",
@@ -71,11 +73,43 @@ const GARDEN_SEED_CONFIGS: Record<string, GardenSeedConfig> = {
     baseYield: 5,
     yieldLabel: "carrots",
     harvestBag: {
-      id: "carrotbag",
-      itemType: "carrotbag",
+      id: "bag_carrot",
+      itemType: "bag_carrot",
       name: "Carrot Bag",
       quantity: 1,
       containedItem: "carrot",
+    },
+  },
+  seed_potato: {
+    seedItemId: "seed_potato",
+    cropType: "potato",
+    cropAsset: "seed_potato",
+    totalGrowthDays: 4,
+    completedGrowthDaysAtPlanting: 1,
+    baseYield: 5,
+    yieldLabel: "potatoes",
+    harvestBag: {
+      id: "bag_potato",
+      itemType: "bag_potato",
+      name: "Potato Bag",
+      quantity: 1,
+      containedItem: "potato",
+    },
+  },
+  seed_onion: {
+    seedItemId: "seed_onion",
+    cropType: "onion",
+    cropAsset: "seed_onion",
+    totalGrowthDays: 5,
+    completedGrowthDaysAtPlanting: 1,
+    baseYield: 5,
+    yieldLabel: "onions",
+    harvestBag: {
+      id: "bag_onion",
+      itemType: "bag_onion",
+      name: "Onion Bag",
+      quantity: 1,
+      containedItem: "onion",
     },
   },
 };
@@ -133,11 +167,8 @@ export function getCropYieldLabel(seedItemId: string | null): string {
 }
 
 /**
- * Carrot calendar:
- * Day 1 planting = seed_carrot (completedGrowthDays 1, visual progress 0)
- * Day 2 = carrotyoung
- * Day 3 = carrotyoung
- * Day 4 = carrotbed / ready to harvest
+ * Crops count the planting day as day 1. Watering advances them when the next
+ * game day begins, so four-day crops are ready on day 4 and onions on day 5.
  */
 export function createCarrotPlot(): GardenPlotData {
   return createGardenPlotFromSeed(SECOND_GARDEN_PLOT_EMPTY, "seed_carrot")!;
