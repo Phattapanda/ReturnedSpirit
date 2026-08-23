@@ -56,6 +56,9 @@ const SFX_SOURCES: Record<string, number> = {
   bling:              require('../../assets/audio/bling.wav'),
   eat:                require('../../assets/audio/eat.mp3'),
   footstep:           require('../../assets/audio/footstep.mp3'),
+  'level-up':         require('../../assets/audio/level_up.mp3'),
+  'new-recipe-found': require('../../assets/audio/new_recipe_found.mp3'),
+  'upgrade-building': require('../../assets/audio/upgrade_building.mp3'),
 };
 
 // ─── Theme resolver (pure function) ──────────────────────────────────────────

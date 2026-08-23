@@ -333,13 +333,48 @@ export default function KitchenScreen() {
   }, [showMenu]);
   const [showRecipes, setShowRecipes] = useState(false);
   const [discoveredRecipeIds, setDiscoveredRecipeIds] = useState<string[]>([]);
+  const discoveredRecipeIdsRef = useRef<string[]>([]);
+  const [newRecipePresentation, setNewRecipePresentation] = useState<{ name: string; outputId: string } | null>(null);
+  const pendingNewRecipeRef = useRef<{ name: string; outputId: string } | null>(null);
+  const newRecipeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const newRecipeScale = useSharedValue(1.18);
+  const newRecipeOpacity = useSharedValue(0);
   const [showUpgrades, setShowUpgrades] = useState(false);
 
   useEffect(() => {
     let active = true;
-    loadDiscoveredRecipes().then((ids) => { if (active) setDiscoveredRecipeIds(ids); }).catch(() => {});
-    return () => { active = false; };
+    loadDiscoveredRecipes().then((ids) => {
+      if (!active) return;
+      discoveredRecipeIdsRef.current = ids;
+      setDiscoveredRecipeIds(ids);
+    }).catch(() => {});
+    return () => {
+      active = false;
+      if (newRecipeTimerRef.current) clearTimeout(newRecipeTimerRef.current);
+    };
   }, []);
+
+  const newRecipeAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: newRecipeOpacity.value,
+    transform: [{ scale: newRecipeScale.value }],
+  }));
+
+  function showNewRecipePresentation(recipe: { name: string; outputId: string }) {
+    if (newRecipeTimerRef.current) clearTimeout(newRecipeTimerRef.current);
+    setNewRecipePresentation(recipe);
+    newRecipeScale.value = 1.18;
+    newRecipeOpacity.value = 0;
+    newRecipeOpacity.value = withTiming(1, { duration: 120 });
+    newRecipeScale.value = withSpring(1, { damping: 14, stiffness: 190 });
+    audioManager.playSoundEffect("new-recipe-found", { maxDurationMs: 6000 });
+    newRecipeTimerRef.current = setTimeout(() => {
+      newRecipeScale.value = withTiming(0.1, { duration: 240 });
+      newRecipeOpacity.value = withTiming(0, { duration: 220 }, (done) => {
+        if (done) runOnJS(setNewRecipePresentation)(null);
+      });
+      newRecipeTimerRef.current = null;
+    }, 700);
+  }
   const [upgradeBusy, setUpgradeBusy] = useState(false);
   const [upgradeMessage, setUpgradeMessage] = useState<string | null>(null);
   const [barWidth, setBarWidth] = useState(0);
@@ -1037,7 +1072,7 @@ export default function KitchenScreen() {
         setUpgradeMessage("Already unlocked.");
       } else {
         setUpgradeMessage("2nd Plot unlocked.");
-        audioManager.playSoundEffect("bling", { maxDurationMs: 2000 });
+        audioManager.playSoundEffect("upgrade-building", { maxDurationMs: 6000 });
       }
     } finally {
       setUpgradeBusy(false);
@@ -3081,6 +3116,10 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   }
 
   function finishCraft(tutorialCraft: boolean, completedTable: (BagItem | null)[]) {
+    const newlyDiscoveredRecipe = pendingNewRecipeRef.current;
+    pendingNewRecipeRef.current = null;
+    if (newlyDiscoveredRecipe) showNewRecipePresentation(newlyDiscoveredRecipe);
+
     if (!tutorialCraft) {
       setTutState("IDLE");
       tsRef.current = "IDLE";
@@ -3103,7 +3142,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         '"We made enough for two. Can you please split them into 2 bowls?"',
         "Rupert", "ALLOW_ITEM", null, () => {}, "bubble.cooking.split_soup_request",
       );
-    }), 400);
+    }), newlyDiscoveredRecipe ? 1150 : 400);
     setTimeout(() => { craftingLocked.current = false; }, 2000);
   }
 
@@ -3219,7 +3258,16 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     setCraftIngSlots(newIng);
     AsyncStorage.setItem(SK.CRAFT_INGREDIENTS, JSON.stringify(newIng)).catch(() => {});
     AsyncStorage.setItem(SK.CRAFT_TOOL_SLOT, JSON.stringify(craftTool)).catch(() => {});
-    discoverRecipe(recipe.id).then(setDiscoveredRecipeIds).catch(() => {});
+    if (!discoveredRecipeIdsRef.current.includes(recipe.id)) {
+      pendingNewRecipeRef.current = { name: recipe.name, outputId: recipe.outputId };
+      const reservedIds = [...discoveredRecipeIdsRef.current, recipe.id];
+      discoveredRecipeIdsRef.current = reservedIds;
+      setDiscoveredRecipeIds(reservedIds);
+    }
+    discoverRecipe(recipe.id).then((ids) => {
+      discoveredRecipeIdsRef.current = ids;
+      setDiscoveredRecipeIds(ids);
+    }).catch(() => {});
     startCraftOutputFlight(outputs, targetSlots, newTable, tutorialCraft);
   }
 
@@ -4383,6 +4431,30 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
         }}
       />
 
+      {/* First-time recipe discovery celebration. It is intentionally rendered
+          above gameplay only after the crafted output has reached the table. */}
+      {newRecipePresentation && (
+        <View style={[StyleSheet.absoluteFill, styles.newRecipeOverlay]} pointerEvents="none">
+          <Animated.View style={[styles.newRecipeCelebration, newRecipeAnimatedStyle]}>
+            <Text style={styles.newRecipeLabel}>NEW RECIPE</Text>
+            <View
+              style={[
+                styles.newRecipeImageFrame,
+                { width: Math.min(W * 0.48, 190), height: Math.min(W * 0.48, 190) },
+              ]}
+            >
+              <Image
+                source={ITEM_IMAGES[newRecipePresentation.outputId] ?? IMG.herbsoup}
+                style={styles.newRecipeImage}
+                resizeMode="contain"
+                resizeMethod="resize"
+              />
+            </View>
+            <Text style={styles.newRecipeName}>{newRecipePresentation.name}</Text>
+          </Animated.View>
+        </View>
+      )}
+
       {/* ── Player thought bubble */}
       {playerBubble && (() => {
         const playerL = layouts.current.player;
@@ -4405,6 +4477,42 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#0A0500", position: "relative" },
   bgOverlay: { backgroundColor: "rgba(0,0,0,0.28)", zIndex: 0, pointerEvents: "none" as "none" },
+
+  newRecipeOverlay: {
+    zIndex: 850,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.20)",
+  },
+  newRecipeCelebration: { alignItems: "center", justifyContent: "center", gap: 8 },
+  newRecipeLabel: {
+    color: "#F5E6C8",
+    fontSize: 18,
+    fontFamily: "Oldenburg",
+    letterSpacing: 2,
+    textShadowColor: "#2A1000",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 5,
+  },
+  newRecipeImageFrame: {
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 26,
+    borderWidth: 2,
+    borderColor: "rgba(245,230,200,0.85)",
+    backgroundColor: "rgba(22,11,3,0.86)",
+    padding: 12,
+  },
+  newRecipeImage: { width: "100%", height: "100%" },
+  newRecipeName: {
+    color: "#F5E6C8",
+    fontSize: 16,
+    fontFamily: "Oldenburg",
+    textAlign: "center",
+    textShadowColor: "#2A1000",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+  },
 
   // Header
   header: {
