@@ -1,5 +1,13 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, TouchableOpacity, Image, StyleSheet, useWindowDimensions } from "react-native";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  Image,
+  StyleSheet,
+  useWindowDimensions,
+  type ImageSourcePropType,
+} from "react-native";
 import { ACTIVITIES, type ActivityId } from "@/src/game/activity-config";
 import { calcEffectiveStaminaCost } from "@/src/game/player-stats";
 import {
@@ -10,7 +18,7 @@ import {
   type GuestTutorialIntroStep,
 } from "@/src/game/guest-tutorial";
 
-const ACTIVITY_ICONS: Record<ActivityId, ReturnType<typeof require>> = {
+const ACTIVITY_ICONS: Record<ActivityId, ImageSourcePropType> = {
   well:         require("../../assets/images/well.png"),
   collectWood:  require("../../assets/images/wood.png"),
   collectStone: require("../../assets/images/stone.png"),

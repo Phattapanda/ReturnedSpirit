@@ -40,43 +40,88 @@ export type GardenSeedConfig = {
   harvestBag: Omit<BagItem, "containedQuantity">;
 };
 
+const LEGACY_SEED_IDS: Record<string, string> = {
+  herbseed: "seed_herb",
+  carrotseed: "seed_carrot",
+  onionseed: "seed_onion",
+  potatoseed: "seed_potato",
+};
+
 const GARDEN_SEED_CONFIGS: Record<string, GardenSeedConfig> = {
-  herbseed: {
-    seedItemId: "herbseed",
+  seed_herb: {
+    seedItemId: "seed_herb",
     cropType: "herb",
-    cropAsset: "herbseed",
+    cropAsset: "seed_herb",
     totalGrowthDays: 2,
     completedGrowthDaysAtPlanting: 0,
     baseYield: 5,
     yieldLabel: "herbs",
     harvestBag: {
-      id: "herbbag",
-      itemType: "herbbag",
+      id: "bag_herb",
+      itemType: "bag_herb",
       name: "Herb Bag",
       quantity: 1,
       containedItem: "herbs",
     },
   },
-  carrotseed: {
-    seedItemId: "carrotseed",
+  seed_carrot: {
+    seedItemId: "seed_carrot",
     cropType: "carrot",
-    cropAsset: "carrotseed",
+    cropAsset: "seed_carrot",
     totalGrowthDays: 4,
     completedGrowthDaysAtPlanting: 1,
     baseYield: 5,
     yieldLabel: "carrots",
     harvestBag: {
-      id: "carrotbag",
-      itemType: "carrotbag",
+      id: "bag_carrot",
+      itemType: "bag_carrot",
       name: "Carrot Bag",
       quantity: 1,
       containedItem: "carrot",
     },
   },
+  seed_potato: {
+    seedItemId: "seed_potato",
+    cropType: "potato",
+    cropAsset: "seed_potato",
+    totalGrowthDays: 4,
+    completedGrowthDaysAtPlanting: 1,
+    baseYield: 5,
+    yieldLabel: "potatoes",
+    harvestBag: {
+      id: "bag_potato",
+      itemType: "bag_potato",
+      name: "Potato Bag",
+      quantity: 1,
+      containedItem: "potato",
+    },
+  },
+  seed_onion: {
+    seedItemId: "seed_onion",
+    cropType: "onion",
+    cropAsset: "seed_onion",
+    totalGrowthDays: 5,
+    completedGrowthDaysAtPlanting: 1,
+    baseYield: 5,
+    yieldLabel: "onions",
+    harvestBag: {
+      id: "bag_onion",
+      itemType: "bag_onion",
+      name: "Onion Bag",
+      quantity: 1,
+      containedItem: "onion",
+    },
+  },
 };
 
+/** Converts legacy save data to the canonical seed IDs. */
+export function normalizeGardenSeedId(seedItemId: string | null): string | null {
+  return seedItemId ? (LEGACY_SEED_IDS[seedItemId] ?? seedItemId) : null;
+}
+
 export function getGardenSeedConfig(seedItemId: string | null): GardenSeedConfig | null {
-  return seedItemId ? (GARDEN_SEED_CONFIGS[seedItemId] ?? null) : null;
+  const normalizedSeedId = normalizeGardenSeedId(seedItemId);
+  return normalizedSeedId ? (GARDEN_SEED_CONFIGS[normalizedSeedId] ?? null) : null;
 }
 
 export function createGardenPlotFromSeed(
@@ -122,14 +167,11 @@ export function getCropYieldLabel(seedItemId: string | null): string {
 }
 
 /**
- * Carrot calendar:
- * Day 1 planting = carrotseed (completedGrowthDays 1, visual progress 0)
- * Day 2 = carrotyoung
- * Day 3 = carrotyoung
- * Day 4 = carrotbed / ready to harvest
+ * Crops count the planting day as day 1. Watering advances them when the next
+ * game day begins, so four-day crops are ready on day 4 and onions on day 5.
  */
 export function createCarrotPlot(): GardenPlotData {
-  return createGardenPlotFromSeed(SECOND_GARDEN_PLOT_EMPTY, "carrotseed")!;
+  return createGardenPlotFromSeed(SECOND_GARDEN_PLOT_EMPTY, "seed_carrot")!;
 }
 
 export function processGardenPlotDayChange(plot: GardenPlotData): GardenPlotData {

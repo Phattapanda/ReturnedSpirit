@@ -20,12 +20,17 @@ import {
 } from "@/src/game/guest-system";
 
 export type GuestServiceAction = "sell" | "exchange" | "water" | "talk";
+export type GuestServiceSourcePoint = { x: number; y: number };
 
 type GuestCardProps = {
   guest: GuestVisitView;
   onSelect: (guestId: GuestId) => void;
-  onService?: (guest: GuestVisitView, action: GuestServiceAction) => void;
-  enabledService?: GuestServiceAction | null;
+  onService?: (
+    guest: GuestVisitView,
+    action: GuestServiceAction,
+    source?: GuestServiceSourcePoint,
+  ) => boolean | void | Promise<boolean | void>;
+  enabledService?: GuestServiceAction | readonly GuestServiceAction[] | null;
   sellPriceCopper?: number | null;
   departing?: boolean;
 };
@@ -38,16 +43,31 @@ const SERVICE_WATER = require("../../assets/images/service_water.png");
 const SERVICE_TALK = require("../../assets/images/service_talk.png");
 const TRADE_POTATO = require("../../assets/images/potato.png");
 const TRADE_CARROT = require("../../assets/images/carrot.png");
+const TRADE_ONION = require("../../assets/images/onion.png");
 const TRADE_FERTILIZER = require("../../assets/images/fertilizer.png");
+const TRADE_PREMIUM_FERTILIZER = require("../../assets/premiumfertilizer.png");
+const TRADE_SEED_POTATO = require("../../assets/images/seed_potato.png");
+const TRADE_SEED_CARROT = require("../../assets/images/seed_carrot.png");
+const TRADE_SEED_ONION = require("../../assets/images/seed_onion.png");
+const TRADE_HEALTHY_MUFFIN = require("../../assets/images/healthy muffin.png");
 const TRADE_GOLDEN_APPLE = require("../../assets/images/golden apple.png");
 
 const TRADE_IMAGES: Record<string, ReturnType<typeof require>> = {
   potato: TRADE_POTATO,
   carrot: TRADE_CARROT,
-  standardfertilizer: TRADE_FERTILIZER,
-  premiumfertilizer: TRADE_FERTILIZER,
+  onion: TRADE_ONION,
+  standard_fertilizer: TRADE_FERTILIZER,
+  premium_fertilizer: TRADE_PREMIUM_FERTILIZER,
+  seed_potato: TRADE_SEED_POTATO,
+  seed_carrot: TRADE_SEED_CARROT,
+  seed_onion: TRADE_SEED_ONION,
+  healthymuffin: TRADE_HEALTHY_MUFFIN,
   goldenapple: TRADE_GOLDEN_APPLE,
 };
+
+export function getGuestExchangeImage(itemId: string): ReturnType<typeof require> | null {
+  return TRADE_IMAGES[itemId] ?? null;
+}
 
 const GUEST_PORTRAITS: Record<string, ReturnType<typeof require>> = {
   old_farmer: OLD_FARMER,
@@ -76,6 +96,8 @@ export function GuestCard({
   const portrait = GUEST_PORTRAITS[profile.portraitKey];
   const canTrade = guest.exchangeOffer !== null;
   const tradeImage = guest.exchangeOffer ? TRADE_IMAGES[guest.exchangeOffer.itemId] : null;
+  const exchangeButtonRef = useRef<View>(null);
+  const sellButtonRef = useRef<View>(null);
   const departureOpacity = useRef(new Animated.Value(1)).current;
   const departureX = useRef(new Animated.Value(0)).current;
 
@@ -87,7 +109,31 @@ export function GuestCard({
     ]).start();
   }, [departing, departureOpacity, departureX]);
 
-  const serviceEnabled = (action: GuestServiceAction) => !!onService && enabledService === action;
+  const serviceEnabled = (action: GuestServiceAction) => !!onService && (
+    Array.isArray(enabledService) ? enabledService.includes(action) : enabledService === action
+  );
+
+  function handleSellPress() {
+    const button = sellButtonRef.current;
+    if (!button) {
+      void onService?.(guest, "sell");
+      return;
+    }
+    button.measureInWindow((x, y, width, height) => {
+      void onService?.(guest, "sell", { x: x + width / 2, y: y + height / 2 });
+    });
+  }
+
+  function handleExchangePress() {
+    const exchangeButton = exchangeButtonRef.current;
+    if (!exchangeButton) {
+      void onService?.(guest, "exchange");
+      return;
+    }
+    exchangeButton.measureInWindow((x, y, width, height) => {
+      void onService?.(guest, "exchange", { x: x + width / 2, y: y + height / 2 });
+    });
+  }
 
   return (
     <Animated.View style={{ opacity: departureOpacity, transform: [{ translateX: departureX }] }}>
@@ -107,7 +153,7 @@ export function GuestCard({
 
           <View style={styles.guestTextArea}>
             <Text style={styles.name}>{profile.name}</Text>
-            <Text style={styles.requestText}>“I could use something to eat.”</Text>
+            <Text style={styles.requestText}>{coachmanRequestText(guest)}</Text>
           </View>
         </View>
 
@@ -115,9 +161,10 @@ export function GuestCard({
 
         <View style={styles.serviceRow}>
           <TouchableOpacity
+            ref={sellButtonRef}
             style={[styles.serviceButton, !serviceEnabled("sell") && styles.serviceButtonDisabled]}
             disabled={!serviceEnabled("sell")}
-            onPress={() => onService?.(guest, "sell")}
+            onPress={handleSellPress}
             activeOpacity={0.8}
           >
             <Image source={SERVICE_SELL} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
@@ -130,9 +177,10 @@ export function GuestCard({
 
           {canTrade && (
             <TouchableOpacity
+              ref={exchangeButtonRef}
               style={[styles.serviceButton, !serviceEnabled("exchange") && styles.serviceButtonDisabled]}
               disabled={!serviceEnabled("exchange")}
-              onPress={() => onService?.(guest, "exchange")}
+              onPress={handleExchangePress}
               activeOpacity={0.8}
             >
               <View style={styles.tradeItemWrap}>
@@ -184,12 +232,26 @@ type DiningGuestAreaProps = {
   dayIndex: number;
   forcedActiveGuestId?: GuestId | null;
   enabledService?: GuestServiceAction | null;
+  enabledServicesForGuest?: (guest: GuestVisitView) => GuestServiceAction | readonly GuestServiceAction[] | null;
   sellPriceCopper?: number | null;
   departingGuestId?: GuestId | null;
   hiddenGuestIds?: readonly GuestId[];
-  onService?: (guest: GuestVisitView, action: GuestServiceAction) => void;
+  onService?: (
+    guest: GuestVisitView,
+    action: GuestServiceAction,
+    source?: GuestServiceSourcePoint,
+  ) => boolean | void | Promise<boolean | void>;
   onFavorRewardDialog?: (guest: GuestVisitView, text: string) => void;
 };
+
+function coachmanRequestText(guest: GuestVisitView): string {
+  if (guest.profile.id !== "coachman") return "“I could use something to eat.”";
+  if (guest.favor >= 100) return "“My favorite stop. What’s cooking?”";
+  if (guest.favor >= 75) return "“I was hoping your kitchen was open.”";
+  if (guest.favor >= 50) return "“The road always leads me back here.”";
+  if (guest.favor >= 25) return "“Good to see you. Something warm today?”";
+  return "“A hot meal would be welcome.”";
+}
 
 /**
  * Dining-facing guest list foundation. It owns only presentation/selection state;
@@ -199,6 +261,7 @@ export default function DiningGuestArea({
   dayIndex,
   forcedActiveGuestId = null,
   enabledService = null,
+  enabledServicesForGuest,
   sellPriceCopper = null,
   departingGuestId = null,
   hiddenGuestIds = [],
@@ -248,6 +311,19 @@ export default function DiningGuestArea({
     })));
   }
 
+  async function handleService(
+    guest: GuestVisitView,
+    action: GuestServiceAction,
+    source?: GuestServiceSourcePoint,
+  ) {
+    const completed = await onService?.(guest, action, source);
+    if (action === "exchange" && completed === true) {
+      setGuests((current) => current.map((entry) => (
+        entry.profile.id === guest.profile.id ? { ...entry, exchangeOffer: null } : entry
+      )));
+    }
+  }
+
   useEffect(() => {
     if (!forcedActiveGuestId || loading) return;
     setActiveGuest(forcedActiveGuestId).catch(() => {});
@@ -283,9 +359,9 @@ export default function DiningGuestArea({
           key={guest.profile.id}
           guest={guest}
           onSelect={handleSelect}
-          onService={onService}
-          enabledService={guest.selected ? enabledService : null}
-          sellPriceCopper={guest.profile.id === "old_farmer" ? sellPriceCopper : null}
+          onService={handleService}
+          enabledService={guest.selected ? (enabledServicesForGuest?.(guest) ?? enabledService) : null}
+          sellPriceCopper={sellPriceCopper}
           departing={departingGuestId === guest.profile.id}
         />
       ))}

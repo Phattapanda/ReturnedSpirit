@@ -5,6 +5,8 @@ node_modules/
 
 # Expo
 .expo/
+.expo-export-check/
+.expo-export-asset-naming/
 .metro-cache/
 dist/
 web-build/

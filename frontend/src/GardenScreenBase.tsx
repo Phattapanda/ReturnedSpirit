@@ -12,8 +12,9 @@ import {
   Animated as RNAnimated,
   Image,
   useWindowDimensions,
+  type ImageSourcePropType,
 } from "react-native";
-import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -40,9 +41,11 @@ import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import { loadLogbook, type LogEntry, LOGBOOK_KEY } from "@/src/game/logbook";
 import ActivityBar from "@/src/components/ActivityBar";
 import StatusModal from "@/src/components/StatusModal";
+import PortraitBubble from "@/src/components/portrait-bubble";
 import {
   PLAYER_BAG_KEY, DEFAULT_BAG, planAddToBag,
   BAG_INSPECTED_KEY,
+  normalizePlayerBagData,
   type PlayerBagData, type BagItem,
 } from "@/src/game/item-system";
 import {
@@ -62,14 +65,24 @@ import {
 } from "@/src/game/guest-tutorial";
 import { loadPostGuestTutorialState } from "@/src/game/post-guest-tutorial";
 import { ensureAssetReady } from "@/src/assets/AssetManager";
-import { subscribeGardenRuntimeRefresh } from "@/src/game/garden-runtime-context";
+import {
+  subscribeGardenPlayerThought,
+  subscribeGardenRuntimeRefresh,
+} from "@/src/game/garden-runtime-context";
 import { commitHarvestBag } from "@/src/game/garden-harvest";
 import { addKarmaPoints } from "@/src/game/progression";
+import { recordTitheHarvest } from "@/src/game/tithe-system";
 import { setPlaytimePaused } from "@/src/game/playtime-tracker";
+import { loadTravelState } from "@/src/game/travel-system";
 import {
   createGardenPlotFromSeed,
   createHarvestBagForCrop,
+  normalizeGardenSeedId,
 } from "@/src/game/garden-crop-system";
+import {
+  getGardenFertilizerConfig,
+  normalizeGardenFertilizerId,
+} from "@/src/game/garden-fertilizer-system";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
   PLAYER_AVATAR_KEY,
@@ -150,23 +163,10 @@ export type InventoryItem = {
   itemType: string;
   name: string;
   quantity: number;
-  // For herbbag type (future crafting)
+  // For bag_herb type (future crafting)
   containedItem?: string;
   containedQuantity?: number;
 };
-
-// ─── Fertilizer config ────────────────────────────────────────────────────────
-
-type FertilizerConfig = {
-  id: string;
-  name: string;
-  yieldBonus: number;
-  staminaCost: number;
-};
-
-const FERTILIZER_CONFIGS: FertilizerConfig[] = [
-  { id: "standard_fertilizer", name: "Standard Fertilizer", yieldBonus: 1, staminaCost: 3 },
-];
 
 // ─── Location data ────────────────────────────────────────────────────────────
 
@@ -184,8 +184,10 @@ const IMG = {
   avSad:       require("../assets/images/avatar1_sad.png"),
   avTired:     require("../assets/images/avatar1_tired.png"),
   avSick:      require("../assets/images/avatar1_sick.png"),
-  herbbag:     require("../assets/images/herbbag.png"),
-  carrotbag:   require("../assets/images/carrotbag.png"),
+  bag_herb:    require("../assets/images/bag_herb.png"),
+  bag_carrot:  require("../assets/images/bag_carrot.png"),
+  bag_onion:   require("../assets/images/bag_onion.png"),
+  bag_potato:  require("../assets/images/bag_potato.png"),
   bucket:      require("../assets/images/bucket.png"),
   bucketwater: require("../assets/images/bucketwater.png"),
   getwater:    require("../assets/images/getwater.png"),
@@ -202,6 +204,8 @@ const IMG = {
   loc_mail:      require("../assets/images/gotomail.png"),
   loc_explore:   require("../assets/images/goexplore.png"),
   loc_storage:   require("../assets/images/gotostorage.png"),
+  standard_fertilizer: require("../assets/images/fertilizer.png"),
+  premium_fertilizer: require("../assets/premiumfertilizer.png"),
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -216,9 +220,21 @@ function rupertSrc(p: "normal" | "sad" | "laugh") {
 // ─── Default data ─────────────────────────────────────────────────────────────
 
 const DEFAULT_INVENTORY: InventoryItem[] = [
-  { id: "herbseed",            itemType: "seed",        name: "Herb Seed",            quantity: 5 },
+  { id: "seed_herb",           itemType: "seed",        name: "Herb Seed",            quantity: 5 },
   { id: "standard_fertilizer", itemType: "fertilizer",  name: "Standard Fertilizer",  quantity: 5 },
 ];
+
+function normalizeGardenInventoryIds(items: InventoryItem[]): InventoryItem[] {
+  return items.map((item) => {
+    if (item.itemType === "seed") {
+      return { ...item, id: normalizeGardenSeedId(item.id) ?? item.id };
+    }
+    if (item.itemType === "fertilizer") {
+      return { ...item, id: normalizeGardenFertilizerId(item.id) ?? item.id };
+    }
+    return item;
+  });
+}
 
 const SECOND_PLOT_EMPTY: GardenPlotData = {
   id: "garden_plot_02",
@@ -250,8 +266,8 @@ const TUTORIAL_PLOT_INITIAL: GardenPlotData = {
   upgradeLevel: 1,
   status: "growing",
   cropType: "herb",
-  cropAsset: "herbbed",
-  seedItemId: "herbseed",
+  cropAsset: "bed_herb",
+  seedItemId: "seed_herb",
   totalGrowthDays: 2,
   completedGrowthDays: 1,
   remainingGrowthDays: 1,
@@ -280,7 +296,6 @@ const FLOAT_FADE_OUT = 400;    // ms fade-out
 
 export default function GardenScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ loadedFromSave?: string }>();
   const insets = useSafeAreaInsets();
   const { width: W, height: H } = useWindowDimensions();
   const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(DEFAULT_PLAYER_AVATAR_ID);
@@ -330,19 +345,21 @@ export default function GardenScreen() {
   const [secondPlotUnlocked, setSecondPlotUnlocked] = useState(false);
   const [diningUnlocked, setDiningUnlocked] = useState(false);
   const [coreTravelUnlocked, setCoreTravelUnlocked] = useState(false);
+  const [exploreUnlocked, setExploreUnlocked] = useState(false);
 
   // Guest progression refresh: Dining opens at dining_prompt;
   // Dormitory becomes normal travel after service_complete.
   useFocusEffect(
     React.useCallback(() => {
       let active = true;
-      loadGuestTutorialIntroStep()
-        .then((step) => {
+      Promise.all([loadGuestTutorialIntroStep(), loadTravelState()])
+        .then(([step, travel]) => {
 if (!active) return;
 setDiningUnlocked(guestTutorialHasReached(step, "dining_prompt"));
 setCoreTravelUnlocked(guestTutorialHasReached(step, "service_complete"));
 setRupertInDining(guestTutorialKeepsRupertInDining(step));
 setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
+setExploreUnlocked(travel.exploreUnlocked);
         })
         .catch(() => {});
       return () => { active = false; };
@@ -392,7 +409,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
 
   // Single flying item overlay — always rendered (opacity driven by animation)
   type FlyTarget = { ex: number; ey: number; onDone?: () => void };
-  const [flyImg, setFlyImg] = useState<ReturnType<typeof require> | null>(null);
+  const [flyImg, setFlyImg] = useState<ImageSourcePropType | null>(null);
   const pendingFlyRef = useRef<FlyTarget | null>(null);
   const flyX        = useSharedValue(0);
   const flyY        = useSharedValue(0);
@@ -532,12 +549,12 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
         }
 
         if (rawInv) {
-          try { setInventory(JSON.parse(rawInv)); } catch { /* keep current */ }
+          try { setInventory(normalizeGardenInventoryIds(JSON.parse(rawInv))); } catch { /* keep current */ }
         }
 
         if (rawBag) {
           try {
-            const nextBag: PlayerBagData = { ...DEFAULT_BAG, ...JSON.parse(rawBag) };
+            const nextBag = normalizePlayerBagData(JSON.parse(rawBag));
             playerBagRef.current = nextBag;
             setPlayerBag(nextBag);
           } catch { /* keep current */ }
@@ -657,7 +674,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
 
         // Load player bag
         const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
-        if (rawBag) { try { setPlayerBag(JSON.parse(rawBag)); } catch { /* default */ } }
+        if (rawBag) { try { setPlayerBag(normalizePlayerBagData(JSON.parse(rawBag))); } catch { /* default */ } }
 
         // Bag pulse is a one-time tutorial cue. Once the bag was inspected after
         // receiving it, every later Garden visit must restore that persisted state.
@@ -672,12 +689,12 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
         // Load inventory
         const rawInv = await AsyncStorage.getItem(GSK.INVENTORY);
         if (rawInv) {
-          try { setInventory(JSON.parse(rawInv)); } catch { /* use default */ }
+          try { setInventory(normalizeGardenInventoryIds(JSON.parse(rawInv))); } catch { /* use default */ }
         }
 
         // Load selected fertilizer
         const rawFert = await AsyncStorage.getItem(GSK.SEL_FERTILIZER);
-        if (rawFert) setSelectedFertilizer(rawFert);
+        if (rawFert) setSelectedFertilizer(normalizeGardenFertilizerId(rawFert) ?? "standard_fertilizer");
 
         // Load plot data
         const rawPlot = await AsyncStorage.getItem(GSK.PLOT_DATA);
@@ -821,7 +838,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
   // Actual animation starts in useEffect after React renders the image.
   // ─────────────────────────────────────────────────────────────────────────
   function startFlyAnim(
-    image: ReturnType<typeof require>,
+    image: ImageSourcePropType,
     sx: number, sy: number,
     ex: number, ey: number,
     onDone?: () => void,
@@ -843,7 +860,13 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
     harvestBag: BagItem,
     source: "primary" | "second",
   ) {
-    const image = harvestBag.id === "carrotbag" ? IMG.carrotbag : IMG.herbbag;
+    const harvestImages: Record<string, ImageSourcePropType> = {
+      bag_herb: IMG.bag_herb,
+      bag_carrot: IMG.bag_carrot,
+      bag_onion: IMG.bag_onion,
+      bag_potato: IMG.bag_potato,
+    };
+    const image = harvestImages[harvestBag.id] ?? IMG.bag_herb;
     const sourceRef = source === "second" ? secondCropAreaViewRef : cropAreaViewRef;
 
     const [startPos, endPos] = await Promise.all([
@@ -954,6 +977,16 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
       playerBubbleTimer.current = null;
     }, 2500);
   }
+
+  useEffect(() => subscribeGardenPlayerThought((text) => {
+    if (playerBubbleTimer.current) clearTimeout(playerBubbleTimer.current);
+    const thought = text.trim().replace(/^["“”]+|["“”]+$/g, "");
+    setPlayerBubble(thought);
+    playerBubbleTimer.current = setTimeout(() => {
+      setPlayerBubble(null);
+      playerBubbleTimer.current = null;
+    }, 2600);
+  }), []);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Tutorial: intro bubble sequence
@@ -1151,7 +1184,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
       showPlayerBubble('"No fertilizer available."');
       return;
     }
-    const fertConfig = FERTILIZER_CONFIGS.find(f => f.id === selectedFertilizer);
+    const fertConfig = getGardenFertilizerConfig(selectedFertilizer);
     if (!fertConfig) { showPlayerBubble('"No fertilizer available."'); return; }
 
     const fertilizerCost = calcEffectiveStaminaCost(fertConfig.staminaCost, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
@@ -1233,9 +1266,9 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
 
       const finalYield = plotData.baseYield + plotData.accumulatedWeedYieldBonus + plotData.accumulatedFertilizerYieldBonus;
 
-      const herbbagItem: BagItem = {
-        id: "herbbag",
-        itemType: "herbbag",
+      const herbBagItem: BagItem = {
+        id: "bag_herb",
+        itemType: "bag_herb",
         name: `Herb Bag`,
         quantity: 1,
         containedItem: "herbs",
@@ -1259,13 +1292,13 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
       const startPos = cropLayout.current ?? { cx: W / 2, cy: H * 0.45 };
       const endPos   = bagIconLayout.current ?? { cx: W * 0.75, cy: H * 0.2 };
 
-      // Defensive: ensure herbbag asset is decoded before flying animation
-      await ensureAssetReady('herbbag');
+      // Defensive: ensure bag_herb asset is decoded before flying animation.
+      await ensureAssetReady('bag_herb');
 
       const emptyPlot = createEmptyPrimaryPlot();
       let harvestCommit;
       try {
-        harvestCommit = await commitHarvestBag(herbbagItem, [
+        harvestCommit = await commitHarvestBag(herbBagItem, [
           [GSK.PLOT_DATA, JSON.stringify(emptyPlot)],
         ]);
       } catch {
@@ -1287,11 +1320,12 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
       setPlayerBag(harvestCommit.bag);
       setPlotData(emptyPlot);
       await addKarmaPoints(1);
+      await recordTitheHarvest();
       audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
 
       // Start fly animation, then complete harvest after
       startFlyAnim(
-        IMG.herbbag,
+        IMG.bag_herb,
         startPos.cx, startPos.cy,
         endPos.cx, endPos.cy,
         async () => {
@@ -1342,6 +1376,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
       setPlotData(emptyPlot);
       setGardenState("IDLE");
       await addKarmaPoints(1);
+      await recordTitheHarvest();
       deductStamina(harvestCost, `-${harvestCost}`);
       await animateHarvestToPlayerBag(harvestBag, "primary");
     } catch {
@@ -1824,7 +1859,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
 
     if (inTuesdayFlow) {
       // Check harvest done
-      const herbsInBag = playerBag.slots.some(s => s !== null && s.id === "herbbag");
+      const herbsInBag = playerBag.slots.some(s => s !== null && s.id === "bag_herb");
       const waterInBag = playerBag.slots.some(s => s !== null && s.id === "bucketwater");
       const needsHarvest = cur !== "TUTORIAL_HARVEST_COMPLETE" &&
         cur !== "BUCKET_GIFT" && cur !== "ACTIVITY_BAR_UNLOCKED" &&
@@ -1868,7 +1903,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
 
     // If leaving Tuesday garden with all required items, persist crafting ready
     if (inTuesdayFlow) {
-      const herbsInBag = playerBag.slots.some(s => s !== null && s.id === "herbbag");
+      const herbsInBag = playerBag.slots.some(s => s !== null && s.id === "bag_herb");
       const waterInBag = playerBag.slots.some(s => s !== null && s.id === "bucketwater");
       if (herbsInBag && waterInBag) {
         AsyncStorage.setItem(GSK.CRAFTING_READY, "true").catch(() => {});
@@ -1878,8 +1913,10 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
 
     // Footstep sound for outdoor → kitchen transition
     audioManager.playSoundEffect('footstep', { maxDurationMs: 4000 });
-    if (params.loadedFromSave === "1") router.replace("/kitchen");
-    else router.back();
+    // Room navigation must not depend on the current stack history. Dining uses
+    // replace() when returning to Garden, so back() here can otherwise reveal an
+    // older Garden entry instead of Kitchen.
+    router.replace("/kitchen");
   }
 
   function handleStorageTap() {
@@ -1892,7 +1929,12 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
   const temporaryStaminaReduction = getActiveStaminaBuffReduction(playerStats);
   const waterCost      = calcEffectiveStaminaCost(2, playerStats.endurance, temporaryStaminaReduction);
   const pullWeedsCost  = calcEffectiveStaminaCost(8, playerStats.endurance, temporaryStaminaReduction);
-  const fertilizeCost  = calcEffectiveStaminaCost(3, playerStats.endurance, temporaryStaminaReduction);
+  const selectedFertilizerConfig = getGardenFertilizerConfig(selectedFertilizer);
+  const fertilizeCost = calcEffectiveStaminaCost(
+    selectedFertilizerConfig?.staminaCost ?? 3,
+    playerStats.endurance,
+    temporaryStaminaReduction,
+  );
 
   const plotInteractive =
     gts === "GARDEN_PLOT_INTERACTIVE" ||
@@ -1928,41 +1970,20 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
     if (!bubble) return null;
     const rupertL = portraitLayouts.current.rupert;
     const bubbleTopPos = rupertL
-      ? rupertL.y + rupertL.h + 8
-      : (headerH > 0 ? headerH + 128 : insets.top + 190);
+      ? rupertL.y + rupertL.h + 12
+      : (headerH > 0 ? headerH + 140 : insets.top + 202);
     const arrowCenterX = rupertL ? rupertL.x + rupertL.w / 2 : W / 2;
-    const bubbleWidthTarget = Math.min(
-      W - 32,
-      Math.max(180, Math.min(W * 0.78, Math.max(bubble.text.length * 7.2, bubble.speaker.length * 9) + 48)),
-    );
-    const bubbleLeftCalc = Math.max(16, Math.min(arrowCenterX - bubbleWidthTarget / 2, W - bubbleWidthTarget - 16));
-    const bubbleRightCalc = Math.max(16, W - bubbleLeftCalc - bubbleWidthTarget);
-    const arrowOffset = Math.max(12, Math.min(
-      arrowCenterX - bubbleLeftCalc - 10,
-      W - bubbleLeftCalc - bubbleRightCalc - 32,
-    ));
 
-    const bubbleInner = (
-      <TouchableOpacity
-        style={{ position: "absolute", top: bubbleTopPos, left: bubbleLeftCalc, right: bubbleRightCalc }}
-        onPress={dismissBubble}
-        activeOpacity={0.88}
-      >
-        <View style={{ position: "relative" }}>
-          <View style={[styles.bubbleArrowBorder, { left: arrowOffset }]} />
-          <View style={[styles.bubbleArrowFill, { left: arrowOffset + 2 }]} />
-          <View style={styles.bubbleCardInner}>
-            <Text style={styles.bubbleSpeaker}>{bubble.speaker}</Text>
-            <Text style={styles.bubbleText}>{bubble.text}</Text>
-          </View>
-        </View>
-      </TouchableOpacity>
-    );
-
-    // All policies: global dismiss via full-screen Pressable
     return (
       <Pressable style={[StyleSheet.absoluteFill, { zIndex: 401 }]} onPress={dismissBubble} key="bubble-global">
-        {bubbleInner}
+        <PortraitBubble
+          anchorX={arrowCenterX}
+          screenWidth={W}
+          speaker={bubble.speaker}
+          text={bubble.text}
+          top={bubbleTopPos}
+          variant="speech"
+        />
       </Pressable>
     );
   }
@@ -1974,16 +1995,12 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
     if (!playerBubble) return null;
     const playerL = portraitLayouts.current.player;
     const topPos = playerL
-      ? playerL.y + playerL.h + 8
-      : (headerH > 0 ? headerH + 128 : insets.top + 190);
+      ? playerL.y + playerL.h + 12
+      : (headerH > 0 ? headerH + 140 : insets.top + 202);
+    const anchorX = playerL ? playerL.x + playerL.w / 2 : W * 0.18;
     return (
       <View style={[StyleSheet.absoluteFill, { zIndex: 410 }]} pointerEvents="none" key="player-bubble">
-        <View style={{ position: "absolute", top: topPos, left: 10, right: Math.max(10, W - Math.min(W * 0.75, 420) - 10) }}>
-          <View style={styles.playerBubbleArrow} />
-          <View style={styles.playerBubbleCard}>
-            <Text style={styles.playerBubbleText}>{playerBubble}</Text>
-          </View>
-        </View>
+        <PortraitBubble anchorX={anchorX} screenWidth={W} text={playerBubble} top={topPos} />
       </View>
     );
   }
@@ -1993,11 +2010,13 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
   // ─────────────────────────────────────────────────────────────────────────
   const seeds = inventory.filter(i => i.itemType === "seed" && i.quantity > 0);
   const fertilizers = inventory.filter(i => i.itemType === "fertilizer" && i.quantity > 0);
-  const herbbags = inventory.filter(i => i.itemType === "herbbag" && i.quantity > 0);
+  const harvestBags = inventory.filter(i => i.itemType.startsWith("bag_") && i.quantity > 0);
 
   async function selectFertilizer(id: string) {
-    setSelectedFertilizer(id);
-    await AsyncStorage.setItem(GSK.SEL_FERTILIZER, id);
+    const normalized = normalizeGardenFertilizerId(id);
+    if (!getGardenFertilizerConfig(normalized)) return;
+    setSelectedFertilizer(normalized!);
+    await AsyncStorage.setItem(GSK.SEL_FERTILIZER, normalized!);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -2017,8 +2036,10 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
         <Image source={IMG.avSad}       style={{ width: 1, height: 1 }} />
         <Image source={IMG.avTired}     style={{ width: 1, height: 1 }} />
         <Image source={IMG.avSick}      style={{ width: 1, height: 1 }} />
-        <Image source={IMG.herbbag}     style={{ width: 1, height: 1 }} />
-        <Image source={IMG.carrotbag}   style={{ width: 1, height: 1 }} />
+        <Image source={IMG.bag_herb}    style={{ width: 1, height: 1 }} />
+        <Image source={IMG.bag_carrot}  style={{ width: 1, height: 1 }} />
+        <Image source={IMG.bag_onion}   style={{ width: 1, height: 1 }} />
+        <Image source={IMG.bag_potato}  style={{ width: 1, height: 1 }} />
         <Image source={IMG.bucket}      style={{ width: 1, height: 1 }} />
         <Image source={IMG.bucketwater} style={{ width: 1, height: 1 }} />
       </View>
@@ -2127,6 +2148,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
           <GardenPlot
             data={plotData}
             interactive={plotInteractive}
+            selectedFertilizerId={selectedFertilizer}
             actionCosts={{ water: waterCost, pullWeeds: pullWeedsCost, fertilize: fertilizeCost }}
             onWater={handleWater}
             onPullWeeds={handlePullWeeds}
@@ -2139,11 +2161,12 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
         </Animated.View>
 
         {secondPlotUnlocked && (
-          <View ref={secondCropAreaViewRef} style={styles.secondPlotWrap}>
+          <Animated.View ref={secondCropAreaViewRef} style={[styles.secondPlotWrap, plotOpacityStyle]}>
             <Text style={styles.secondPlotLabel}>2nd Plot</Text>
             <GardenPlot
               data={SECOND_PLOT_EMPTY}
               interactive={false}
+              selectedFertilizerId={selectedFertilizer}
               onWater={() => {}}
               onPullWeeds={() => {}}
               onFertilize={() => {}}
@@ -2155,7 +2178,7 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
               }}
               actionCosts={{ water: waterCost, pullWeeds: pullWeedsCost, fertilize: fertilizeCost }}
             />
-          </View>
+          </Animated.View>
         )}
 
       </ScrollView>
@@ -2217,7 +2240,8 @@ setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
 const guestDormitoryBlocked = rupertInDining && loc.id === "dormitory";
 const diningAvailable = diningUnlocked && loc.id === "dining";
 const dormitoryAvailable = coreTravelUnlocked && loc.id === "dormitory";
-const active = guestDormitoryBlocked || diningAvailable || dormitoryAvailable;
+const exploreAvailable = exploreUnlocked && loc.id === "explore";
+const active = guestDormitoryBlocked || diningAvailable || dormitoryAvailable || exploreAvailable;
 const onPress = guestDormitoryBlocked
   ? () => showPlayerBubble('"I need to cook herb soup for the guest."')
   : diningAvailable
@@ -2230,6 +2254,11 @@ const onPress = guestDormitoryBlocked
           audioManager.playSoundEffect("walking-on-wood", { maxDurationMs: 5000 });
           router.push("/dormitory");
         }
+      : exploreAvailable
+        ? () => {
+            audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });
+            router.push({ pathname: "/outside-tavern", params: { returnTo: "garden" } });
+          }
       : undefined;
 return (
   <TouchableOpacity
@@ -2316,6 +2345,12 @@ return (
                     activeOpacity={0.8}
                   >
                     <View style={styles.storeRowLeft}>
+                      <Image
+                        source={item.id === "premium_fertilizer" ? IMG.premium_fertilizer : IMG.standard_fertilizer}
+                        style={styles.storeItemImage}
+                        resizeMode="contain"
+                        resizeMethod="resize"
+                      />
                       {selectedFertilizer === item.id && (
                         <Ionicons name="checkmark-circle" size={16} color="#C4943A" style={{ marginRight: 6 }} />
                       )}
@@ -2328,10 +2363,10 @@ return (
             )}
 
             {/* Herb bags */}
-            {herbbags.length > 0 && (
+            {harvestBags.length > 0 && (
               <>
                 <Text style={styles.storeCatLabel}>Harvest</Text>
-                {herbbags.map((item, idx) => (
+                {harvestBags.map((item, idx) => (
                   <View key={`${item.id}_${idx}`} style={styles.storeRow}>
                     <Text style={styles.storeItemName}>{item.name}</Text>
                     <Text style={styles.storeItemQty}>×{item.quantity}</Text>
@@ -2340,7 +2375,7 @@ return (
               </>
             )}
 
-            {seeds.length === 0 && fertilizers.length === 0 && herbbags.length === 0 && (
+            {seeds.length === 0 && fertilizers.length === 0 && harvestBags.length === 0 && (
               <Text style={styles.storeEmpty}>Storage is empty.</Text>
             )}
 
@@ -2677,50 +2712,6 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
 
-  // Bubbles (Rupert speech)
-  bubbleArrowBorder: {
-    position: "absolute", top: -11,
-    width: 0, height: 0, borderStyle: "solid",
-    borderLeftWidth: 11, borderRightWidth: 11, borderBottomWidth: 11, borderTopWidth: 0,
-    borderLeftColor: "transparent", borderRightColor: "transparent",
-    borderBottomColor: "rgba(196,148,58,0.55)",
-  },
-  bubbleArrowFill: {
-    position: "absolute", top: -7,
-    width: 0, height: 0, borderStyle: "solid",
-    borderLeftWidth: 9, borderRightWidth: 9, borderBottomWidth: 9, borderTopWidth: 0,
-    borderLeftColor: "transparent", borderRightColor: "transparent",
-    borderBottomColor: "rgba(250, 242, 218, 0.97)",
-  },
-  bubbleCardInner: {
-    backgroundColor: "rgba(250, 242, 218, 0.97)", borderRadius: 14,
-    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 14,
-    borderWidth: 1.5, borderColor: "rgba(196,148,58,0.55)",
-    shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.28, shadowRadius: 8,
-    elevation: 12, gap: 6,
-  },
-  bubbleSpeaker: { color: "#7A4800", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 1 },
-  bubbleText: { color: "#2A1000", fontSize: 15, lineHeight: 22, fontFamily: "RobotoRegular" },
-
-  // Player thought bubble
-  playerBubbleCard: {
-    backgroundColor: "rgba(240,230,200,0.95)", borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 10,
-    borderWidth: 1.5, borderColor: "rgba(196,148,58,0.50)",
-    shadowColor: "#000", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.4, shadowRadius: 7,
-    elevation: 14,
-    alignSelf: "flex-start" as const,
-  },
-  playerBubbleText: { color: "#2A1000", fontSize: 13, fontFamily: "RobotoItalic", lineHeight: 20 },
-  playerBubbleArrow: {
-    width: 0, height: 0, borderStyle: "solid",
-    borderLeftWidth: 8, borderRightWidth: 8,
-    borderBottomWidth: 9, borderTopWidth: 0,
-    borderLeftColor: "transparent", borderRightColor: "transparent",
-    borderBottomColor: "rgba(240,230,200,0.95)",
-    alignSelf: "flex-start", marginLeft: 20,
-  },
-
   // Tear-out modal
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.76)", alignItems: "center", justifyContent: "center" },
   tearOutPanel: {
@@ -2765,6 +2756,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(196,148,58,0.10)",
   },
   storeRowLeft: { flexDirection: "row", alignItems: "center" },
+  storeItemImage: { width: 28, height: 28, marginRight: 8 },
   storeItemName: { color: "#F0E8D5", fontSize: 13, fontFamily: "Oldenburg" },
   storeItemQty: { color: "#C4943A", fontSize: 13, fontFamily: "Oldenburg" },
   storeItemQtyZero: { color: "rgba(196,148,58,0.35)" },

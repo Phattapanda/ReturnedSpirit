@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, Image, StyleSheet, Text, View } from "react-native";
 import { usePathname } from "expo-router";
+import { useIsFocused } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAudioManager } from "@/src/audio/AudioProvider";
 
 import {
   DEFAULT_CURRENCY_COPPER,
@@ -21,7 +23,8 @@ function isGameplayRoute(pathname: string): boolean {
     pathname === "/garden" ||
     pathname === "/dormitory" ||
     pathname === "/dining" ||
-    pathname === "/dining-hall";
+    pathname === "/dining-hall" ||
+    pathname === "/outside-tavern";
 }
 
 /**
@@ -34,25 +37,42 @@ function isGameplayRoute(pathname: string): boolean {
  */
 export default function CurrencyHud() {
   const pathname = usePathname();
+  const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
+  const { playSoundEffect } = useAudioManager();
   const [totalCopper, setTotalCopper] = useState(DEFAULT_CURRENCY_COPPER);
+  const lastCopperRef = useRef<number | null>(null);
+  const isFocusedRef = useRef(isFocused);
   const opacity = useRef(new Animated.Value(0)).current;
   const translateX = useRef(new Animated.Value(18)).current;
+
+  useEffect(() => {
+    isFocusedRef.current = isFocused;
+  }, [isFocused]);
 
   // Currency persistence/subscription is independent from navigation.
   useEffect(() => {
     let active = true;
     loadCurrencyCopper().then((value) => {
-      if (active) setTotalCopper(value);
+      if (active) {
+        lastCopperRef.current = value;
+        setTotalCopper(value);
+      }
     });
     const unsubscribe = subscribeCurrency((value) => {
-      if (active) setTotalCopper(value);
+      if (!active) return;
+      const previous = lastCopperRef.current;
+      lastCopperRef.current = value;
+      setTotalCopper(value);
+      if (previous !== null && previous !== value && isFocusedRef.current) {
+        playSoundEffect("money", { maxDurationMs: 4000 });
+      }
     });
     return () => {
       active = false;
       unsubscribe();
     };
-  }, []);
+  }, [playSoundEffect]);
 
   // Follow room navigation visually instead of staying pinned during Stack transitions.
   useEffect(() => {

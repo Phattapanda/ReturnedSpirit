@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   DEFAULT_BAG,
   PLAYER_BAG_KEY,
+  normalizePlayerBagData,
   planAddToNextFreeBagSlot,
   type BagItem,
   type PlayerBagData,
@@ -25,17 +26,7 @@ function normalizeBag(raw: string | null): PlayerBagData {
   }
 
   try {
-    const parsed = JSON.parse(raw) as Partial<PlayerBagData>;
-    const slotCount = Number.isInteger(parsed.slotCount) && (parsed.slotCount ?? 0) > 0
-      ? parsed.slotCount!
-      : DEFAULT_BAG.slotCount;
-    const parsedSlots = Array.isArray(parsed.slots) ? parsed.slots : [];
-    const slots = Array.from({ length: slotCount }, (_, index) => {
-      const item = parsedSlots[index];
-      return item && typeof item === "object" ? { ...item } : null;
-    });
-
-    return { ...DEFAULT_BAG, ...parsed, slotCount, slots };
+    return normalizePlayerBagData(JSON.parse(raw));
   } catch {
     return { ...DEFAULT_BAG, slots: [...DEFAULT_BAG.slots] };
   }

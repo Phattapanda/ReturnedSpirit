@@ -2,6 +2,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { resetGuestRelationshipsForNextRun, type GuestId } from "@/src/game/guest-system";
 import { beginNextRun, type ProgressionState } from "@/src/game/progression";
+import { PLAYER_STATS_KEY, normalizePlayerStats } from "@/src/game/player-stats";
+import { advanceEffectsToNextRun } from "@/src/game/status-effect-system";
 
 type SaveSlot = {
   slot: number;
@@ -30,10 +32,19 @@ export function getDeathAngelRunLine(runNumber: number): string {
 export async function advanceToNextRun(
   slotNumber: number,
   preservedGuestIds: readonly GuestId[] = [],
+  grantedTraitIds: readonly string[] = [],
 ): Promise<ProgressionState> {
+  const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
+  const stats = normalizePlayerStats(rawStats ? JSON.parse(rawStats) : null);
+  const nextStats = {
+    ...stats,
+    statusEffects: advanceEffectsToNextRun(stats.statusEffects, grantedTraitIds),
+  };
+
   const [progression] = await Promise.all([
     beginNextRun(),
     resetGuestRelationshipsForNextRun(preservedGuestIds),
+    AsyncStorage.setItem(PLAYER_STATS_KEY, JSON.stringify(nextStats)),
   ]);
 
   const rawSlots = await AsyncStorage.getItem("game_slots");

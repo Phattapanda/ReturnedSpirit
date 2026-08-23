@@ -1,3 +1,13 @@
+import {
+  DEFAULT_STATUS_EFFECT_STATE,
+  advanceTemporaryEffectsDay,
+  applyTemporaryEffect,
+  getStatusModifiers,
+  hasTemporaryEffect,
+  normalizeStatusEffectState,
+  type StatusEffectState,
+} from "@/src/game/status-effect-system";
+
 // ─── Player Stats & Growth Points ─────────────────────────────────────────────
 
 export type PlayerStats = {
@@ -11,10 +21,7 @@ export type PlayerStats = {
   luck: number;
   effectiveness: number;
   growthPoints: number;
-  activeStaminaBuffs: {
-    energyDrinkDays: number;
-    energyPillDays: number;
-  };
+  statusEffects: StatusEffectState;
 };
 
 export const PLAYER_STATS_KEY = "@game:player_stats";
@@ -30,10 +37,7 @@ export const DEFAULT_PLAYER_STATS: PlayerStats = {
   luck: 1,
   effectiveness: 1,
   growthPoints: 0,
-  activeStaminaBuffs: {
-    energyDrinkDays: 0,
-    energyPillDays: 0,
-  },
+  statusEffects: DEFAULT_STATUS_EFFECT_STATE,
 };
 
 export const UPGRADE_GP_COST = 10;
@@ -43,14 +47,15 @@ function normalizedInteger(value: unknown, fallback: number, minimum = 0): numbe
   return Number.isFinite(parsed) ? Math.max(minimum, Math.floor(parsed)) : fallback;
 }
 
-/** Safely migrates saves created before Level and temporary Stamina buffs existed. */
+/** Safely migrates saves created before Level and the general status-effect system existed. */
 export function normalizePlayerStats(raw: unknown): PlayerStats {
   if (!raw || typeof raw !== "object") return {
     ...DEFAULT_PLAYER_STATS,
-    activeStaminaBuffs: { ...DEFAULT_PLAYER_STATS.activeStaminaBuffs },
+    statusEffects: normalizeStatusEffectState(null),
   };
-  const candidate = raw as Partial<PlayerStats>;
-  const buffs = candidate.activeStaminaBuffs ?? DEFAULT_PLAYER_STATS.activeStaminaBuffs;
+  const candidate = raw as Partial<PlayerStats> & {
+    activeStaminaBuffs?: { energyDrinkDays?: unknown; energyPillDays?: unknown };
+  };
   return {
     level: normalizedInteger(candidate.level, 1, 1),
     maximumStamina: normalizedInteger(candidate.maximumStamina, DEFAULT_PLAYER_STATS.maximumStamina, 1),
@@ -62,16 +67,12 @@ export function normalizePlayerStats(raw: unknown): PlayerStats {
     luck: normalizedInteger(candidate.luck, 1, 1),
     effectiveness: normalizedInteger(candidate.effectiveness, 1, 1),
     growthPoints: normalizedInteger(candidate.growthPoints, 0),
-    activeStaminaBuffs: {
-      energyDrinkDays: normalizedInteger(buffs.energyDrinkDays, 0),
-      energyPillDays: normalizedInteger(buffs.energyPillDays, 0),
-    },
+    statusEffects: normalizeStatusEffectState(candidate.statusEffects, candidate.activeStaminaBuffs),
   };
 }
 
 export function getActiveStaminaBuffReduction(stats: PlayerStats): number {
-  return Number(stats.activeStaminaBuffs.energyDrinkDays > 0)
-    + Number(stats.activeStaminaBuffs.energyPillDays > 0);
+  return getStatusModifiers(stats.statusEffects).staminaCostReduction;
 }
 
 /** Central cost formula: Endurance and active effects can reduce an action to zero. */
@@ -87,28 +88,23 @@ export function calcEffectiveStaminaCost(
 export type StaminaBuffItemId = "energydrink" | "energypill";
 
 export function hasStaminaBuff(stats: PlayerStats, itemId: StaminaBuffItemId): boolean {
-  return itemId === "energydrink"
-    ? stats.activeStaminaBuffs.energyDrinkDays > 0
-    : stats.activeStaminaBuffs.energyPillDays > 0;
+  return hasTemporaryEffect(stats.statusEffects, itemId === "energydrink" ? "energy_drink" : "energy_pill");
 }
 
 export function activateStaminaBuff(stats: PlayerStats, itemId: StaminaBuffItemId): PlayerStats {
   return {
     ...stats,
-    activeStaminaBuffs: {
-      ...stats.activeStaminaBuffs,
-      ...(itemId === "energydrink" ? { energyDrinkDays: 5 } : { energyPillDays: 10 }),
-    },
+    statusEffects: applyTemporaryEffect(
+      stats.statusEffects,
+      itemId === "energydrink" ? "energy_drink" : "energy_pill",
+    ),
   };
 }
 
-export function advanceStaminaBuffDay(stats: PlayerStats): PlayerStats {
+export function advancePlayerStatusEffectsDay(stats: PlayerStats): PlayerStats {
   return {
     ...stats,
-    activeStaminaBuffs: {
-      energyDrinkDays: Math.max(0, stats.activeStaminaBuffs.energyDrinkDays - 1),
-      energyPillDays: Math.max(0, stats.activeStaminaBuffs.energyPillDays - 1),
-    },
+    statusEffects: advanceTemporaryEffectsDay(stats.statusEffects),
   };
 }
 

@@ -91,6 +91,10 @@ export default function NewGame() {
       "@game:stamina",
       "@game:life",
       "@game:day_index",
+      "@game:elapsed_days",
+      "@game:civil_servant_tithe",
+      "@game:pending_next_run_intro",
+      "@game:travel_state",
       // Garden state
       "@garden:has_entered",
       "@garden:has_seen_introduction",
@@ -126,6 +130,7 @@ export default function NewGame() {
       "@kitchen:cooking_tutorial_step",
       "@kitchen:craft_ingredients",
       "@kitchen:craft_tool_slot",
+      "@kitchen:discovered_recipes",
       // Room / Dormitory state
       "@room:has_entered",
       "@room:has_seen_evening_thought",
