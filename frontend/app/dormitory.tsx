@@ -27,6 +27,7 @@ import {
   ROOM_UPGRADES_DEFAULT,
   calcSleepRecovery,
   canAfford,
+  deductUpgradeCost,
   type RoomUpgrade,
 } from "@/src/game/room-config";
 import {
@@ -202,6 +203,7 @@ export default function DormitoryScreen() {
   }, [showMenu]);
   const [upgradeMsg, setUpgradeMsg]               = useState<string | null>(null);
   const upgradeMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const roomUpgradeBusyRef = useRef(false);
 
   // ── Sleep transition
   const [sleepTransitioning, setSleepTransitioning] = useState(false);
@@ -776,18 +778,39 @@ export default function DormitoryScreen() {
     setRS("UPGRADE_MODAL");
   }
 
-  function handleUpgradeTap(upgrade: RoomUpgrade) {
-    if (upgrade.completed) return;
+  async function handleUpgradeTap(upgrade: RoomUpgrade) {
+    if (upgrade.completed || roomUpgradeBusyRef.current) return;
     if (!canAfford(upgrade, sharedResources)) {
       if (upgradeMsgTimer.current) clearTimeout(upgradeMsgTimer.current);
       setUpgradeMsg("Not enough resources.");
       upgradeMsgTimer.current = setTimeout(() => setUpgradeMsg(null), 2500);
       return;
     }
-    // Future: open confirmation and execute purchase
-    // For now, show "not enough resources" until implementation is complete
-    setUpgradeMsg("Purchase confirmed! (requires sufficient resources)");
-    upgradeMsgTimer.current = setTimeout(() => setUpgradeMsg(null), 2500);
+
+    const nextResources = deductUpgradeCost(upgrade, sharedResources);
+    if (!nextResources) return;
+    const nextUpgrades = roomUpgrades.map((entry) => (
+      entry.id === upgrade.id ? { ...entry, completed: true } : entry
+    ));
+
+    roomUpgradeBusyRef.current = true;
+    try {
+      await AsyncStorage.multiSet([
+        [DSK.UPGRADES, JSON.stringify(nextUpgrades)],
+        [SHARED_RESOURCES_KEY, JSON.stringify(nextResources)],
+      ]);
+      setRoomUpgrades(nextUpgrades);
+      setSharedResources(nextResources);
+      if (upgrade.effects.unlockRoomStorage) setRoomStorageUnlocked(true);
+      audioManager.playSoundEffect("upgrade-building", { maxDurationMs: 6000 });
+      setUpgradeMsg(`${upgrade.displayName} complete.`);
+    } catch {
+      setUpgradeMsg("Upgrade failed.");
+    } finally {
+      roomUpgradeBusyRef.current = false;
+      if (upgradeMsgTimer.current) clearTimeout(upgradeMsgTimer.current);
+      upgradeMsgTimer.current = setTimeout(() => setUpgradeMsg(null), 2500);
+    }
   }
 
   function closeUpgradeModal() {
@@ -1050,7 +1073,7 @@ export default function DormitoryScreen() {
                     key={upg.id}
                     upgrade={upg}
                     resources={sharedResources}
-                    onTap={() => handleUpgradeTap(upg)}
+                    onTap={() => { void handleUpgradeTap(upg); }}
                   />
                 ))
               )}
