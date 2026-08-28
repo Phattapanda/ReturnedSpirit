@@ -4,11 +4,55 @@ import type { GardenPlotData } from "@/src/components/GardenPlot";
 import type { BagItem } from "@/src/game/item-system";
 
 export const SECOND_GARDEN_PLOT_KEY = "@garden:plot_02_data";
+export const THIRD_GARDEN_PLOT_KEY = "@garden:plot_03_data";
+export const FOURTH_GARDEN_PLOT_KEY = "@garden:plot_04_data";
+
+export type GardenPlotNumber = 1 | 2 | 3 | 4;
+
+export function gardenPlotId(plotNumber: GardenPlotNumber): string {
+  return `garden_plot_0${plotNumber}`;
+}
+
+export function gardenPlotStorageKey(plotNumber: GardenPlotNumber): string {
+  return `@garden:plot_0${plotNumber}_data`;
+}
+
+export function minimumYieldForUpgradeLevel(level: number | undefined): number {
+  return level && level >= 2 ? 10 : level && level >= 1 ? 7 : 5;
+}
+
+export function createEmptyGardenPlot(plotNumber: GardenPlotNumber): GardenPlotData {
+  return {
+    id: gardenPlotId(plotNumber),
+    plotType: "small",
+    upgradeLevel: 1,
+    yieldUpgradeLevel: 0,
+    status: "empty",
+    cropType: null,
+    cropAsset: null,
+    seedItemId: null,
+    totalGrowthDays: 0,
+    completedGrowthDays: 0,
+    remainingGrowthDays: 0,
+    progressPercent: 0,
+    wateredToday: false,
+    weedsPulledToday: false,
+    fertilizedToday: false,
+    fertilizerTypeUsedToday: null,
+    consecutiveUnwateredDays: 0,
+    baseYield: 0,
+    accumulatedWeedYieldBonus: 0,
+    accumulatedFertilizerYieldBonus: 0,
+    readyToHarvest: false,
+    withered: false,
+  };
+}
 
 export const SECOND_GARDEN_PLOT_EMPTY: GardenPlotData = {
   id: "garden_plot_02",
   plotType: "small",
   upgradeLevel: 1,
+  yieldUpgradeLevel: 0,
   status: "empty",
   cropType: null,
   cropAsset: null,
@@ -146,7 +190,7 @@ export function createGardenPlotFromSeed(
     fertilizedToday: false,
     fertilizerTypeUsedToday: null,
     consecutiveUnwateredDays: 0,
-    baseYield: config.baseYield,
+    baseYield: Math.max(config.baseYield, minimumYieldForUpgradeLevel(basePlot.yieldUpgradeLevel)),
     accumulatedWeedYieldBonus: 0,
     accumulatedFertilizerYieldBonus: 0,
     readyToHarvest: false,
@@ -226,12 +270,15 @@ export async function saveSecondGardenPlot(plot: GardenPlotData): Promise<void> 
 }
 
 export async function advanceSecondGardenPlotDay(): Promise<void> {
-  const raw = await AsyncStorage.getItem(SECOND_GARDEN_PLOT_KEY);
-  if (!raw) return;
-  try {
-    const plot = { ...SECOND_GARDEN_PLOT_EMPTY, ...JSON.parse(raw) } as GardenPlotData;
-    await saveSecondGardenPlot(processGardenPlotDayChange(plot));
-  } catch {
-    // A malformed optional second plot must never block the main day transition.
+  for (const plotNumber of [2, 3, 4] as const) {
+    const key = gardenPlotStorageKey(plotNumber);
+    const raw = await AsyncStorage.getItem(key);
+    if (!raw) continue;
+    try {
+      const plot = { ...createEmptyGardenPlot(plotNumber), ...JSON.parse(raw) } as GardenPlotData;
+      await AsyncStorage.setItem(key, JSON.stringify(processGardenPlotDayChange(plot)));
+    } catch {
+      // A malformed optional plot must never block the main day transition.
+    }
   }
 }

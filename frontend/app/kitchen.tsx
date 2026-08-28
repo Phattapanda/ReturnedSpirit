@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { StyleSheet, View } from "react-native";
 
 import KitchenScreenBase from "@/src/KitchenScreenBase";
+import TavernLocationTransition from "@/src/components/tavern-location-transition";
 import { KitchenRuntimeContext, notifyKitchenPlayerThought } from "@/src/game/kitchen-runtime-context";
 
 /**
@@ -22,12 +23,14 @@ export default function KitchenScreen() {
   }
 
   return (
-    <KitchenRuntimeContext.Provider value={{ refreshKitchen, showPlayerThought }}>
-      <View style={styles.root}>
-        <KitchenScreenBase key={instanceKey} />
+    <TavernLocationTransition location="kitchen">
+      <KitchenRuntimeContext.Provider value={{ refreshKitchen, showPlayerThought }}>
+        <View style={styles.root}>
+          <KitchenScreenBase key={instanceKey} />
 
-      </View>
-    </KitchenRuntimeContext.Provider>
+        </View>
+      </KitchenRuntimeContext.Provider>
+    </TavernLocationTransition>
   );
 }
 

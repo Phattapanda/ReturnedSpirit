@@ -79,6 +79,7 @@ agenthub/agents/youtube/db
 memory/test_credentials.md
 
 # Mobile development
+*.apk
 android-sdk/workspace-export.zip
 .env
 .env.*

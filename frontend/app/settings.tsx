@@ -1,71 +1,52 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState } from "react";
+import { useManagedTimers } from "@/src/hooks/use-managed-timers";
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  Image,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { Image } from "expo-image";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import Slider from "@react-native-community/slider";
 
 import { useAudioManager } from "@/src/audio/AudioProvider";
+import { useHaptics } from "@/src/feedback/haptics-provider";
+import { updateGameSettings, type HapticsMode } from "@/src/settings/game-settings";
 
 const BG = require("../assets/images/bg-tavern.jpg");
 
-type VibrationMode = "off" | "light" | "medium" | "strong";
-
-const VIB_MODES: VibrationMode[] = ["off", "light", "medium", "strong"];
-const VIB_LABELS: Record<VibrationMode, string> = {
+const HAPTICS_MODES: HapticsMode[] = ["off", "light", "medium", "strong"];
+const HAPTICS_LABELS: Record<HapticsMode, string> = {
   off: "Off", light: "Light", medium: "Medium", strong: "Strong",
 };
 
-const VOLUME_STEPS = [0, 25, 50, 75, 100];
-
 export default function Settings() {
+  const { setManagedTimeout: setTimeout } = useManagedTimers();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
   const { musicVolume, sfxVolume, setMusicVolume, setSfxVolume, playSoundEffect, unlockAudio } = useAudioManager();
-
-  const [vibration, setVibration] = useState<VibrationMode>("light");
+  const { hapticsMode, setHapticsMode } = useHaptics();
   const [language] = useState("English");
 
-  useEffect(() => {
-    AsyncStorage.getItem("game_settings").then((raw) => {
-      if (!raw) return;
-      try {
-        const s = JSON.parse(raw);
-        if (s.vibration) setVibration(s.vibration);
-      } catch {}
-    });
-  }, []);
-
-  const persist = useCallback(async (patch: Record<string, unknown>) => {
-    try {
-      const raw = await AsyncStorage.getItem("game_settings");
-      const s = raw ? JSON.parse(raw) : {};
-      await AsyncStorage.setItem("game_settings", JSON.stringify({ ...s, ...patch }));
-    } catch {}
-  }, []);
-
-  const onMusicVol = (v: number) => {
-    setMusicVolume(v);
-    persist({ musicVolume: v }).catch(() => {});
+  const saveMusicVolume = (value: number) => {
+    updateGameSettings({ musicVolume: Math.round(value) }).catch(() => {});
   };
-  const onSfxVol = (v: number) => {
+  const previewAndSaveSfxVolume = (value: number) => {
+    const rounded = Math.round(value);
     unlockAudio();  // ensure audio unlocked before playing
-    setSfxVolume(v);
-    playSoundEffect('getwater', { maxDurationMs: 3000 });
-    persist({ sfxVolume: v }).catch(() => {});
+    setSfxVolume(rounded);
+    setTimeout(() => playSoundEffect('getwater', { maxDurationMs: 3000 }), 120);
+    updateGameSettings({ sfxVolume: rounded }).catch(() => {});
   };
 
   return (
     <View style={styles.root}>
-      <Image source={BG} style={styles.bgImage} resizeMode="cover" />
+      <Image source={BG} style={styles.bgImage} contentFit="cover" />
 
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
@@ -88,18 +69,19 @@ export default function Settings() {
             <Text style={styles.sectionTitle}>Music Volume</Text>
             <Text testID="music-volume-value" style={styles.sectionValue}>{musicVolume}%</Text>
           </View>
-          <View style={styles.toggleRow}>
-            {VOLUME_STEPS.map((v) => (
-              <TouchableOpacity
-                key={v}
-                testID={`music-volume-${v}`}
-                style={[styles.toggleBtn, musicVolume === v && styles.toggleBtnActive]}
-                onPress={() => onMusicVol(v)}
-              >
-                <Text style={[styles.toggleText, musicVolume === v && styles.toggleTextActive]}>{v}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          <Slider
+            testID="music-volume-slider"
+            value={musicVolume}
+            minimumValue={0}
+            maximumValue={100}
+            step={1}
+            onValueChange={setMusicVolume}
+            onSlidingComplete={saveMusicVolume}
+            minimumTrackTintColor="#6B7C55"
+            maximumTrackTintColor="#D7CEBD"
+            thumbTintColor="#C4943A"
+            accessibilityLabel="Music volume"
+          />
         </View>
 
         {/* SFX Volume */}
@@ -109,41 +91,43 @@ export default function Settings() {
             <Text style={styles.sectionTitle}>Sound Effects</Text>
             <Text testID="sfx-volume-value" style={styles.sectionValue}>{sfxVolume}%</Text>
           </View>
-          <View style={styles.toggleRow}>
-            {VOLUME_STEPS.map((v) => (
-              <TouchableOpacity
-                key={v}
-                testID={`sfx-volume-${v}`}
-                style={[styles.toggleBtn, sfxVolume === v && styles.toggleBtnActive]}
-                onPress={() => onSfxVol(v)}
-              >
-                <Text style={[styles.toggleText, sfxVolume === v && styles.toggleTextActive]}>{v}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          <Slider
+            testID="sfx-volume-slider"
+            value={sfxVolume}
+            minimumValue={0}
+            maximumValue={100}
+            step={1}
+            onValueChange={setSfxVolume}
+            onSlidingComplete={previewAndSaveSfxVolume}
+            minimumTrackTintColor="#6B7C55"
+            maximumTrackTintColor="#D7CEBD"
+            thumbTintColor="#C4943A"
+            accessibilityLabel="Sound effects volume"
+          />
         </View>
 
-        {/* Vibration */}
+        {/* Haptics */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <MaterialCommunityIcons name="vibrate" size={20} color="#C4943A" />
-            <Text style={styles.sectionTitle}>Vibration</Text>
-            <Text testID="vibration-value" style={styles.sectionValue}>{VIB_LABELS[vibration]}</Text>
+            <Text style={styles.sectionTitle}>Haptics</Text>
+            <Text testID="haptics-value" style={styles.sectionValue}>{HAPTICS_LABELS[hapticsMode]}</Text>
           </View>
           <View style={styles.toggleRow}>
-            {VIB_MODES.map((m) => (
+            {HAPTICS_MODES.map((mode) => (
               <TouchableOpacity
-                key={m}
-                testID={`vibration-${m}`}
-                style={[styles.toggleBtn, vibration === m && styles.toggleBtnActive]}
-                onPress={() => { setVibration(m); persist({ vibration: m }).catch(() => {}); }}
+                key={mode}
+                testID={`haptics-${mode}`}
+                style={[styles.toggleBtn, hapticsMode === mode && styles.toggleBtnActive]}
+                onPress={() => setHapticsMode(mode)}
               >
-                <Text style={[styles.toggleText, vibration === m && styles.toggleTextActive]}>
-                  {VIB_LABELS[m]}
+                <Text style={[styles.toggleText, hapticsMode === mode && styles.toggleTextActive]}>
+                  {HAPTICS_LABELS[mode]}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
+          <Text style={styles.settingHint}>Only important actions: crafting, serving guests, level ups, and story choices.</Text>
         </View>
 
         {/* Language */}
@@ -198,5 +182,6 @@ const styles = StyleSheet.create({
   toggleBtnActive: { backgroundColor: "#6B7C55", borderColor: "#6B7C55" },
   toggleText: { fontSize: 14, color: "#2C1810", fontWeight: "500" },
   toggleTextActive: { color: "#FFF", fontWeight: "700" },
+  settingHint: { fontSize: 12, lineHeight: 17, color: "#8B7355" },
   comingSoon: { fontSize: 13, color: "#8B7355", fontStyle: "italic" },
 });

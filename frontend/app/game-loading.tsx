@@ -16,7 +16,7 @@
  *  5. Navigate to destination (/intro for new-game, /kitchen for load-game)
  *
  * Error path:
- *  If critical assets (herbsoup, bag_herb, bucket, bucketwater, portraits, bg_kitchen)
+ *  If critical assets (soup_herb, bag_herb, bucket, bucketwater, portraits, bg_kitchen)
  *  fail to load, show a Retry / Main Menu screen.
  *
  * Architecture constraints:
@@ -253,7 +253,10 @@ export default function GameLoading() {
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.mainMenuBtn}
-              onPress={() => router.replace("/")}
+              onPress={() => {
+                if (router.canGoBack()) router.dismissAll();
+                else router.replace("/");
+              }}
               activeOpacity={0.8}
             >
               <Text style={styles.mainMenuText}>Main Menu</Text>

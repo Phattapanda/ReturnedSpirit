@@ -43,6 +43,11 @@ import { DEFAULT_PROGRESSION_STATE, PROGRESSION_STATE_KEY } from "@/src/game/pro
 import { flushPlaytime } from "@/src/game/playtime-tracker";
 import { DEFAULT_TRAVEL_STATE, TRAVEL_STATE_KEY } from "@/src/game/travel-system";
 import { DISCOVERED_RECIPES_KEY } from "@/src/game/cooking-system";
+import { MERCHANT_SHOP_KEY } from "@/src/game/merchant-shop";
+import { DEFAULT_MAILBOX_STATE, MAILBOX_STATE_KEY } from "@/src/game/mailbox-system";
+import { KITCHEN_SMALL_CRATE_KEY } from "@/src/game/kitchen-small-crate";
+import { FOREST_DUNGEON_KEY, FOREST_FIGHT_SNAPSHOT_KEY } from "@/src/game/forest-dungeon-system";
+import { COACHMAN_ESCORT_KEY } from "@/src/game/coachman-escort-system";
 import {
   DEFAULT_TITHE_STATE,
   ELAPSED_DAYS_KEY,
@@ -77,6 +82,8 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   TITHE_STATE_KEY,
   NEXT_RUN_INTRO_PENDING_KEY,
   TRAVEL_STATE_KEY,
+  MERCHANT_SHOP_KEY,
+  MAILBOX_STATE_KEY,
   // Kitchen tutorial flags
   "@tutorial:kitchen_done",
   "@kitchen:has_seen_post_garden_dialog",
@@ -88,6 +95,10 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   "@kitchen:cooking_tutorial_step",
   "@kitchen:craft_ingredients",
   "@kitchen:craft_tool_slot",
+  KITCHEN_SMALL_CRATE_KEY,
+  FOREST_DUNGEON_KEY,
+  FOREST_FIGHT_SNAPSHOT_KEY,
+  COACHMAN_ESCORT_KEY,
   DISCOVERED_RECIPES_KEY,
   // Garden state
   "@garden:has_entered",
@@ -100,6 +111,8 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   "@garden:tutorial_state",
   "@garden:plot_01_data",
   "@garden:plot_02_data",
+  "@garden:plot_03_data",
+  "@garden:plot_04_data",
   "@garden:inventory",
   "@garden:selected_fertilizer",
   "@garden:inventory_bag_unlocked",
@@ -136,13 +149,6 @@ export async function createSnapshot(
   trigger: "day_transition" | "manual" | "new_game",
 ): Promise<void> {
   if (__DEV__) {
-    if (trigger === "day_transition") {
-      console.log("[SAVE] SAVE TRIGGER: DAY TRANSITION — slot", slotNum);
-    } else if (trigger === "manual") {
-      console.log("[SAVE] SAVE TRIGGER: MANUAL MENU SAVE — slot", slotNum);
-    } else {
-      console.log("[SAVE] SAVE TRIGGER: NEW GAME INIT — slot", slotNum);
-    }
   }
   try {
     if (trigger === "new_game") {
@@ -159,6 +165,7 @@ export async function createSnapshot(
         [NEXT_RUN_INTRO_PENDING_KEY, "false"],
         [TRAVEL_STATE_KEY, JSON.stringify(DEFAULT_TRAVEL_STATE)],
         [DISCOVERED_RECIPES_KEY, JSON.stringify([])],
+        [MAILBOX_STATE_KEY, JSON.stringify(DEFAULT_MAILBOX_STATE)],
       ]);
     }
 

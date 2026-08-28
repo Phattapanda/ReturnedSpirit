@@ -61,10 +61,18 @@ export function addKarmaPoints(amount: number): Promise<ProgressionState> {
   }));
 }
 
+export function spendKarmaPoints(amount: number): Promise<ProgressionState | null> {
+  const normalizedAmount = Math.max(0, Math.floor(Number(amount) || 0));
+  let affordable = false;
+  return updateProgressionState((state) => {
+    affordable = state.karmaPoints >= normalizedAmount;
+    return affordable ? { ...state, karmaPoints: state.karmaPoints - normalizedAmount } : state;
+  }).then((state) => affordable ? state : null);
+}
+
 export function beginNextRun(): Promise<ProgressionState> {
   return updateProgressionState((state) => ({
     ...state,
     runNumber: state.runNumber + 1,
   }));
 }
-

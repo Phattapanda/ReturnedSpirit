@@ -14,6 +14,10 @@ import {
   getActiveStaminaBuffReduction,
   normalizePlayerStats,
 } from "@/src/game/player-stats";
+import {
+  areRegularGuestsUnlockedForDay,
+  loadPostGuestTutorialState,
+} from "@/src/game/post-guest-tutorial";
 
 export const TRAVEL_STATE_KEY = "@game:travel_state";
 
@@ -77,6 +81,21 @@ export async function loadTravelState(): Promise<TravelState> {
   }
 }
 
+/**
+ * Navigation to Outside the Tavern becomes available as soon as regular guests
+ * can appear. The persisted travel flag remains reserved for Coachman's later
+ * travel tutorial and destination unlocks.
+ */
+export async function loadExploreNavigationUnlocked(): Promise<boolean> {
+  const [travel, guestState, postGuestState] = await Promise.all([
+    loadTravelState(),
+    loadGuestState(),
+    loadPostGuestTutorialState(),
+  ]);
+  return travel.exploreUnlocked ||
+    areRegularGuestsUnlockedForDay(postGuestState, guestState.calendarDaySerial);
+}
+
 export async function unlockExploreFromCoachman(): Promise<TravelState> {
   const next: TravelState = {
     version: 1,
@@ -87,15 +106,30 @@ export async function unlockExploreFromCoachman(): Promise<TravelState> {
   return next;
 }
 
+export async function unlockNextCityAfterEscort(): Promise<TravelState> {
+  const current = await loadTravelState();
+  const next: TravelState = {
+    ...current,
+    exploreUnlocked: true,
+    unlockedDestinations: [...new Set<TravelDestinationId>([...current.unlockedDestinations, "next_city"])],
+  };
+  await AsyncStorage.setItem(TRAVEL_STATE_KEY, JSON.stringify(next));
+  return next;
+}
+
 export async function getCoachmanTravelStatus(dayIndex: number): Promise<{
   available: boolean;
   favor: number;
   discountPercent: number;
 }> {
-  const state = await loadGuestState();
+  const [state, postGuestState] = await Promise.all([
+    loadGuestState(),
+    loadPostGuestTutorialState(),
+  ]);
   const favor = state.favors.coachman ?? COACHMAN_PROFILE.initialFavor;
   return {
-    available: isGuestScheduled(COACHMAN_PROFILE, dayIndex, favor),
+    available: areRegularGuestsUnlockedForDay(postGuestState, state.calendarDaySerial) &&
+      isGuestScheduled(COACHMAN_PROFILE, dayIndex, favor),
     favor,
     discountPercent: getGuestTransportDiscountPercent(COACHMAN_PROFILE, favor),
   };

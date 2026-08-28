@@ -18,9 +18,11 @@ type Props = {
   locationName: string;
   showPortraitRow?: boolean;
   onHeaderHeightChange?: (height: number) => void;
+  refreshKey?: number;
+  bagAttention?: boolean;
 };
 
-export default function TravelHeader({ locationName, showPortraitRow = false, onHeaderHeightChange }: Props) {
+export default function TravelHeader({ locationName, showPortraitRow = false, onHeaderHeightChange, refreshKey = 0, bagAttention = false }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [stamina, setStamina] = useState(0);
@@ -34,6 +36,7 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
   const [menuOpen, setMenuOpen] = useState(false);
 
   useFocusEffect(useCallback(() => {
+    void refreshKey;
     let active = true;
     (async () => {
       const [rawStamina, rawLife, rawDay, rawStats, rawAvatar, rawBag] = await AsyncStorage.multiGet([
@@ -49,14 +52,13 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
       if (rawBag[1]) setBag(normalizePlayerBagData(JSON.parse(rawBag[1])));
     })().catch(() => {});
     return () => { active = false; };
-  }, []));
+  }, [refreshKey]));
 
   const staminaPct = Math.max(0, Math.min(1, stamina / Math.max(1, stats.maximumStamina)));
   const lifePct = Math.max(0, Math.min(1, life / Math.max(1, stats.maximumLife)));
 
   return (
     <>
-      <CurrencyHud />
       <View
         style={[styles.header, { paddingTop: insets.top + 6 }]}
         onLayout={(event) => onHeaderHeightChange?.(event.nativeEvent.layout.height)}
@@ -74,11 +76,14 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
               <Text style={styles.statBarText}>{life}/{stats.maximumLife}</Text>
             </View>
           </View>
-          <View style={styles.rightHeader}>
-            <View style={styles.dayBadge}><Text style={styles.dayText}>{DAYS[dayIdx]}</Text></View>
-            <TouchableOpacity style={styles.menuButton} onPress={() => setMenuOpen(true)} activeOpacity={0.8}>
-              <Ionicons name="menu" size={22} color="#F5E6C8" />
-            </TouchableOpacity>
+          <View style={styles.rightHeaderColumn}>
+            <View style={styles.rightHeader}>
+              <View style={styles.dayBadge}><Text style={styles.dayText}>{DAYS[dayIdx]}</Text></View>
+              <TouchableOpacity style={styles.menuButton} onPress={() => setMenuOpen(true)} activeOpacity={0.8}>
+                <Ionicons name="menu" size={22} color="#F5E6C8" />
+              </TouchableOpacity>
+            </View>
+            <CurrencyHud inline compact />
           </View>
         </View>
         <Text style={styles.locationName}>{locationName}</Text>
@@ -89,7 +94,7 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
           <TouchableOpacity style={styles.circleWrap} onPress={() => setStatusOpen(true)} activeOpacity={0.8}>
             <Image source={getPlayerAvatarForStamina(avatarId, stamina)} style={styles.circleImg} resizeMode="cover" />
           </TouchableOpacity>
-          <BagIconButton unlocked={bag.unlocked} onPress={() => setBagOpen(true)} />
+          <BagIconButton unlocked={bag.unlocked} bagId={bag.bagId} pulsing={bagAttention} onPress={() => setBagOpen(true)} />
         </View>
       )}
 
@@ -103,6 +108,7 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
         onBagUpdated={setBag}
         onStatsUpdated={setStats}
         onStaminaUpdated={setStamina}
+        onLifeUpdated={setLife}
       />
       <StatusModal
         visible={statusOpen}
@@ -163,6 +169,7 @@ const styles = StyleSheet.create({
     width: 42, height: 42, borderRadius: 9, alignItems: "center", justifyContent: "center",
     borderWidth: 1.5, borderColor: "rgba(196,148,58,0.38)", backgroundColor: "rgba(196,148,58,0.16)",
   },
+  rightHeaderColumn: { alignItems: "flex-end", alignSelf: "flex-start", gap: 4, transform: [{ translateY: -2 }] },
   rightHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
   menuButton: {
     width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center",

@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "frontend",
-    "slug": "frontend",
+    "name": "A Returned Spirit",
+    "slug": "returned-spirit",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "frontend",
+    "scheme": "returned-spirit",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -18,7 +18,11 @@
         "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.emergent.deutschgame.b8t357"
+      "package": "com.emergent.deutschgame.b8t357",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -40,6 +44,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "ccf9ecf7-c932-4056-ba57-fd62fb2086af"
+      }
+    },
+    "owner": "phatta"
   }
 }

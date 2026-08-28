@@ -12,12 +12,13 @@
  */
 
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { AudioPlayer } from 'expo-audio';
+import { loadGameSettings } from '@/src/settings/game-settings';
 
 // ─── Theme key types ──────────────────────────────────────────────────────────
 
-export type ThemeKey = 'main-menu' | 'kitchen' | 'garden' | 'dining' | 'dining-dawn' | 'dormitory-morning' | 'dormitory-evening' | null;
+export type ThemeKey = 'main-menu' | 'kitchen' | 'garden' | 'dining' | 'dining-dawn' | 'dormitory-morning' | 'dormitory-evening'
+  | 'battle-over50' | 'battle-under50' | 'rest-area' | 'boss-battle' | null;
 export type LocationKey = 'main-menu' | 'kitchen' | 'garden' | 'dining' | 'dormitory' | null;
 export type TimeOfDayKey = 'morning' | 'evening';
 
@@ -31,6 +32,10 @@ const THEME_SOURCES: Record<NonNullable<ThemeKey>, number> = {
   'dining-dawn':        require('../../assets/audio/dininghall_dawn_theme.mp3'),
   'dormitory-morning':  require('../../assets/audio/Room-Morning-Theme.mp3'),
   'dormitory-evening':  require('../../assets/audio/Room-Evening-Theme.mp3'),
+  'battle-over50':      require('../../assets/audio/battle_theme_over50.mp3'),
+  'battle-under50':     require('../../assets/audio/battle_theme_under50.mp3'),
+  'rest-area':          require('../../assets/audio/rest_area.mp3'),
+  'boss-battle':        require('../../assets/audio/boss_battle_theme.mp3'),
 };
 
 const SFX_SOURCES: Record<string, number> = {
@@ -59,6 +64,12 @@ const SFX_SOURCES: Record<string, number> = {
   'level-up':         require('../../assets/audio/level_up.mp3'),
   'new-recipe-found': require('../../assets/audio/new_recipe_found.mp3'),
   'upgrade-building': require('../../assets/audio/upgrade_building.mp3'),
+  'deep-monster-growl': require('../../assets/audio/deep-monster-growl.mp3'),
+  'sword-hit':          require('../../assets/audio/sword_hit.mp3'),
+  'sword-miss':         require('../../assets/audio/sword_miss.mp3'),
+  'combat-impact':      require('../../assets/audio/combat_impact.mp3'),
+  'attack-miss':        require('../../assets/audio/attack_miss.mp3'),
+  action:               require('../../assets/audio/action.mp3'),
 };
 
 // ─── Theme resolver (pure function) ──────────────────────────────────────────
@@ -139,11 +150,9 @@ class AudioEngine {
 
   async loadSettings(): Promise<void> {
     try {
-      const raw = await AsyncStorage.getItem('game_settings');
-      if (!raw) return;
-      const s = JSON.parse(raw);
-      if (typeof s.musicVolume === 'number') this.musicVolume = Math.max(0, Math.min(100, s.musicVolume)) / 100;
-      if (typeof s.sfxVolume  === 'number') this.sfxVolume  = Math.max(0, Math.min(100, s.sfxVolume))  / 100;
+      const settings = await loadGameSettings();
+      this.musicVolume = settings.musicVolume / 100;
+      this.sfxVolume = settings.sfxVolume / 100;
       this.notifyListeners();
     } catch (e) {
       if (__DEV__) console.warn('[AudioEngine] loadSettings:', e);
@@ -200,6 +209,14 @@ class AudioEngine {
     else            this.channelB = p;
   }
 
+  private disposeChannel(ch: 'A' | 'B'): void {
+    const player = this.getChannel(ch);
+    if (!player) return;
+    try { player.pause(); } catch {}
+    try { player.remove(); } catch {}
+    this.setChannel(ch, null);
+  }
+
   private inactiveChannel(): 'A' | 'B' {
     return this.activeChannel === 'A' ? 'B' : 'A';
   }
@@ -237,12 +254,7 @@ class AudioEngine {
     const inactiveCh = this.inactiveChannel();
 
     // Dispose existing inactive player
-    const oldInactive = this.getChannel(inactiveCh);
-    if (oldInactive) {
-      try { oldInactive.pause(); } catch {}
-      try { oldInactive.remove(); } catch {}
-      this.setChannel(inactiveCh, null);
-    }
+    this.disposeChannel(inactiveCh);
 
     // Create new player
     let newPlayer: AudioPlayer;
@@ -353,6 +365,13 @@ class AudioEngine {
     this.clearCrossfadeTimers();
 
     const activeCh = this.activeChannel;
+    // An interrupted load/crossfade can leave a player in the inactive channel.
+    // It is never audible, but without disposal it retains a native decoder.
+    if (activeCh) this.disposeChannel(activeCh === 'A' ? 'B' : 'A');
+    else {
+      this.disposeChannel('A');
+      this.disposeChannel('B');
+    }
     if (!activeCh) {
       this.currentThemeKey = null;
       this.notifyListeners();
@@ -509,6 +528,20 @@ class AudioEngine {
     try { h.player.pause(); } catch {}
     try { h.player.remove(); } catch {}
     this.sfxPlayers.delete(key);
+  }
+
+  /** Release short-lived native players when the app leaves the foreground. */
+  suspendTransientAudio(): void {
+    if (this.duckIntervalId !== null) {
+      clearInterval(this.duckIntervalId);
+      this.duckIntervalId = null;
+    }
+    this.duckLevel = 1;
+    for (const key of [...this.sfxPlayers.keys()]) this.stopSoundEffect(key);
+    if (this.activeChannel) {
+      const player = this.getChannel(this.activeChannel);
+      if (player) try { player.volume = this.effectiveMusicVol(); } catch {}
+    }
   }
 
   isSfxPlaying(key: string): boolean {

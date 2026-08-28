@@ -9,7 +9,7 @@
  * All AudioPlayer objects and timers live in the AudioEngine.
  */
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { audioEngine, getMusicTheme } from './audioEngine';
 import type { ThemeKey, LocationKey, TimeOfDayKey, AudioEngineState } from './audioEngine';
@@ -49,7 +49,15 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
 
     // Subscribe to engine state changes → update React state
     const unsub = audioEngine.addListener(() => {
-      setState(audioEngine.getState());
+      const next = audioEngine.getState();
+      setState((previous) => (
+        previous.currentThemeKey === next.currentThemeKey &&
+        previous.musicVolume === next.musicVolume &&
+        previous.sfxVolume === next.sfxVolume &&
+        previous.audioUnlocked === next.audioUnlocked
+          ? previous
+          : next
+      ));
     });
 
     // App foreground/background handling
@@ -57,6 +65,8 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
       if (next === 'active') {
         // Reload settings in case they changed while in background
         audioEngine.loadSettings().catch(() => {});
+      } else {
+        audioEngine.suspendTransientAudio();
       }
     });
 
@@ -100,7 +110,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     audioEngine.unlockAudio().catch(() => {});
   }, []);
 
-  const ctxValue: AudioManagerContextValue = {
+  const ctxValue = useMemo<AudioManagerContextValue>(() => ({
     currentThemeKey: state.currentThemeKey,
     musicVolume:     state.musicVolume,
     sfxVolume:       state.sfxVolume,
@@ -114,7 +124,20 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     duckMusic,
     unlockAudio,
     getMusicTheme,
-  };
+  }), [
+    state.currentThemeKey,
+    state.musicVolume,
+    state.sfxVolume,
+    state.audioUnlocked,
+    crossfadeTo,
+    stopGameplayMusic,
+    playSoundEffect,
+    stopSoundEffect,
+    setMusicVolume,
+    setSfxVolume,
+    duckMusic,
+    unlockAudio,
+  ]);
 
   return (
     <AudioManagerContext.Provider value={ctxValue}>

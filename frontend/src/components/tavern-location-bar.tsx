@@ -4,14 +4,18 @@ import { useFocusEffect, useRouter } from "expo-router";
 
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { guestTutorialHasReached, loadGuestTutorialIntroStep } from "@/src/game/guest-tutorial";
-import { loadTravelState } from "@/src/game/travel-system";
+import { loadExploreNavigationUnlocked } from "@/src/game/travel-system";
+import {
+  LocationStatusBadge,
+  useLocationStatusBadges,
+} from "@/src/components/location-status-badges";
 
 const LOCATIONS = [
   { id: "kitchen", image: require("../../assets/images/gotokitchen.png"), route: "/kitchen" },
   { id: "garden", image: require("../../assets/images/gotogarden.png"), route: "/garden" },
   { id: "dining", image: require("../../assets/images/gotodining.png"), route: "/dining" },
   { id: "dormitory", image: require("../../assets/images/gotodormitory.png"), route: "/dormitory" },
-  { id: "mail", image: require("../../assets/images/gotomail.png"), route: null },
+  { id: "mail", image: require("../../assets/images/gotomail.png"), route: "/mail" },
   { id: "explore", image: require("../../assets/images/goexplore.png"), route: "/outside-tavern" },
 ] as const;
 
@@ -24,15 +28,16 @@ type Props = {
 export default function TavernLocationBar({ current }: Props) {
   const router = useRouter();
   const audioManager = useAudioManager();
+  const { harvestReady, merchantPresent } = useLocationStatusBadges();
   const [coreUnlocked, setCoreUnlocked] = useState(false);
   const [exploreUnlocked, setExploreUnlocked] = useState(false);
 
   useFocusEffect(useCallback(() => {
     let active = true;
-    Promise.all([loadGuestTutorialIntroStep(), loadTravelState()]).then(([tutorial, travel]) => {
+    Promise.all([loadGuestTutorialIntroStep(), loadExploreNavigationUnlocked()]).then(([tutorial, exploreAvailable]) => {
       if (!active) return;
       setCoreUnlocked(guestTutorialHasReached(tutorial, "service_complete"));
-      setExploreUnlocked(travel.exploreUnlocked);
+      setExploreUnlocked(exploreAvailable);
     }).catch(() => {});
     return () => { active = false; };
   }, []));
@@ -44,7 +49,7 @@ export default function TavernLocationBar({ current }: Props) {
         const enabled = isCurrent || (
           location.id === "explore"
             ? exploreUnlocked
-            : location.id !== "mail" && coreUnlocked
+            : coreUnlocked
         );
         return (
           <TouchableOpacity
@@ -59,6 +64,8 @@ export default function TavernLocationBar({ current }: Props) {
             }}
           >
             <Image source={location.image} style={[styles.image, !enabled && styles.imageLocked]} resizeMode="contain" />
+            {location.id === "garden" && harvestReady && <LocationStatusBadge kind="harvest" />}
+            {location.id === "explore" && merchantPresent && <LocationStatusBadge kind="merchant" />}
           </TouchableOpacity>
         );
       })}

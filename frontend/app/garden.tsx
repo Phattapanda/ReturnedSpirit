@@ -2,6 +2,7 @@ import React from "react";
 import { StyleSheet, View } from "react-native";
 
 import GardenScreenBase from "@/src/GardenScreenBase";
+import TavernLocationTransition from "@/src/components/tavern-location-transition";
 import {
   GardenRuntimeContext,
   notifyGardenRuntimeRefresh,
@@ -26,12 +27,14 @@ export default function GardenScreen() {
   }
 
   return (
-    <GardenRuntimeContext.Provider value={{ refreshGarden, showPlayerThought }}>
-      <View style={styles.root}>
-        <GardenScreenBase />
+    <TavernLocationTransition location="garden">
+      <GardenRuntimeContext.Provider value={{ refreshGarden, showPlayerThought }}>
+        <View style={styles.root}>
+          <GardenScreenBase />
 
-      </View>
-    </GardenRuntimeContext.Provider>
+        </View>
+      </GardenRuntimeContext.Provider>
+    </TavernLocationTransition>
   );
 }
 

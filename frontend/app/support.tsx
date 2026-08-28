@@ -56,7 +56,7 @@ export default function Support() {
           <View style={styles.successBox} testID="success-message">
             <MaterialCommunityIcons name="check-circle-outline" size={48} color="#6B7C55" />
             <Text style={styles.successTitle}>Message Sent!</Text>
-            <Text style={styles.successSub}>Thank you for your feedback. We'll get back to you soon.</Text>
+            <Text style={styles.successSub}>Thank you for your feedback. We&apos;ll get back to you soon.</Text>
             <TouchableOpacity testID="send-another-button" style={styles.sendAnotherBtn} onPress={() => setSent(false)}>
               <Text style={styles.sendAnotherText}>Send another</Text>
             </TouchableOpacity>

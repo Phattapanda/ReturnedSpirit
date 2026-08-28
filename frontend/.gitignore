@@ -7,7 +7,13 @@ node_modules/
 .expo/
 .expo-export-check/
 .expo-export-asset-naming/
+.expo-export-guest-check/
+.expo-export-monsters/
+.expo-*-export-check/
 .metro-cache/
+.npm-cache/
+.eas-cli-runtime/
+.eas-userinfo-patch.cjs
 dist/
 web-build/
 expo-env.d.ts

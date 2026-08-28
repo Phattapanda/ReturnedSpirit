@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from "react";
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from "react-native";
+import React, { useState, useEffect, useRef } from "react";
+import { View, Text, TouchableOpacity, FlatList, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -9,6 +9,8 @@ export default function LogbookScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [entries, setEntries] = useState<LogEntry[]>([]);
+  const scrollRef = useRef<FlatList<LogEntry>>(null);
+  const didScrollToLatest = useRef(false);
 
   useEffect(() => {
     loadLogbook().then(setEntries).catch(() => {});
@@ -25,25 +27,34 @@ export default function LogbookScreen() {
         <View style={{ width: 38 }} />
       </View>
       <View style={styles.divider} />
-      <ScrollView
+      <FlatList
+        ref={scrollRef}
+        data={entries}
+        keyExtractor={(entry) => entry.id}
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-      >
-        {entries.length === 0 ? (
+        initialNumToRender={12}
+        maxToRenderPerBatch={10}
+        windowSize={7}
+        onContentSizeChange={() => {
+          if (entries.length === 0 || didScrollToLatest.current) return;
+          didScrollToLatest.current = true;
+          scrollRef.current?.scrollToEnd({ animated: false });
+        }}
+        ListEmptyComponent={(
           <Text style={styles.empty}>No entries yet.</Text>
-        ) : (
-          entries.map((entry) => (
-            <View key={entry.id} style={styles.entry}>
+        )}
+        renderItem={({ item: entry }) => (
+            <View style={styles.entry}>
               <Text style={styles.entryMeta}>
                 {entry.day} · {entry.location.charAt(0).toUpperCase() + entry.location.slice(1)}
               </Text>
               <Text style={styles.entrySpeaker}>{entry.speaker}</Text>
               <Text style={styles.entryText}>{entry.text}</Text>
             </View>
-          ))
         )}
-      </ScrollView>
+      />
     </View>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Animated, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useHaptics } from "@/src/feedback/haptics-provider";
 
 type Props = {
   visible: boolean;
@@ -9,6 +10,7 @@ type Props = {
 };
 
 export default function RunEndingOverlay({ visible, busy = false, onNewRun, onTakeBreak }: Props) {
+  const { triggerHaptic } = useHaptics();
   const opacity = useRef(new Animated.Value(0)).current;
   const [showDeath, setShowDeath] = useState(false);
   const [showChoice, setShowChoice] = useState(false);
@@ -33,10 +35,10 @@ export default function RunEndingOverlay({ visible, busy = false, onNewRun, onTa
       {showChoice && (
         <View style={styles.choicePanel}>
           <Text style={styles.question}>Start a new run?</Text>
-          <TouchableOpacity style={styles.yesButton} disabled={busy} onPress={onNewRun}>
+          <TouchableOpacity style={styles.yesButton} disabled={busy} onPress={() => { triggerHaptic("choice"); onNewRun(); }}>
             <Text style={styles.yesText}>{busy ? "Preparing..." : "YES"}</Text>
           </TouchableOpacity>
-          <TouchableOpacity disabled={busy} onPress={onTakeBreak}>
+          <TouchableOpacity disabled={busy} onPress={() => { triggerHaptic("choice"); onTakeBreak(); }}>
             <Text style={styles.breakText}>Take a break.</Text>
           </TouchableOpacity>
         </View>

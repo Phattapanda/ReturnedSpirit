@@ -17,6 +17,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { NEXT_RUN_INTRO_PENDING_KEY } from "@/src/game/tithe-system";
+import { useAudioManager } from "@/src/audio/AudioProvider";
+import { useHaptics } from "@/src/feedback/haptics-provider";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
   PLAYER_AVATAR_KEY,
@@ -148,6 +150,8 @@ export default function IntroScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: screenW, height: screenH } = useWindowDimensions();
+  const { sfxVolume } = useAudioManager();
+  const { triggerHaptic } = useHaptics();
   const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(DEFAULT_PLAYER_AVATAR_ID);
 
   useEffect(() => {
@@ -198,10 +202,6 @@ export default function IntroScreen() {
 
   useEffect(() => {
     mountedRef.current = true;
-    try { knockPlayer.volume = 1; } catch {}
-    try { tapPlayer.volume = 1; } catch {}
-    try { walkPlayer.volume = 1; } catch {}
-
     return () => {
       mountedRef.current = false;
       for (const timer of timersRef.current) clearTimeout(timer);
@@ -216,6 +216,13 @@ export default function IntroScreen() {
       try { walkPlayer.pause(); } catch {}
     };
   }, [knockPlayer, tapPlayer, videoPlayer, walkPlayer]);
+
+  useEffect(() => {
+    const volume = sfxVolume / 100;
+    try { knockPlayer.volume = volume; } catch {}
+    try { tapPlayer.volume = volume; } catch {}
+    try { walkPlayer.volume = volume; } catch {}
+  }, [knockPlayer, sfxVolume, tapPlayer, walkPlayer]);
 
   function later(fn: () => void, ms: number) {
     const timer = setTimeout(() => {
@@ -389,6 +396,7 @@ export default function IntroScreen() {
   }
 
   function handleChoice(nextPhase: DialogPhase | "kitchen") {
+    triggerHaptic("choice");
     playTapSound();
     if (nextPhase === "kitchen") {
       playWalkingWood();

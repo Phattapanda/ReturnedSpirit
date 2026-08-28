@@ -8,6 +8,7 @@ export type GuestTutorialDialogLine = {
   text: string;
   portrait: ImageSourcePropType;
   playerPortrait?: boolean;
+  highlightedPhrases?: readonly string[];
 };
 
 type Props = {
@@ -15,6 +16,48 @@ type Props = {
   line: GuestTutorialDialogLine | null;
   onContinue: () => void;
 };
+
+type DialogTextSegment = {
+  text: string;
+  highlighted: boolean;
+};
+
+function splitHighlightedText(text: string, phrases: readonly string[] = []): DialogTextSegment[] {
+  const searchablePhrases = phrases.filter((phrase) => phrase.length > 0);
+  if (searchablePhrases.length === 0) return [{ text, highlighted: false }];
+
+  const lowerText = text.toLocaleLowerCase();
+  const segments: DialogTextSegment[] = [];
+  let cursor = 0;
+
+  while (cursor < text.length) {
+    let nextStart = -1;
+    let nextPhrase = "";
+
+    searchablePhrases.forEach((phrase) => {
+      const matchStart = lowerText.indexOf(phrase.toLocaleLowerCase(), cursor);
+      if (matchStart >= 0 && (nextStart < 0 || matchStart < nextStart)) {
+        nextStart = matchStart;
+        nextPhrase = phrase;
+      }
+    });
+
+    if (nextStart < 0) {
+      segments.push({ text: text.slice(cursor), highlighted: false });
+      break;
+    }
+    if (nextStart > cursor) {
+      segments.push({ text: text.slice(cursor, nextStart), highlighted: false });
+    }
+    segments.push({
+      text: text.slice(nextStart, nextStart + nextPhrase.length),
+      highlighted: true,
+    });
+    cursor = nextStart + nextPhrase.length;
+  }
+
+  return segments;
+}
 
 /**
  * Portrait-dialog presentation for the guest tutorial.
@@ -37,7 +80,13 @@ export default function GuestTutorialDialog({ visible, line, onContinue }: Props
         </View>
         <Text style={styles.speaker}>{line.speaker}</Text>
         <View style={styles.dialogBox}>
-          <Text style={styles.dialogText}>{line.text}</Text>
+          <Text style={styles.dialogText}>
+            {splitHighlightedText(line.text, line.highlightedPhrases).map((segment, index) => (
+              <Text key={`${index}-${segment.text}`} style={segment.highlighted ? styles.requiredStepText : undefined}>
+                {segment.text}
+              </Text>
+            ))}
+          </Text>
         </View>
         <TouchableOpacity style={styles.continueBtn} onPress={onContinue} activeOpacity={0.8}>
           <Text style={styles.continueText}>Continue</Text>
@@ -108,6 +157,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 25,
     textAlign: "center",
+  },
+  requiredStepText: {
+    color: "#EF4B43",
+    fontWeight: "900",
   },
   continueBtn: {
     marginTop: 12,

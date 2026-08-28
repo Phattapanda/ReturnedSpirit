@@ -1,0 +1,14 @@
+node_modules/
+.npm-cache/
+.eas-cli-runtime/
+.eas-userinfo-patch.cjs
+.expo/
+.expo-export-check/
+.expo-export-asset-naming/
+.expo-export-guest-check/
+.metro-cache/
+dist/
+web-build/
+*.tsbuildinfo
+*.log
+.DS_Store

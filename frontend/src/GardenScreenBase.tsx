@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { useManagedTimers } from "@/src/hooks/use-managed-timers";
 import {
   View,
   Text,
@@ -43,6 +44,10 @@ import ActivityBar from "@/src/components/ActivityBar";
 import StatusModal from "@/src/components/StatusModal";
 import PortraitBubble from "@/src/components/portrait-bubble";
 import {
+  LocationStatusBadge,
+  useLocationStatusBadges,
+} from "@/src/components/location-status-badges";
+import {
   PLAYER_BAG_KEY, DEFAULT_BAG, planAddToBag,
   BAG_INSPECTED_KEY,
   normalizePlayerBagData,
@@ -73,11 +78,13 @@ import { commitHarvestBag } from "@/src/game/garden-harvest";
 import { addKarmaPoints } from "@/src/game/progression";
 import { recordTitheHarvest } from "@/src/game/tithe-system";
 import { setPlaytimePaused } from "@/src/game/playtime-tracker";
-import { loadTravelState } from "@/src/game/travel-system";
+import { loadExploreNavigationUnlocked } from "@/src/game/travel-system";
 import {
   createGardenPlotFromSeed,
+  createEmptyGardenPlot,
   createHarvestBagForCrop,
   normalizeGardenSeedId,
+  type GardenPlotNumber,
 } from "@/src/game/garden-crop-system";
 import {
   getGardenFertilizerConfig,
@@ -236,34 +243,11 @@ function normalizeGardenInventoryIds(items: InventoryItem[]): InventoryItem[] {
   });
 }
 
-const SECOND_PLOT_EMPTY: GardenPlotData = {
-  id: "garden_plot_02",
-  plotType: "small",
-  upgradeLevel: 1,
-  status: "empty",
-  cropType: null,
-  cropAsset: null,
-  seedItemId: null,
-  totalGrowthDays: 0,
-  completedGrowthDays: 0,
-  remainingGrowthDays: 0,
-  progressPercent: 0,
-  wateredToday: false,
-  weedsPulledToday: false,
-  fertilizedToday: false,
-  fertilizerTypeUsedToday: null,
-  consecutiveUnwateredDays: 0,
-  baseYield: 0,
-  accumulatedWeedYieldBonus: 0,
-  accumulatedFertilizerYieldBonus: 0,
-  readyToHarvest: false,
-  withered: false,
-};
-
 const TUTORIAL_PLOT_INITIAL: GardenPlotData = {
   id: "garden_plot_01",
   plotType: "small",
   upgradeLevel: 1,
+  yieldUpgradeLevel: 0,
   status: "growing",
   cropType: "herb",
   cropAsset: "bed_herb",
@@ -295,7 +279,14 @@ const FLOAT_FADE_OUT = 400;    // ms fade-out
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function GardenScreen() {
+  const {
+    setManagedTimeout: setTimeout,
+    clearManagedTimeout: clearTimeout,
+    setManagedInterval: setInterval,
+    clearManagedInterval: clearInterval,
+  } = useManagedTimers();
   const router = useRouter();
+  const { merchantPresent } = useLocationStatusBadges();
   const insets = useSafeAreaInsets();
   const { width: W, height: H } = useWindowDimensions();
   const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(DEFAULT_PLAYER_AVATAR_ID);
@@ -306,7 +297,7 @@ export default function GardenScreen() {
       .then((raw) => { if (active) setPlayerAvatarId(normalizePlayerAvatarId(raw)); })
       .catch(() => {});
     return () => { active = false; };
-  }, []);
+  }, [clearTimeout, clearInterval]);
 
   // ── Audio
   const audioManager = useAudioManager();
@@ -335,6 +326,7 @@ export default function GardenScreen() {
   // ── Logbook (shared with kitchen.tsx via AsyncStorage)
   const [logbook, setLogbook] = useState<LogEntry[]>([]);
   const [showLogbook, setShowLogbook] = useState(false);
+  const logbookScrollRef = useRef<ScrollView>(null);
 
   // ── Portraits
   const [rupertPortrait, setRupertPortrait] = useState<"normal" | "sad" | "laugh">("normal");
@@ -343,6 +335,9 @@ export default function GardenScreen() {
   const [rupertInDining, setRupertInDining] = useState(false);
   const [rupertAwayFromGarden, setRupertAwayFromGarden] = useState(true);
   const [secondPlotUnlocked, setSecondPlotUnlocked] = useState(false);
+  const [thirdPlotUnlocked, setThirdPlotUnlocked] = useState(false);
+  const [fourthPlotUnlocked, setFourthPlotUnlocked] = useState(false);
+  const [plotYieldUpgradeLevels, setPlotYieldUpgradeLevels] = useState<Record<string, number>>({});
   const [diningUnlocked, setDiningUnlocked] = useState(false);
   const [coreTravelUnlocked, setCoreTravelUnlocked] = useState(false);
   const [exploreUnlocked, setExploreUnlocked] = useState(false);
@@ -352,14 +347,14 @@ export default function GardenScreen() {
   useFocusEffect(
     React.useCallback(() => {
       let active = true;
-      Promise.all([loadGuestTutorialIntroStep(), loadTravelState()])
-        .then(([step, travel]) => {
+      Promise.all([loadGuestTutorialIntroStep(), loadExploreNavigationUnlocked()])
+        .then(([step, exploreAvailable]) => {
 if (!active) return;
 setDiningUnlocked(guestTutorialHasReached(step, "dining_prompt"));
 setCoreTravelUnlocked(guestTutorialHasReached(step, "service_complete"));
 setRupertInDining(guestTutorialKeepsRupertInDining(step));
 setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(step));
-setExploreUnlocked(travel.exploreUnlocked);
+setExploreUnlocked(exploreAvailable);
         })
         .catch(() => {});
       return () => { active = false; };
@@ -402,7 +397,7 @@ setExploreUnlocked(travel.exploreUnlocked);
   // ── Flying item overlay (harvest, bucket, well animations)
   const bagIconViewRef  = useRef<View>(null);
   const cropAreaViewRef = useRef<View>(null);
-  const secondCropAreaViewRef = useRef<View>(null);
+  const auxiliaryCropAreaRefs = useRef<Record<number, View | null>>({ 2: null, 3: null, 4: null });
   const bagIconLayout   = useRef<{ cx: number; cy: number } | null>(null);
   const cropLayout      = useRef<{ cx: number; cy: number } | null>(null);
   const [activityBarH, setActivityBarH] = useState(70);
@@ -583,8 +578,6 @@ setExploreUnlocked(travel.exploreUnlocked);
     const FLY_MS    = 1100; // flight to destination
     const SHRINK_MS = 300;  // fade/shrink at destination
 
-    if (__DEV__) console.log(`[FlyAnim] src=(${flyX.value},${flyY.value}) dst=(${ex},${ey})`);
-
     // Phase 1: Appear at source
     flyOpacity.value = 0;
     flyScale.value   = 1.0;
@@ -633,6 +626,9 @@ setExploreUnlocked(travel.exploreUnlocked);
         setRupertAwayFromGarden(guestTutorialRupertHasLeftGarden(guestTutorialStep));
         const postGuestState = await loadPostGuestTutorialState();
         setSecondPlotUnlocked(postGuestState.secondPlotUnlocked);
+        setThirdPlotUnlocked(postGuestState.thirdPlotUnlocked);
+        setFourthPlotUnlocked(postGuestState.fourthPlotUnlocked);
+        setPlotYieldUpgradeLevels(postGuestState.plotYieldUpgradeLevels);
 
         // Load logbook (shared with kitchen.tsx)
         const lb = await loadLogbook();
@@ -699,7 +695,17 @@ setExploreUnlocked(travel.exploreUnlocked);
         // Load plot data
         const rawPlot = await AsyncStorage.getItem(GSK.PLOT_DATA);
         if (rawPlot) {
-          try { setPlotData(JSON.parse(rawPlot)); } catch { /* use default */ }
+          try {
+            setPlotData({
+              ...JSON.parse(rawPlot),
+              yieldUpgradeLevel: postGuestState.plotYieldUpgradeLevels.garden_plot_01 ?? 0,
+            });
+          } catch { /* use default */ }
+        } else {
+          setPlotData((current) => ({
+            ...current,
+            yieldUpgradeLevel: postGuestState.plotYieldUpgradeLevels.garden_plot_01 ?? 0,
+          }));
         }
 
         // Check intro seen
@@ -799,7 +805,7 @@ setExploreUnlocked(travel.exploreUnlocked);
       if (playerBubbleTimer.current) clearTimeout(playerBubbleTimer.current);
       if (staminaCountTimer.current) clearInterval(staminaCountTimer.current);
     };
-  }, []);
+  }, [clearTimeout, clearInterval]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Measure portrait layouts (for bubble positioning)
@@ -822,7 +828,7 @@ setExploreUnlocked(travel.exploreUnlocked);
   useEffect(() => {
     const t = setTimeout(measurePortraits, 500);
     return () => clearTimeout(t);
-  }, [W, H, insets.top, insets.bottom]);
+  }, [W, H, insets.top, insets.bottom, setTimeout, clearTimeout]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // State helpers
@@ -858,7 +864,7 @@ setExploreUnlocked(travel.exploreUnlocked);
 
   async function animateHarvestToPlayerBag(
     harvestBag: BagItem,
-    source: "primary" | "second",
+    source: "primary" | GardenPlotNumber,
   ) {
     const harvestImages: Record<string, ImageSourcePropType> = {
       bag_herb: IMG.bag_herb,
@@ -867,13 +873,13 @@ setExploreUnlocked(travel.exploreUnlocked);
       bag_potato: IMG.bag_potato,
     };
     const image = harvestImages[harvestBag.id] ?? IMG.bag_herb;
-    const sourceRef = source === "second" ? secondCropAreaViewRef : cropAreaViewRef;
+    const sourceView = source === "primary" ? cropAreaViewRef.current : auxiliaryCropAreaRefs.current[source];
 
     const [startPos, endPos] = await Promise.all([
       new Promise<{ cx: number; cy: number }>((resolve) => {
-        const view = sourceRef.current;
+        const view = sourceView;
         if (!view) {
-          resolve({ cx: W / 2, cy: H * (source === "second" ? 0.66 : 0.45) });
+          resolve({ cx: W / 2, cy: H * (source === "primary" ? 0.45 : 0.66) });
           return;
         }
         view.measureInWindow((x, y, w, h) => {
@@ -986,7 +992,7 @@ setExploreUnlocked(travel.exploreUnlocked);
       setPlayerBubble(null);
       playerBubbleTimer.current = null;
     }, 2600);
-  }), []);
+  }), [setTimeout, clearTimeout]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Tutorial: intro bubble sequence
@@ -1105,6 +1111,7 @@ setExploreUnlocked(travel.exploreUnlocked);
     const newPlot: GardenPlotData = { ...plotData, wateredToday: true };
     setPlotData(newPlot);
     await AsyncStorage.setItem(GSK.PLOT_DATA, JSON.stringify(newPlot));
+    audioManager.playSoundEffect('action', { maxDurationMs: 3000 });
 
     // Update tutorial state
     if (gtsRef.current === "GARDEN_PLOT_INTERACTIVE") {
@@ -1131,6 +1138,7 @@ setExploreUnlocked(travel.exploreUnlocked);
         id: plotData.id,
         plotType: plotData.plotType,
         upgradeLevel: plotData.upgradeLevel,
+        yieldUpgradeLevel: plotData.yieldUpgradeLevel ?? 0,
         // Reset to empty
         status: "empty",
         cropType: null, cropAsset: null, seedItemId: null,
@@ -1143,6 +1151,7 @@ setExploreUnlocked(travel.exploreUnlocked);
       };
       setPlotData(newPlot);
       await AsyncStorage.setItem(GSK.PLOT_DATA, JSON.stringify(newPlot));
+      audioManager.playSoundEffect('action', { maxDurationMs: 3000 });
       deductStamina(clearCost, `-${clearCost}`);
       actionLocked.current = false;
       return;
@@ -1163,6 +1172,7 @@ setExploreUnlocked(travel.exploreUnlocked);
     };
     setPlotData(newPlot);
     await AsyncStorage.setItem(GSK.PLOT_DATA, JSON.stringify(newPlot));
+    audioManager.playSoundEffect('action', { maxDurationMs: 3000 });
     if (gtsRef.current === "GARDEN_PLOT_INTERACTIVE" || gtsRef.current === "GARDEN_MINIMUM_TASK_COMPLETE") {
       await AsyncStorage.setItem(GSK.HAS_PULLED_WEEDS, "true");
     }
@@ -1209,6 +1219,7 @@ setExploreUnlocked(travel.exploreUnlocked);
     };
     setPlotData(newPlot);
     await AsyncStorage.setItem(GSK.PLOT_DATA, JSON.stringify(newPlot));
+    audioManager.playSoundEffect('action', { maxDurationMs: 3000 });
     if (gtsRef.current === "GARDEN_PLOT_INTERACTIVE" || gtsRef.current === "GARDEN_MINIMUM_TASK_COMPLETE") {
       await AsyncStorage.setItem(GSK.HAS_FERTILIZED, "true");
     }
@@ -1222,6 +1233,7 @@ setExploreUnlocked(travel.exploreUnlocked);
       id: plotData.id,
       plotType: plotData.plotType,
       upgradeLevel: plotData.upgradeLevel,
+      yieldUpgradeLevel: plotData.yieldUpgradeLevel ?? 0,
       status: "empty",
       cropType: null,
       cropAsset: null,
@@ -1321,6 +1333,7 @@ setExploreUnlocked(travel.exploreUnlocked);
       setPlotData(emptyPlot);
       await addKarmaPoints(1);
       await recordTitheHarvest();
+      audioManager.playSoundEffect('action', { maxDurationMs: 3000 });
       audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
 
       // Start fly animation, then complete harvest after
@@ -1377,6 +1390,7 @@ setExploreUnlocked(travel.exploreUnlocked);
       setGardenState("IDLE");
       await addKarmaPoints(1);
       await recordTitheHarvest();
+      audioManager.playSoundEffect('action', { maxDurationMs: 3000 });
       deductStamina(harvestCost, `-${harvestCost}`);
       await animateHarvestToPlayerBag(harvestBag, "primary");
     } catch {
@@ -1638,15 +1652,25 @@ setExploreUnlocked(travel.exploreUnlocked);
 
     wellLocked.current = true;
 
-    // Replace bucket with bucketwater in the same slot
-    const newSlots = [...playerBag.slots];
-    newSlots[bucketSlotIdx] = {
+    // Convert exactly one bucket from the selected stack. Add the filled bucket
+    // through the normal Bag planner so it merges into an existing water stack.
+    const slotsAfterTakingBucket = playerBag.slots.map((slot, index) => {
+      if (index !== bucketSlotIdx || !slot) return slot ? { ...slot } : null;
+      return slot.quantity > 1 ? { ...slot, quantity: slot.quantity - 1 } : null;
+    });
+    const waterBucket: BagItem = {
       id: "bucketwater",
       itemType: "bucketwater",
       name: "Bucket of Water",
       quantity: 1,
     };
-    const newBag = { ...playerBag, slots: newSlots };
+    const bagAfterTakingBucket = { ...playerBag, slots: slotsAfterTakingBucket };
+    const addWaterPlan = planAddToBag(waterBucket, bagAfterTakingBucket);
+    if (!addWaterPlan.canTransfer || addWaterPlan.remainderQty > 0) {
+      showPlayerBubble('"My bag is full."');
+      return;
+    }
+    const newBag = { ...bagAfterTakingBucket, slots: addWaterPlan.updatedSlots };
     setPlayerBag(newBag);
     deductStamina(wellCost, `-${wellCost}`);
 
@@ -1753,6 +1777,7 @@ setExploreUnlocked(travel.exploreUnlocked);
       ]);
       setInventory(newInv);
       setPlotData(newPlot);
+      audioManager.playSoundEffect('action', { maxDurationMs: 3000 });
       setSeedModalVisible(false);
       setSelectedSeedId(null);
       if (gtsRef.current === "TUTORIAL_WATER_FETCHED" || gtsRef.current === "GARDEN_REPLANTING_AVAILABLE") {
@@ -1820,7 +1845,8 @@ setExploreUnlocked(travel.exploreUnlocked);
         await discardRuntimeAndRestore(parseInt(rawSlot, 10));
       }
     } catch { /* non-critical */ }
-    router.replace("/");
+    if (router.canGoBack()) router.dismissAll();
+    else router.replace("/");
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -2025,7 +2051,6 @@ setExploreUnlocked(travel.exploreUnlocked);
 
   return (
     <View style={styles.root}>
-      <CurrencyHud />
       {/* ── Hidden portrait preload (belt-and-suspenders on top of AssetManager) ── */}
       <View style={{ position: "absolute", width: 0, height: 0, overflow: "hidden" }}>
         <Image source={IMG.rupert}      style={{ width: 1, height: 1 }} />
@@ -2087,15 +2112,18 @@ setExploreUnlocked(travel.exploreUnlocked);
               <Text style={styles.statBarText}>{lifeCurrent}/{playerStats.maximumLife}</Text>
             </View>
           </View>
-          <View style={styles.rightHeader}>
-            <View style={styles.dayBadge}><Text style={styles.dayText}>{DAYS[dayIdx]}</Text></View>
-            <TouchableOpacity
-              style={styles.menuRoundBtn}
-              onPress={() => setShowMenu(true)}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="menu" size={22} color="#F5E6C8" />
-            </TouchableOpacity>
+          <View style={styles.rightHeaderColumn}>
+            <View style={styles.rightHeader}>
+              <View style={styles.dayBadge}><Text style={styles.dayText}>{DAYS[dayIdx]}</Text></View>
+              <TouchableOpacity
+                style={styles.menuRoundBtn}
+                onPress={() => setShowMenu(true)}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="menu" size={22} color="#F5E6C8" />
+              </TouchableOpacity>
+            </View>
+            <CurrencyHud inline compact />
           </View>
         </View>
         <Text style={styles.locationName}>Garden</Text>
@@ -2132,6 +2160,7 @@ setExploreUnlocked(travel.exploreUnlocked);
             <View ref={bagIconViewRef}>
               <BagIconButton
                 unlocked={true}
+                bagId={playerBag.bagId}
                 onPress={handleOpenBag}
                 pulsing={!bagInspected}
               />
@@ -2160,26 +2189,38 @@ setExploreUnlocked(travel.exploreUnlocked);
           />
         </Animated.View>
 
-        {secondPlotUnlocked && (
-          <Animated.View ref={secondCropAreaViewRef} style={[styles.secondPlotWrap, plotOpacityStyle]}>
-            <Text style={styles.secondPlotLabel}>2nd Plot</Text>
-            <GardenPlot
-              data={SECOND_PLOT_EMPTY}
-              interactive={false}
-              selectedFertilizerId={selectedFertilizer}
-              onWater={() => {}}
-              onPullWeeds={() => {}}
-              onFertilize={() => {}}
-              onHarvest={() => {}}
-              onCropTap={() => {}}
-              onSpendStamina={spendSecondPlotStamina}
-              onHarvestStored={(item) => {
-                void animateHarvestToPlayerBag(item, "second");
-              }}
-              actionCosts={{ water: waterCost, pullWeeds: pullWeedsCost, fertilize: fertilizeCost }}
-            />
-          </Animated.View>
-        )}
+        {([2, 3, 4] as const).map((plotNumber) => {
+          const unlocked = plotNumber === 2 ? secondPlotUnlocked : plotNumber === 3 ? thirdPlotUnlocked : fourthPlotUnlocked;
+          if (!unlocked) return null;
+          const ordinal = plotNumber === 2 ? "2nd" : plotNumber === 3 ? "3rd" : "4th";
+          const data = {
+            ...createEmptyGardenPlot(plotNumber),
+            yieldUpgradeLevel: plotYieldUpgradeLevels[`garden_plot_0${plotNumber}`] ?? 0,
+          };
+          return (
+            <Animated.View
+              key={plotNumber}
+              ref={(view) => { auxiliaryCropAreaRefs.current[plotNumber] = view as unknown as View | null; }}
+              style={[styles.secondPlotWrap, plotOpacityStyle]}
+            >
+              <Text style={styles.secondPlotLabel}>{ordinal} Plot</Text>
+              <GardenPlot
+                data={data}
+                interactive={false}
+                selectedFertilizerId={selectedFertilizer}
+                onWater={() => {}}
+                onPullWeeds={() => {}}
+                onFertilize={() => {}}
+                onHarvest={() => {}}
+                onCropTap={() => {}}
+                onSpendStamina={spendSecondPlotStamina}
+                onHarvestStored={(item) => { void animateHarvestToPlayerBag(item, plotNumber); }}
+                onActionSuccess={() => { audioManager.playSoundEffect('action', { maxDurationMs: 3000 }); }}
+                actionCosts={{ water: waterCost, pullWeeds: pullWeedsCost, fertilize: fertilizeCost }}
+              />
+            </Animated.View>
+          );
+        })}
 
       </ScrollView>
 
@@ -2240,24 +2281,30 @@ setExploreUnlocked(travel.exploreUnlocked);
 const guestDormitoryBlocked = rupertInDining && loc.id === "dormitory";
 const diningAvailable = diningUnlocked && loc.id === "dining";
 const dormitoryAvailable = coreTravelUnlocked && loc.id === "dormitory";
+const mailAvailable = coreTravelUnlocked && loc.id === "mail";
 const exploreAvailable = exploreUnlocked && loc.id === "explore";
-const active = guestDormitoryBlocked || diningAvailable || dormitoryAvailable || exploreAvailable;
+const active = guestDormitoryBlocked || diningAvailable || dormitoryAvailable || mailAvailable || exploreAvailable;
 const onPress = guestDormitoryBlocked
   ? () => showPlayerBubble('"I need to cook herb soup for the guest."')
   : diningAvailable
     ? () => {
         audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });
-        router.push("/dining");
+        router.replace("/dining");
       }
     : dormitoryAvailable
       ? () => {
           audioManager.playSoundEffect("walking-on-wood", { maxDurationMs: 5000 });
-          router.push("/dormitory");
+          router.replace("/dormitory");
         }
+      : mailAvailable
+        ? () => {
+            audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });
+            router.replace("/mail");
+          }
       : exploreAvailable
         ? () => {
             audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });
-            router.push({ pathname: "/outside-tavern", params: { returnTo: "garden" } });
+            router.replace({ pathname: "/outside-tavern", params: { returnTo: "garden" } });
           }
       : undefined;
 return (
@@ -2274,6 +2321,7 @@ return (
       resizeMode="contain"
       resizeMethod="resize"
     />
+    {loc.id === "explore" && merchantPresent && <LocationStatusBadge kind="merchant" />}
   </TouchableOpacity>
 );
         })}
@@ -2572,8 +2620,15 @@ return (
       )}
 
       {/* ── Logbook Modal */}
-      <Modal visible={showLogbook} transparent animationType="fade">
-        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.72)", justifyContent: "center", alignItems: "center" }}>
+      <Modal
+        visible={showLogbook}
+        transparent
+        animationType="fade"
+        onShow={() => {
+          requestAnimationFrame(() => logbookScrollRef.current?.scrollToEnd({ animated: false }));
+        }}
+      >
+        {showLogbook && (<View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.72)", justifyContent: "center", alignItems: "center" }}>
           <View style={{ backgroundColor: "#1A0F00", borderWidth: 1.5, borderColor: "#C4943A", borderRadius: 16, padding: 20, maxHeight: "80%", width: W * 0.88 }}>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
               <Text style={{ color: "#C4943A", fontFamily: "Oldenburg", fontSize: 17 }}>Logbook</Text>
@@ -2582,7 +2637,15 @@ return (
               </TouchableOpacity>
             </View>
             <View style={{ height: 1, backgroundColor: "rgba(196,148,58,0.22)", marginBottom: 12 }} />
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView
+              ref={logbookScrollRef}
+              showsVerticalScrollIndicator={false}
+              onContentSizeChange={() => {
+                if (showLogbook && logbook.length > 0) {
+                  logbookScrollRef.current?.scrollToEnd({ animated: false });
+                }
+              }}
+            >
               {logbook.length === 0 ? (
                 <Text style={{ color: "rgba(240,232,213,0.45)", fontFamily: "Oldenburg", fontSize: 13, textAlign: "center", marginTop: 16 }}>
                   No entries yet.
@@ -2604,7 +2667,7 @@ return (
               )}
             </ScrollView>
           </View>
-        </View>
+        </View>)}
       </Modal>
     </View>
   );
@@ -2655,7 +2718,8 @@ const styles = StyleSheet.create({
   },
   staFloatText: { color: "#FFF", fontSize: 12, fontFamily: "Oldenburg", fontWeight: "700" },
   locationName: { color: "#F0E8D5", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 1, textAlign: "center", marginTop: 4 },
-  rightHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginLeft: 10 },
+  rightHeaderColumn: { alignItems: "flex-end", alignSelf: "flex-start", gap: 4, marginLeft: 10, transform: [{ translateY: -2 }] },
+  rightHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
   dayBadge: {
     width: 38, height: 38, borderRadius: 8,
     backgroundColor: "rgba(196,148,58,0.16)",

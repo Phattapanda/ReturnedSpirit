@@ -10,6 +10,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import StatusEffectsModal from "@/src/components/status-effects-modal";
 import { useAudioManager } from "@/src/audio/AudioProvider";
+import { useHaptics } from "@/src/feedback/haptics-provider";
 import {
   STAT_DESCRIPTIONS,
   UPGRADE_GP_COST,
@@ -37,6 +38,7 @@ export default function StatusModal({
 }: Props) {
   const insets = useSafeAreaInsets();
   const audioManager = useAudioManager();
+  const { triggerHaptic } = useHaptics();
   const [showInfo, setShowInfo] = useState(false);
   const [showEffects, setShowEffects] = useState(false);
   const upgradeLocked = React.useRef(false);
@@ -47,6 +49,7 @@ export default function StatusModal({
     upgradeLocked.current = true;
     const { stats: updated, newCurrentLife } = applyStatUpgrade(stats, field, currentLife);
     onStatsUpdated(updated, newCurrentLife);
+    triggerHaptic("level-up");
     audioManager.playSoundEffect("level-up", { maxDurationMs: 6000 });
     setTimeout(() => { upgradeLocked.current = false; }, 300);
   }

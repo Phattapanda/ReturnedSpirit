@@ -12,6 +12,7 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import {
+  getMerchantExchangeOffer,
   prepareGuestsForDay,
   setActiveGuest,
   subscribeFavorRewardDialog,
@@ -32,12 +33,20 @@ type GuestCardProps = {
   ) => boolean | void | Promise<boolean | void>;
   enabledService?: GuestServiceAction | readonly GuestServiceAction[] | null;
   sellPriceCopper?: number | null;
+  selectedMealIsAlcoholic?: boolean;
+  beverageName?: string;
+  beveragePriceCopper?: number;
+  beverageIsAlcoholic?: boolean;
   departing?: boolean;
 };
 
 const COIN_COPPER = require("../../assets/images/coin_copper.png");
 const OLD_FARMER = require("../../assets/images/old_farmer.png");
 const COACHMAN = require("../../assets/images/coachman.png");
+const MERCHANT = require("../../assets/images/merchant.png");
+const TRAVELER = require("../../assets/images/traveler.png");
+const CITY_GUARD = require("../../assets/images/city_guard.png");
+const LOCAL_BOOZER = require("../../assets/images/local_boozer.png");
 const SERVICE_SELL = require("../../assets/images/service_sell.png");
 const SERVICE_WATER = require("../../assets/images/service_water.png");
 const SERVICE_TALK = require("../../assets/images/service_talk.png");
@@ -51,6 +60,17 @@ const TRADE_SEED_CARROT = require("../../assets/images/seed_carrot.png");
 const TRADE_SEED_ONION = require("../../assets/images/seed_onion.png");
 const TRADE_HEALTHY_MUFFIN = require("../../assets/images/healthy muffin.png");
 const TRADE_GOLDEN_APPLE = require("../../assets/images/golden apple.png");
+const TRADE_BUCKET = require("../../assets/images/bucket.png");
+const TRADE_SEED_HERB = require("../../assets/images/seed_herb.png");
+const TRADE_NAILS = require("../../assets/images/nails.png");
+const TRADE_CLOTH = require("../../assets/images/cloth.png");
+const TRADE_PAINT = require("../../assets/images/paint.png");
+const TRADE_HEALING_POTION = require("../../assets/images/potion_healing_low_grade.png");
+const TRADE_STAMINA_POTION = require("../../assets/images/potion_stamina_low_grade.png");
+const TRADE_IRON_INGOT = require("../../assets/images/ingot_iron.png");
+const TRADE_COPPER_INGOT = require("../../assets/images/ingot_copper.png");
+const TRADE_MANA_SHARD = require("../../assets/images/shard_mana.png");
+const TRADE_MANA_STONE = require("../../assets/images/stone_mana.png");
 
 const TRADE_IMAGES: Record<string, ReturnType<typeof require>> = {
   potato: TRADE_POTATO,
@@ -63,6 +83,17 @@ const TRADE_IMAGES: Record<string, ReturnType<typeof require>> = {
   seed_onion: TRADE_SEED_ONION,
   healthymuffin: TRADE_HEALTHY_MUFFIN,
   goldenapple: TRADE_GOLDEN_APPLE,
+  bucket: TRADE_BUCKET,
+  seed_herb: TRADE_SEED_HERB,
+  nails: TRADE_NAILS,
+  cloth: TRADE_CLOTH,
+  paint: TRADE_PAINT,
+  potion_healing_low_grade: TRADE_HEALING_POTION,
+  potion_stamina_low_grade: TRADE_STAMINA_POTION,
+  ingot_iron: TRADE_IRON_INGOT,
+  ingot_copper: TRADE_COPPER_INGOT,
+  shard_mana: TRADE_MANA_SHARD,
+  stone_mana: TRADE_MANA_STONE,
 };
 
 export function getGuestExchangeImage(itemId: string): ReturnType<typeof require> | null {
@@ -72,6 +103,10 @@ export function getGuestExchangeImage(itemId: string): ReturnType<typeof require
 const GUEST_PORTRAITS: Record<string, ReturnType<typeof require>> = {
   old_farmer: OLD_FARMER,
   coachman: COACHMAN,
+  merchant: MERCHANT,
+  traveler: TRAVELER,
+  city_guard: CITY_GUARD,
+  local_boozer: LOCAL_BOOZER,
 };
 
 /**
@@ -90,12 +125,28 @@ export function GuestCard({
   onService,
   enabledService = null,
   sellPriceCopper = null,
+  selectedMealIsAlcoholic = false,
+  beverageName = "Water",
+  beveragePriceCopper = 1,
+  beverageIsAlcoholic = false,
   departing = false,
 }: GuestCardProps) {
   const { profile, selected } = guest;
+  const displayedSellPrice = profile.id === "local_boozer" && selectedMealIsAlcoholic && sellPriceCopper !== null
+    ? sellPriceCopper * 2
+    : sellPriceCopper;
+  const displayedBeveragePrice = profile.id === "local_boozer" && beverageIsAlcoholic
+    ? beveragePriceCopper * 2
+    : beveragePriceCopper;
   const portrait = GUEST_PORTRAITS[profile.portraitKey];
-  const canTrade = guest.exchangeOffer !== null;
-  const tradeImage = guest.exchangeOffer ? TRADE_IMAGES[guest.exchangeOffer.itemId] : null;
+  const selectedMerchantOffer = profile.id === "merchant" && sellPriceCopper !== null
+    ? getMerchantExchangeOffer(sellPriceCopper)
+    : null;
+  const visibleExchangeOffer = profile.exchangeMode === "meal_value"
+    ? selectedMerchantOffer
+    : guest.exchangeOffer;
+  const canTrade = guest.exchangeOffer !== null || profile.exchangeMode === "meal_value";
+  const tradeImage = visibleExchangeOffer ? TRADE_IMAGES[visibleExchangeOffer.itemId] : null;
   const exchangeButtonRef = useRef<View>(null);
   const sellButtonRef = useRef<View>(null);
   const departureOpacity = useRef(new Animated.Value(1)).current;
@@ -170,8 +221,14 @@ export function GuestCard({
             <Image source={SERVICE_SELL} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
             <Text style={styles.serviceLabel}>Sell for</Text>
             <View style={styles.serviceValueRow}>
-              <Text style={styles.serviceValueText}>{sellPriceCopper ?? "X"}</Text>
-              <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" resizeMethod="resize" />
+              {displayedSellPrice === null ? (
+                <Text style={styles.serviceValueText}>Select meal</Text>
+              ) : (
+                <>
+                  <Text style={styles.serviceValueText}>{displayedSellPrice}</Text>
+                  <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" resizeMethod="resize" />
+                </>
+              )}
             </View>
           </TouchableOpacity>
 
@@ -191,9 +248,14 @@ export function GuestCard({
                 )}
               </View>
               <Text style={styles.serviceLabel}>Exchange</Text>
-              {guest.exchangeOffer && (
+              {visibleExchangeOffer && (
                 <Text style={styles.tradeOfferText} numberOfLines={2}>
-                  {guest.exchangeOffer.quantity}× {guest.exchangeOffer.name}
+                  {visibleExchangeOffer.quantity}× {visibleExchangeOffer.name}
+                </Text>
+              )}
+              {!visibleExchangeOffer && profile.exchangeMode === "meal_value" && (
+                <Text style={styles.tradeOfferText} numberOfLines={2}>
+                  {sellPriceCopper === null ? "Select a meal" : "No offer for this meal"}
                 </Text>
               )}
             </TouchableOpacity>
@@ -205,10 +267,12 @@ export function GuestCard({
             onPress={() => onService?.(guest, "water")}
             activeOpacity={0.8}
           >
-            <Image source={SERVICE_WATER} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
-            <Text style={styles.serviceLabel}>Offer water</Text>
+            {beverageIsAlcoholic
+              ? <Ionicons name="beer-outline" size={29} color="#C4943A" />
+              : <Image source={SERVICE_WATER} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />}
+            <Text style={styles.serviceLabel}>Offer {beverageName}</Text>
             <View style={styles.serviceValueRow}>
-              <Text style={styles.serviceValueText}>for 1</Text>
+              <Text style={styles.serviceValueText}>for {displayedBeveragePrice}</Text>
               <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" resizeMethod="resize" />
             </View>
           </TouchableOpacity>
@@ -234,6 +298,10 @@ type DiningGuestAreaProps = {
   enabledService?: GuestServiceAction | null;
   enabledServicesForGuest?: (guest: GuestVisitView) => GuestServiceAction | readonly GuestServiceAction[] | null;
   sellPriceCopper?: number | null;
+  selectedMealIsAlcoholic?: boolean;
+  beverageName?: string;
+  beveragePriceCopper?: number;
+  beverageIsAlcoholic?: boolean;
   departingGuestId?: GuestId | null;
   hiddenGuestIds?: readonly GuestId[];
   onService?: (
@@ -245,6 +313,8 @@ type DiningGuestAreaProps = {
 };
 
 function coachmanRequestText(guest: GuestVisitView): string {
+  if (guest.profile.id === "local_boozer") return "“Something alcoholic, if you have it.”";
+  if (guest.profile.id === "city_guard") return "“Anything warm will do.”";
   if (guest.profile.id !== "coachman") return "“I could use something to eat.”";
   if (guest.favor >= 100) return "“My favorite stop. What’s cooking?”";
   if (guest.favor >= 75) return "“I was hoping your kitchen was open.”";
@@ -263,6 +333,10 @@ export default function DiningGuestArea({
   enabledService = null,
   enabledServicesForGuest,
   sellPriceCopper = null,
+  selectedMealIsAlcoholic = false,
+  beverageName = "Water",
+  beveragePriceCopper = 1,
+  beverageIsAlcoholic = false,
   departingGuestId = null,
   hiddenGuestIds = [],
   onService,
@@ -362,6 +436,10 @@ export default function DiningGuestArea({
           onService={handleService}
           enabledService={guest.selected ? (enabledServicesForGuest?.(guest) ?? enabledService) : null}
           sellPriceCopper={sellPriceCopper}
+          selectedMealIsAlcoholic={selectedMealIsAlcoholic}
+          beverageName={beverageName}
+          beveragePriceCopper={beveragePriceCopper}
+          beverageIsAlcoholic={beverageIsAlcoholic}
           departing={departingGuestId === guest.profile.id}
         />
       ))}

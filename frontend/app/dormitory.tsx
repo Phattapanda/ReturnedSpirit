@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { useManagedTimers } from "@/src/hooks/use-managed-timers";
 import {
   View,
   Text,
@@ -42,6 +43,7 @@ import SceneBackground from "@/src/components/SceneBackground";
 import CurrencyHud from "@/src/components/CurrencyHud";
 import StatusModal from "@/src/components/StatusModal";
 import PortraitBubble from "@/src/components/portrait-bubble";
+import TavernLocationTransition from "@/src/components/tavern-location-transition";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
 import { setPlaytimePaused } from "@/src/game/playtime-tracker";
@@ -95,7 +97,7 @@ type RoomState =
 // ─── Assets ───────────────────────────────────────────────────────────────────
 
 const IMG = {
-  room_evening: require("../assets/images/room1_evening.jpg"),
+  room_evening: require("../assets/images/room1_evening.png"),
   room_morning: require("../assets/images/room1_morning.jpg"),
   avLaugh:      require("../assets/images/avatar1_laugh.png"),
   avNormal:     require("../assets/images/avatar1_normal.png"),
@@ -145,6 +147,10 @@ function processPlotDayChange(p: GardenPlotData): GardenPlotData {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function DormitoryScreen() {
+  const {
+    setManagedTimeout: setTimeout,
+    clearManagedTimeout: clearTimeout,
+  } = useManagedTimers();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: W } = useWindowDimensions();
@@ -164,6 +170,7 @@ export default function DormitoryScreen() {
   const [lifeCurrent, setLifeCurrent]       = useState(15);
   const [playerStats, setPlayerStats]       = useState<PlayerStats>(DEFAULT_PLAYER_STATS);
   const [dayIdx, setDayIdx]                 = useState(0);
+  const [elapsedDayCount, setElapsedDayCount] = useState(0);
 
   // ── Room state
   const [roomState, setRoomState]   = useState<RoomState>("LOADING");
@@ -293,16 +300,16 @@ export default function DormitoryScreen() {
   useEffect(() => {
     const t = setTimeout(measurePortrait, 600);
     return () => clearTimeout(t);
-  }, [W, insets.top]);
+  }, [W, insets.top, setTimeout, clearTimeout]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Pure helper: determine dormitory time-of-day and intro flag
   //
-  // Days 1 & 2 (dayIdx 0, 1): tutorial-controlled via saved flags
-  // Day 3+  (dayIdx >= 2):    dynamic — staminaSpentToday >= 20 → evening
+  // Days 1 & 2 (elapsed day counts 0, 1): tutorial-controlled via saved flags
+  // Day 3+  (elapsed day count >= 2): dynamic — staminaSpentToday >= 10 → evening
   // ─────────────────────────────────────────────────────────────────────────
   function resolveDormitoryTimeOfDay(
-    di: number,
+    elapsedDays: number,
     spent: number,
     flags: {
       firstSleepDone: boolean;
@@ -311,7 +318,7 @@ export default function DormitoryScreen() {
       savedTimeOfDay: TimeOfDay;
     },
   ): { timeOfDay: TimeOfDay; showEveningIntro: boolean } {
-    if (di <= 1) {
+    if (elapsedDays <= 1) {
       // Tutorial days: respect saved time-of-day and intro flags
       if (flags.savedTimeOfDay === "morning" && flags.firstSleepDone) {
         return { timeOfDay: "morning", showEveningIntro: false };
@@ -322,7 +329,7 @@ export default function DormitoryScreen() {
       return { timeOfDay: "evening", showEveningIntro: false };
     }
     // Day 3+: fully dynamic
-    return { timeOfDay: spent >= 20 ? "evening" : "morning", showEveningIntro: false };
+    return { timeOfDay: spent >= 10 ? "evening" : "morning", showEveningIntro: false };
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -356,6 +363,9 @@ export default function DormitoryScreen() {
         const rawDay = await AsyncStorage.getItem(DSK.DAY_INDEX);
         const di = rawDay !== null ? parseInt(rawDay, 10) : 0;
         setDayIdx(di);
+        const rawElapsedDays = await AsyncStorage.getItem(ELAPSED_DAYS_KEY);
+        const elapsedDays = Math.max(0, Number.parseInt(rawElapsedDays ?? "0", 10) || 0);
+        setElapsedDayCount(elapsedDays);
         const guestTutorialStep = await loadGuestTutorialIntroStep();
 
         // Daily stamina spend (cross-screen, written by garden.tsx deductStamina)
@@ -409,13 +419,13 @@ export default function DormitoryScreen() {
 
         // ── Resolve room state via central helper ──────────────────────────
         const resolvedRoom = resolveDormitoryTimeOfDay(
-          di, spent,
+          elapsedDays, spent,
           { firstSleepDone: fs, hasSeenEveThought: evt, hasEntered: rawHasEntered === "true", savedTimeOfDay: tod },
         );
         // The first guest tutorial completes Day 2's required progression. Once it
         // is finished, the player may sleep and move on to Day 3 even though Day 2
         // originally began in the tutorial-controlled morning state.
-        const postGuestDayTwoEvening = di === 1 && guestTutorialStep === "service_complete";
+        const postGuestDayTwoEvening = elapsedDays === 1 && guestTutorialStep === "service_complete";
         const resolvedTod: TimeOfDay = postGuestDayTwoEvening ? "evening" : resolvedRoom.timeOfDay;
         const showEveningIntro = postGuestDayTwoEvening ? false : resolvedRoom.showEveningIntro;
         if (postGuestDayTwoEvening && tod !== "evening") {
@@ -426,7 +436,7 @@ export default function DormitoryScreen() {
         if (resolvedTod === "morning") {
           setRS("ROOM_MORNING");
           // Ambient: morning birds on Day 3+ morning entry
-          if (di >= 2) {
+          if (elapsedDays >= 2) {
             playMorningBirdsOnce();
           }
         } else if (showEveningIntro) {
@@ -438,7 +448,7 @@ export default function DormitoryScreen() {
         } else {
           setRS("ROOM_EVENING_INTERACTIVE");
           // Ambient: owl on Day 3+ evening entry
-          if (di >= 2) {
+          if (elapsedDays >= 2) {
             audioManager.playSoundEffect('owl', { maxDurationMs: 30000 });
           }
         }
@@ -447,14 +457,14 @@ export default function DormitoryScreen() {
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [clearTimeout]);
 
   useEffect(() => {
     return () => {
       if (playerBubbleTimer.current) clearTimeout(playerBubbleTimer.current);
       if (upgradeMsgTimer.current) clearTimeout(upgradeMsgTimer.current);
     };
-  }, []);
+  }, [clearTimeout]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Player thought bubble
@@ -493,7 +503,7 @@ export default function DormitoryScreen() {
   function handleGoToSleep() {
     if (timeOfDay === "morning") {
       // Day 3+: "not tired enough yet"; Day 1 & 2: "too early to sleep again"
-      if (dayIdx >= 2) {
+      if (elapsedDayCount >= 2) {
         showPlayerBubble('"I\'m not tired enough to sleep yet."', 2500);
       } else {
         showPlayerBubble('"It\'s too early to sleep again."', 2500);
@@ -543,6 +553,7 @@ export default function DormitoryScreen() {
       ]);
       await prepareTitheForDay(elapsedDays);
       setDayIdx(newDay);
+      setElapsedDayCount(elapsedDays);
 
       // ── 2. Process garden plot growth
       const rawPlot = await AsyncStorage.getItem(DSK.PLOT_DATA);
@@ -739,7 +750,8 @@ export default function DormitoryScreen() {
         await discardRuntimeAndRestore(parseInt(rawSlot, 10));
       }
     } catch { /* non-critical */ }
-    router.replace("/");
+    if (router.canGoBack()) router.dismissAll();
+    else router.replace("/");
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -753,7 +765,7 @@ export default function DormitoryScreen() {
   async function handleGoDownstairs() {
     // Day 3+: always allow going downstairs (player can check and come back)
     // Day 1 & 2: tutorial restriction (must sleep before first leaving)
-    if (dayIdx <= 1 && mustSleep && !firstSleepDone) {
+    if (elapsedDayCount <= 1 && mustSleep && !firstSleepDone) {
       showPlayerBubble('"I should go to sleep."', 2000);
       return;
     }
@@ -841,7 +853,7 @@ export default function DormitoryScreen() {
   // Day 3+: always allowed to go downstairs (not-tired-enough is not a lock)
   // Day 1 & 2: tutorial restricts until first sleep
   // staminaSpentToday is kept in state so it can be displayed/used in future features
-  const canGoDownstairs      = dayIdx >= 2 ? (staminaSpentToday >= 0) : (isMorning || (!mustSleep && firstSleepDone));
+  const canGoDownstairs      = elapsedDayCount >= 2 ? (staminaSpentToday >= 0) : (isMorning || (!mustSleep && firstSleepDone));
   const optionsInteractive   = roomState === "ROOM_EVENING_INTERACTIVE" || roomState === "ROOM_MORNING";
   const incompleteUpgrades   = roomUpgrades.filter(u => !u.completed);
 
@@ -857,7 +869,7 @@ export default function DormitoryScreen() {
   function renderPlayerBubble() {
     if (!playerBubble) return null;
     const L = playerPortraitLayout.current;
-    const topPos = L ? L.y + L.h + 12 : (headerH > 0 ? headerH + 140 : insets.top + 212);
+    const topPos = L ? L.y + L.h - 16 : (headerH > 0 ? headerH + 112 : insets.top + 184);
     const anchorX = L ? L.x + L.w / 2 : W * 0.32;
     const isEveningIntroState = roomState === "ROOM_EVENING_INTRO";
     return (
@@ -875,8 +887,8 @@ export default function DormitoryScreen() {
   // JSX
   // ─────────────────────────────────────────────────────────────────────────
   return (
+    <TavernLocationTransition location="dormitory">
     <View style={styles.root}>
-      <CurrencyHud />
       {/* ── Background (responsive, top-aligned, no cover zoom) ── */}
       <SceneBackground source={isEvening ? IMG.room_evening : IMG.room_morning} topOffset={headerH} />
       <View style={[StyleSheet.absoluteFill, { top: headerH }, styles.bgOverlay]} pointerEvents="none" />
@@ -928,13 +940,16 @@ export default function DormitoryScreen() {
             </View>
           </View>
 
-          <View style={styles.rightHeader}>
-            <View style={styles.dayBadge}>
-              <Text style={styles.dayText}>{DAYS[dayIdx]}</Text>
+          <View style={styles.rightHeaderColumn}>
+            <View style={styles.rightHeader}>
+              <View style={styles.dayBadge}>
+                <Text style={styles.dayText}>{DAYS[dayIdx]}</Text>
+              </View>
+              <TouchableOpacity style={styles.menuBtn} onPress={() => setShowMenu(true)} activeOpacity={0.8}>
+                <Ionicons name="menu" size={22} color="#F5E6C8" />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity style={styles.menuBtn} onPress={() => setShowMenu(true)} activeOpacity={0.8}>
-              <Ionicons name="menu" size={22} color="#F5E6C8" />
-            </TouchableOpacity>
+            <CurrencyHud inline compact />
           </View>
         </View>
         <Text style={styles.locationName}>{roomDisplayName}</Text>
@@ -1144,6 +1159,7 @@ export default function DormitoryScreen() {
       {/* ── Player thought bubble ── */}
       {renderPlayerBubble()}
     </View>
+    </TavernLocationTransition>
   );
 }
 
@@ -1258,7 +1274,8 @@ const styles = StyleSheet.create({
   regenStaText: { color: "#C4943A", fontFamily: "Oldenburg", fontSize: 13, fontWeight: "700" },
   regenLifeText:{ color: "#CC2200", fontFamily: "Oldenburg", fontSize: 13, fontWeight: "700" },
   locationName: { color: "#F0E8D5", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 1, textAlign: "center", marginTop: 4 },
-  rightHeader:  { flexDirection: "row", alignItems: "center", gap: 8, marginLeft: 10 },
+  rightHeaderColumn: { alignItems: "flex-end", alignSelf: "flex-start", gap: 4, marginLeft: 10, transform: [{ translateY: -2 }] },
+  rightHeader:  { flexDirection: "row", alignItems: "center", gap: 8 },
   dayBadge: {
     width: 38, height: 38, borderRadius: 8,
     backgroundColor: "rgba(196,148,58,0.16)",

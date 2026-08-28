@@ -8,6 +8,7 @@ type PortraitBubbleProps = {
   top: number;
   speaker?: string;
   variant?: "speech" | "thought";
+  highlightedPhrases?: readonly string[];
 };
 
 const EDGE_GAP = 12;
@@ -24,6 +25,7 @@ export default function PortraitBubble({
   top,
   speaker,
   variant = "thought",
+  highlightedPhrases = [],
 }: PortraitBubbleProps) {
   const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
   const isSpeech = variant === "speech";
@@ -68,7 +70,10 @@ export default function PortraitBubble({
         ]}
       >
         {speaker ? <Text style={styles.speaker}>{speaker}</Text> : null}
-        <Text style={isSpeech ? styles.speechText : styles.thoughtText}>{text}</Text>
+        <Text style={isSpeech ? styles.speechText : styles.thoughtText}>{highlightedPhrases.length === 0 ? text : text.split(new RegExp(`(${highlightedPhrases.map((phrase) => phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "gi")).map((part, index) => {
+          const highlighted = highlightedPhrases.some((phrase) => phrase.toLocaleLowerCase() === part.toLocaleLowerCase());
+          return <Text key={`${index}-${part}`} style={highlighted ? styles.highlight : undefined}>{part}</Text>;
+        })}</Text>
       </View>
 
       <View style={[styles.tailBorder, { left: tailLeft, borderBottomColor: borderColor }]} />
@@ -120,6 +125,7 @@ const styles = StyleSheet.create({
     fontFamily: "RobotoItalic",
     flexShrink: 1,
   },
+  highlight: { color: "#C81912", fontWeight: "900", fontStyle: "italic" },
   tailBorder: {
     position: "absolute",
     top: -12,

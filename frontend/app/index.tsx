@@ -5,20 +5,15 @@ import {
   TouchableOpacity,
   StyleSheet,
   StatusBar,
-  Image,
-  useWindowDimensions,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { Image } from "expo-image";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { audioEngine } from "@/src/audio/audioEngine";
 
-const BG = require("../assets/images/mainpage.webp");
-
-// Original image dimensions – used to compute proportional height
-const IMG_W = 923;
-const IMG_H = 2000;
+const BG = require("../assets/images/mainpage.png");
 
 const MENU_ITEMS = [
   { id: "new-game", label: "New Game", icon: "sword-cross" as const },
@@ -30,8 +25,6 @@ const MENU_ITEMS = [
 export default function MainMenu() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
-  const imgHeight = (IMG_H / IMG_W) * width;
 
   // Audio: play main menu theme immediately when arriving at main menu (no crossfade)
   // We use audioEngine directly so we can await unlockAudio() before crossfadeTo.
@@ -43,7 +36,6 @@ export default function MainMenu() {
       await audioEngine.unlockAudio();
       audioEngine.crossfadeTo('main-menu', 0);
     })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Unlock audio + navigate on menu item press
@@ -57,8 +49,8 @@ export default function MainMenu() {
       <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
       <Image
         source={BG}
-        style={{ position: "absolute", top: 0, left: 0, width, height: imgHeight }}
-        resizeMode="stretch" resizeMethod="resize"
+        style={StyleSheet.absoluteFillObject}
+        contentFit="cover"
       />
       <View style={[styles.buttons, { paddingBottom: insets.bottom + 12 }]}>
         {MENU_ITEMS.map((item) => (
