@@ -91,6 +91,13 @@ export default function NewGame() {
       "@game:stamina",
       "@game:life",
       "@game:day_index",
+      "@game:elapsed_days",
+      "@game:civil_servant_tithe",
+      "@game:pending_next_run_intro",
+      "@game:travel_state",
+      "@game:merchant_shop",
+      "@game:mailbox",
+      "@tutorial:coachman_escort",
       // Garden state
       "@garden:has_entered",
       "@garden:has_seen_introduction",
@@ -102,6 +109,8 @@ export default function NewGame() {
       "@garden:tutorial_state",
       "@garden:plot_01_data",
       "@garden:plot_02_data",
+      "@garden:plot_03_data",
+      "@garden:plot_04_data",
       "@garden:inventory",
       "@garden:selected_fertilizer",
       // Tuesday garden flags
@@ -126,6 +135,7 @@ export default function NewGame() {
       "@kitchen:cooking_tutorial_step",
       "@kitchen:craft_ingredients",
       "@kitchen:craft_tool_slot",
+      "@kitchen:discovered_recipes",
       // Room / Dormitory state
       "@room:has_entered",
       "@room:has_seen_evening_thought",
@@ -147,7 +157,7 @@ export default function NewGame() {
 
     setShowModal(false);
     // Navigate to loading screen first — preloads all gameplay assets before intro starts
-    router.push({
+    router.replace({
       pathname: "/game-loading",
       params: { from: "new-game", characterName: name.trim(), slotId: String(selectedSlot) },
     });

@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { usePathname } from "expo-router";
-import React, { useEffect } from "react";
+import { useEffect } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 
 const ACTIVE_SLOT_KEY = "@game:active_slot";
@@ -32,7 +32,9 @@ export function flushPlaytime(): Promise<void> {
   if (startedAtMs !== null) startedAtMs = now;
   if (!slotNumber || seconds <= 0) return writeQueue;
 
-  writeQueue = writeQueue.then(async () => {
+  // Recover from a previous storage failure instead of extending a permanently
+  // rejected promise chain every 30 seconds for the rest of the session.
+  writeQueue = writeQueue.catch(() => {}).then(async () => {
     const raw = await AsyncStorage.getItem(GAME_SLOTS_KEY);
     if (!raw) return;
     const slots = JSON.parse(raw) as SaveSlotWithPlaytime[];
@@ -45,7 +47,7 @@ export function flushPlaytime(): Promise<void> {
       return { ...slot, playtimeSeconds: currentSeconds + seconds };
     });
     await AsyncStorage.setItem(GAME_SLOTS_KEY, JSON.stringify(updated));
-  });
+  }).catch(() => {});
   return writeQueue;
 }
 

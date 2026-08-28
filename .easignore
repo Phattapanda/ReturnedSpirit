@@ -1,0 +1,16 @@
+frontend/node_modules/
+frontend/.npm-cache/
+frontend/.eas-cli-runtime/
+frontend/.eas-userinfo-patch.cjs
+frontend/.expo/
+frontend/.expo-export-check/
+frontend/.expo-export-asset-naming/
+frontend/.expo-export-guest-check/
+frontend/.metro-cache/
+frontend/dist/
+frontend/web-build/
+frontend/*.tsbuildinfo
+frontend/*.log
+*.log
+*.apk
+.DS_Store

@@ -36,11 +36,25 @@ import {
 import {
   DEFAULT_PLAYER_STATS,
   PLAYER_STATS_KEY,
-  advanceStaminaBuffDay,
+  advancePlayerStatusEffectsDay,
   normalizePlayerStats,
 } from "@/src/game/player-stats";
 import { DEFAULT_PROGRESSION_STATE, PROGRESSION_STATE_KEY } from "@/src/game/progression";
 import { flushPlaytime } from "@/src/game/playtime-tracker";
+import { DEFAULT_TRAVEL_STATE, TRAVEL_STATE_KEY } from "@/src/game/travel-system";
+import { DISCOVERED_RECIPES_KEY } from "@/src/game/cooking-system";
+import { MERCHANT_SHOP_KEY } from "@/src/game/merchant-shop";
+import { DEFAULT_MAILBOX_STATE, MAILBOX_STATE_KEY } from "@/src/game/mailbox-system";
+import { KITCHEN_SMALL_CRATE_KEY } from "@/src/game/kitchen-small-crate";
+import { FOREST_DUNGEON_KEY, FOREST_FIGHT_SNAPSHOT_KEY } from "@/src/game/forest-dungeon-system";
+import { COACHMAN_ESCORT_KEY } from "@/src/game/coachman-escort-system";
+import {
+  DEFAULT_TITHE_STATE,
+  ELAPSED_DAYS_KEY,
+  NEXT_RUN_INTRO_PENDING_KEY,
+  TITHE_STATE_KEY,
+  normalizeTitheState,
+} from "@/src/game/tithe-system";
 
 /** All gameplay keys that form a complete save snapshot (NO meta keys like active_slot / game_slots). */
 export const ALL_SNAPSHOT_KEYS: string[] = [
@@ -51,6 +65,7 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   "@game:player_name",
   "@game:player_avatar_id",
   "@game:day_index",
+  ELAPSED_DAYS_KEY,
   "@game:stamina_spent_today",
   "@game:unlocked_locs",
   "@game:save_location",
@@ -64,6 +79,11 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   DINING_MEAL_STATE_KEY,
   GUEST_TUTORIAL_INTRO_KEY,
   POST_GUEST_TUTORIAL_STATE_KEY,
+  TITHE_STATE_KEY,
+  NEXT_RUN_INTRO_PENDING_KEY,
+  TRAVEL_STATE_KEY,
+  MERCHANT_SHOP_KEY,
+  MAILBOX_STATE_KEY,
   // Kitchen tutorial flags
   "@tutorial:kitchen_done",
   "@kitchen:has_seen_post_garden_dialog",
@@ -75,6 +95,11 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   "@kitchen:cooking_tutorial_step",
   "@kitchen:craft_ingredients",
   "@kitchen:craft_tool_slot",
+  KITCHEN_SMALL_CRATE_KEY,
+  FOREST_DUNGEON_KEY,
+  FOREST_FIGHT_SNAPSHOT_KEY,
+  COACHMAN_ESCORT_KEY,
+  DISCOVERED_RECIPES_KEY,
   // Garden state
   "@garden:has_entered",
   "@garden:has_seen_introduction",
@@ -86,6 +111,8 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   "@garden:tutorial_state",
   "@garden:plot_01_data",
   "@garden:plot_02_data",
+  "@garden:plot_03_data",
+  "@garden:plot_04_data",
   "@garden:inventory",
   "@garden:selected_fertilizer",
   "@garden:inventory_bag_unlocked",
@@ -122,13 +149,6 @@ export async function createSnapshot(
   trigger: "day_transition" | "manual" | "new_game",
 ): Promise<void> {
   if (__DEV__) {
-    if (trigger === "day_transition") {
-      console.log("[SAVE] SAVE TRIGGER: DAY TRANSITION — slot", slotNum);
-    } else if (trigger === "manual") {
-      console.log("[SAVE] SAVE TRIGGER: MANUAL MENU SAVE — slot", slotNum);
-    } else {
-      console.log("[SAVE] SAVE TRIGGER: NEW GAME INIT — slot", slotNum);
-    }
   }
   try {
     if (trigger === "new_game") {
@@ -140,6 +160,12 @@ export async function createSnapshot(
         [POST_GUEST_TUTORIAL_STATE_KEY, JSON.stringify(DEFAULT_POST_GUEST_TUTORIAL_STATE)],
         [PLAYER_STATS_KEY, JSON.stringify(DEFAULT_PLAYER_STATS)],
         [PROGRESSION_STATE_KEY, JSON.stringify(DEFAULT_PROGRESSION_STATE)],
+        [ELAPSED_DAYS_KEY, "0"],
+        [TITHE_STATE_KEY, JSON.stringify(DEFAULT_TITHE_STATE)],
+        [NEXT_RUN_INTRO_PENDING_KEY, "false"],
+        [TRAVEL_STATE_KEY, JSON.stringify(DEFAULT_TRAVEL_STATE)],
+        [DISCOVERED_RECIPES_KEY, JSON.stringify([])],
+        [MAILBOX_STATE_KEY, JSON.stringify(DEFAULT_MAILBOX_STATE)],
       ]);
     }
 
@@ -153,7 +179,7 @@ export async function createSnapshot(
       await advanceSecondGardenPlotDay();
       const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
       const stats = normalizePlayerStats(rawStats ? JSON.parse(rawStats) : null);
-      await AsyncStorage.setItem(PLAYER_STATS_KEY, JSON.stringify(advanceStaminaBuffDay(stats)));
+      await AsyncStorage.setItem(PLAYER_STATS_KEY, JSON.stringify(advancePlayerStatusEffectsDay(stats)));
     }
 
     await flushPlaytime();
@@ -199,13 +225,17 @@ export async function restoreFromSnapshot(slotNum: number): Promise<void> {
     if (toRemove.length > 0) await AsyncStorage.multiRemove(toRemove);
 
     // Persist schema defaults for snapshots created before Level/Run/KP existed.
-    const [rawStats, rawProgression] = await AsyncStorage.multiGet([
+    const [rawStats, rawProgression, rawTithe, rawElapsedDays] = await AsyncStorage.multiGet([
       PLAYER_STATS_KEY,
       PROGRESSION_STATE_KEY,
+      TITHE_STATE_KEY,
+      ELAPSED_DAYS_KEY,
     ]);
     await AsyncStorage.multiSet([
       [PLAYER_STATS_KEY, JSON.stringify(normalizePlayerStats(rawStats[1] ? JSON.parse(rawStats[1]) : null))],
       [PROGRESSION_STATE_KEY, rawProgression[1] ?? JSON.stringify(DEFAULT_PROGRESSION_STATE)],
+      [TITHE_STATE_KEY, JSON.stringify(normalizeTitheState(rawTithe[1] ? JSON.parse(rawTithe[1]) : null))],
+      [ELAPSED_DAYS_KEY, rawElapsedDays[1] ?? "0"],
     ]);
   } catch (e) {
     console.error("[SaveManager] restoreFromSnapshot failed:", e);

@@ -16,6 +16,9 @@ import { VideoView, useVideoPlayer } from "expo-video";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { NEXT_RUN_INTRO_PENDING_KEY } from "@/src/game/tithe-system";
+import { useAudioManager } from "@/src/audio/AudioProvider";
+import { useHaptics } from "@/src/feedback/haptics-provider";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
   PLAYER_AVATAR_KEY,
@@ -147,6 +150,8 @@ export default function IntroScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: screenW, height: screenH } = useWindowDimensions();
+  const { sfxVolume } = useAudioManager();
+  const { triggerHaptic } = useHaptics();
   const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(DEFAULT_PLAYER_AVATAR_ID);
 
   useEffect(() => {
@@ -197,10 +202,6 @@ export default function IntroScreen() {
 
   useEffect(() => {
     mountedRef.current = true;
-    try { knockPlayer.volume = 1; } catch {}
-    try { tapPlayer.volume = 1; } catch {}
-    try { walkPlayer.volume = 1; } catch {}
-
     return () => {
       mountedRef.current = false;
       for (const timer of timersRef.current) clearTimeout(timer);
@@ -215,6 +216,13 @@ export default function IntroScreen() {
       try { walkPlayer.pause(); } catch {}
     };
   }, [knockPlayer, tapPlayer, videoPlayer, walkPlayer]);
+
+  useEffect(() => {
+    const volume = sfxVolume / 100;
+    try { knockPlayer.volume = volume; } catch {}
+    try { tapPlayer.volume = volume; } catch {}
+    try { walkPlayer.volume = volume; } catch {}
+  }, [knockPlayer, sfxVolume, tapPlayer, walkPlayer]);
 
   function later(fn: () => void, ms: number) {
     const timer = setTimeout(() => {
@@ -352,6 +360,7 @@ export default function IntroScreen() {
 
   async function saveIntroProgress() {
     try {
+      await AsyncStorage.setItem(NEXT_RUN_INTRO_PENDING_KEY, "false");
       const rawSlot = await AsyncStorage.getItem("@game:active_slot");
       const rawSlots = await AsyncStorage.getItem("game_slots");
       if (rawSlot && rawSlots) {
@@ -387,6 +396,7 @@ export default function IntroScreen() {
   }
 
   function handleChoice(nextPhase: DialogPhase | "kitchen") {
+    triggerHaptic("choice");
     playTapSound();
     if (nextPhase === "kitchen") {
       playWalkingWood();
@@ -464,7 +474,9 @@ export default function IntroScreen() {
         >
           <View style={styles.bubble}>
             <Text style={styles.bubbleText}>{'"Are you awake?"'}</Text>
-            <View style={styles.bubbleTail} />
+            <View style={styles.bubbleTailBorder} />
+            <View style={styles.bubbleTailFill} />
+            <View style={styles.bubbleTailBridge} />
           </View>
         </Animated.View>
       )}
@@ -593,19 +605,44 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 6,
   },
-  bubbleTail: {
+  bubbleTailBorder: {
     position: "absolute",
-    bottom: -9,
+    bottom: -12,
+    alignSelf: "center",
+    width: 0,
+    height: 0,
+    borderLeftWidth: 11,
+    borderRightWidth: 11,
+    borderTopWidth: 12,
+    borderStyle: "solid",
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    borderTopColor: "rgba(196,148,58,0.58)",
+    zIndex: 2,
+  },
+  bubbleTailFill: {
+    position: "absolute",
+    bottom: -8,
     alignSelf: "center",
     width: 0,
     height: 0,
     borderLeftWidth: 9,
     borderRightWidth: 9,
-    borderTopWidth: 9,
+    borderTopWidth: 10,
     borderStyle: "solid",
     borderLeftColor: "transparent",
     borderRightColor: "transparent",
-    borderTopColor: "rgba(18, 10, 4, 0.93)",
+    borderTopColor: "rgba(18,10,4,0.93)",
+    zIndex: 3,
+  },
+  bubbleTailBridge: {
+    position: "absolute",
+    bottom: -1,
+    alignSelf: "center",
+    width: 18,
+    height: 4,
+    backgroundColor: "rgba(18,10,4,0.93)",
+    zIndex: 4,
   },
   bubbleText: {
     color: "#F5E6C8",

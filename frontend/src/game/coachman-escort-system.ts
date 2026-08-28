@@ -1,0 +1,157 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+import { loadCurrencyCopper, saveCurrencyCopper } from "@/src/game/currency-system";
+import { addGuestFavor, loadGuestState } from "@/src/game/guest-system";
+import {
+  ITEM_ATTRIBUTE,
+  ITEM_CATALOG,
+  KITCHEN_TABLE_KEY,
+  PLAYER_BAG_KEY,
+  normalizeBagItem,
+  normalizePlayerBagData,
+  planAddToBag,
+  type BagItem,
+  type PlayerBagData,
+} from "@/src/game/item-system";
+
+export const COACHMAN_ESCORT_KEY = "@tutorial:coachman_escort";
+export const ESCORT_WEAPON_ID = "weapon_iron_shortsword";
+export const ESCORT_ARMOR_ID = "armor_leather_armor";
+
+export type CoachmanEscortPhase = "locked" | "rupert_warned" | "offer_pending" | "accepted" | "declined" | "journey" | "combat" | "post_combat" | "complete";
+
+export type CoachmanEscortState = {
+  version: 1;
+  phase: CoachmanEscortPhase;
+  equipmentPending: boolean;
+  bonusCopperAccepted: boolean;
+};
+
+export const DEFAULT_COACHMAN_ESCORT_STATE: CoachmanEscortState = {
+  version: 1,
+  phase: "locked",
+  equipmentPending: false,
+  bonusCopperAccepted: false,
+};
+
+function normalizeState(raw: unknown): CoachmanEscortState {
+  if (!raw || typeof raw !== "object") return { ...DEFAULT_COACHMAN_ESCORT_STATE };
+  const candidate = raw as Partial<CoachmanEscortState>;
+  const phases = new Set<CoachmanEscortPhase>(["locked", "rupert_warned", "offer_pending", "accepted", "declined", "journey", "combat", "post_combat", "complete"]);
+  return {
+    version: 1,
+    phase: phases.has(candidate.phase as CoachmanEscortPhase) ? candidate.phase as CoachmanEscortPhase : "locked",
+    equipmentPending: candidate.equipmentPending === true,
+    bonusCopperAccepted: candidate.bonusCopperAccepted === true,
+  };
+}
+
+export async function loadCoachmanEscortState(): Promise<CoachmanEscortState> {
+  const raw = await AsyncStorage.getItem(COACHMAN_ESCORT_KEY);
+  return normalizeState(raw ? JSON.parse(raw) : null);
+}
+
+export async function saveCoachmanEscortState(state: CoachmanEscortState): Promise<CoachmanEscortState> {
+  const normalized = normalizeState(state);
+  await AsyncStorage.setItem(COACHMAN_ESCORT_KEY, JSON.stringify(normalized));
+  return normalized;
+}
+
+export async function getCalendarDayNumber(): Promise<number> {
+  const guestState = await loadGuestState();
+  return guestState.calendarDaySerial + 1;
+}
+
+export async function markRupertMonsterWarningSeen(): Promise<CoachmanEscortState> {
+  const state = await loadCoachmanEscortState();
+  if (state.phase !== "locked") return state;
+  return saveCoachmanEscortState({ ...state, phase: "rupert_warned" });
+}
+
+export async function markCoachmanOfferStarted(): Promise<CoachmanEscortState> {
+  const state = await loadCoachmanEscortState();
+  if (state.phase === "accepted" || state.phase === "declined" || state.phase === "complete") return state;
+  return saveCoachmanEscortState({ ...state, phase: "offer_pending" });
+}
+
+function equipmentItem(id: typeof ESCORT_WEAPON_ID | typeof ESCORT_ARMOR_ID): BagItem {
+  const entry = ITEM_CATALOG[id];
+  return {
+    id,
+    itemType: id,
+    name: entry.name,
+    quantity: 1,
+    attributes: [...entry.attributes],
+    durability: entry.maxDurability,
+    maxDurability: entry.maxDurability,
+  };
+}
+
+async function deliverEquipmentToKitchen(): Promise<boolean> {
+  const raw = await AsyncStorage.getItem(KITCHEN_TABLE_KEY);
+  const parsed = raw ? JSON.parse(raw) as (BagItem | null)[] : [];
+  const table = Array.from({ length: Math.max(12, parsed.length) }, (_, index) => normalizeBagItem(parsed[index] ?? null));
+  const equipmentIds = [ESCORT_WEAPON_ID, ESCORT_ARMOR_ID] as const;
+  const missing = equipmentIds.filter((id) => !table.some((item) => item?.id === id));
+  const free = table.reduce<number[]>((indices, item, index) => { if (!item) indices.push(index); return indices; }, []);
+  if (free.length < missing.length) return false;
+  missing.forEach((id, index) => { table[free[index]] = equipmentItem(id); });
+  await AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(table));
+  return true;
+}
+
+export async function acceptCoachmanEscort(withCopperBonus: boolean): Promise<CoachmanEscortState> {
+  const state = await loadCoachmanEscortState();
+  if (state.phase === "accepted" || state.phase === "journey" || state.phase === "combat" || state.phase === "post_combat" || state.phase === "complete") return state;
+  if (!withCopperBonus) await addGuestFavor("coachman", 10);
+  if (withCopperBonus) await saveCurrencyCopper((await loadCurrencyCopper()) + 50);
+  const delivered = await deliverEquipmentToKitchen();
+  return saveCoachmanEscortState({ ...state, phase: "accepted", equipmentPending: !delivered, bonusCopperAccepted: withCopperBonus });
+}
+
+export async function declineCoachmanEscort(): Promise<CoachmanEscortState> {
+  const state = await loadCoachmanEscortState();
+  return saveCoachmanEscortState({ ...state, phase: "declined" });
+}
+
+export type EscortPreparationResult = "ready" | "equipment_in_kitchen" | "bag_full";
+
+export async function prepareCoachmanEscortDeparture(): Promise<EscortPreparationResult> {
+  const [rawBag, rawTable, state] = await Promise.all([
+    AsyncStorage.getItem(PLAYER_BAG_KEY),
+    AsyncStorage.getItem(KITCHEN_TABLE_KEY),
+    loadCoachmanEscortState(),
+  ]);
+  let bag = normalizePlayerBagData(rawBag ? JSON.parse(rawBag) : {});
+  const table = rawTable ? (JSON.parse(rawTable) as (BagItem | null)[]).map(normalizeBagItem) : [];
+  const ids = [ESCORT_WEAPON_ID, ESCORT_ARMOR_ID] as const;
+  if (ids.every((id) => bag.slots.some((item) => item?.id === id))) {
+    await saveCoachmanEscortState({ ...state, phase: "journey", equipmentPending: false });
+    return "ready";
+  }
+  if (ids.some((id) => table.some((item) => item?.id === id) && !bag.slots.some((item) => item?.id === id))) return "equipment_in_kitchen";
+
+  for (const id of ids) {
+    if (bag.slots.some((item) => item?.id === id)) continue;
+    const plan = planAddToBag(equipmentItem(id), bag);
+    if (!plan.canTransfer || plan.remainderQty > 0) return "bag_full";
+    bag = { ...bag, slots: plan.updatedSlots };
+  }
+  await AsyncStorage.multiSet([
+    [PLAYER_BAG_KEY, JSON.stringify(bag)],
+    [COACHMAN_ESCORT_KEY, JSON.stringify({ ...state, phase: "journey", equipmentPending: false })],
+  ]);
+  return "ready";
+}
+
+export async function setCoachmanEscortPhase(phase: CoachmanEscortPhase): Promise<CoachmanEscortState> {
+  const state = await loadCoachmanEscortState();
+  return saveCoachmanEscortState({ ...state, phase });
+}
+
+export function bagHasEscortEquipment(bag: PlayerBagData): boolean {
+  return bag.slots.some((item) => item?.id === ESCORT_WEAPON_ID)
+    && bag.slots.some((item) => item?.id === ESCORT_ARMOR_ID);
+}
+
+export const ESCORT_EQUIPMENT_ATTRIBUTES = [ITEM_ATTRIBUTE.WEAPON, ITEM_ATTRIBUTE.ARMOR] as const;

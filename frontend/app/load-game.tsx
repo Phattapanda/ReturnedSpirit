@@ -87,7 +87,7 @@ export default function LoadGame() {
       // This keeps the loading screen responsible for all pre-gameplay setup.
       // Legacy tutorial flag is also restored by restoreFromSnapshot.
     } catch {}
-    router.push({
+    router.replace({
       pathname: "/game-loading",
       params: { from: "load-game", slotId: String(slot.slot) },
     });

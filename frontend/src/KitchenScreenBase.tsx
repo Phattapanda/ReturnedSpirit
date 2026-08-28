@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { useManagedTimers } from "@/src/hooks/use-managed-timers";
 import {
   View,
   Text,
@@ -12,6 +13,7 @@ import {
   Platform,
   Keyboard,
   useWindowDimensions,
+  type ImageSourcePropType,
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -30,15 +32,44 @@ import { GestureDetector, Gesture } from "react-native-gesture-handler";
 import SceneBackground from "@/src/components/SceneBackground";
 import CurrencyHud from "@/src/components/CurrencyHud";
 import { useAudioManager } from "@/src/audio/AudioProvider";
+import { useHaptics } from "@/src/feedback/haptics-provider";
 import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import StatusModal from "@/src/components/StatusModal";
+import PortraitBubble from "@/src/components/portrait-bubble";
+import StoryDialogOverlay, { type StoryDialogChoice, type StoryDialogLine } from "@/src/components/story-dialog-overlay";
+import {
+  LocationStatusBadge,
+  useLocationStatusBadges,
+} from "@/src/components/location-status-badges";
+import { subscribeKitchenPlayerThought } from "@/src/game/kitchen-runtime-context";
 import {
   PLAYER_BAG_KEY, DEFAULT_BAG, KITCHEN_TABLE_KEY, ITEM_CATALOG,
-  canStack, getContainerStackLimit,
+  applyLifeRecovery, applyStaminaRecovery, canConsumeForStamina, canStack, getContainerStackLimit,
+  getGrantedStatusEffectId, isEdible,
+  normalizeBagItem, normalizePlayerBagData,
   type PlayerBagData, type BagItem,
 } from "@/src/game/item-system";
+import {
+  applyRecipeToolUse,
+  COOKING_RECIPES,
+  consumeRecipeIngredients,
+  createCraftedItem,
+  createRecipeOutputs,
+  discoverRecipe,
+  findCookingRecipe,
+  getCraftableRecipeCount,
+  loadDiscoveredRecipes,
+} from "@/src/game/cooking-system";
 import { planKitchenItemToBag } from "@/src/game/kitchen-bag-transfer";
-import { PLAYER_STATS_KEY, DEFAULT_PLAYER_STATS, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
+import {
+  PLAYER_STATS_KEY,
+  DEFAULT_PLAYER_STATS,
+  calcEffectiveStaminaCost,
+  getActiveStaminaBuffReduction,
+  normalizePlayerStats,
+  type PlayerStats,
+} from "@/src/game/player-stats";
+import { applyTemporaryEffect } from "@/src/game/status-effect-system";
 import { loadLogbook, type LogEntry, LOGBOOK_KEY } from "@/src/game/logbook";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
 import { setPlaytimePaused } from "@/src/game/playtime-tracker";
@@ -51,15 +82,30 @@ import {
 import { ensureAssetReady } from "@/src/assets/AssetManager";
 import {
   DEFAULT_POST_GUEST_TUTORIAL_STATE,
-  SECOND_PLOT_STONE_COST,
-  SECOND_PLOT_WOOD_COST,
+  ALE_QUEST_ITEMS,
+  GUEST_AREA_CLEAN_STAMINA_COST,
+  GUEST_AREA_CLEAN_STEPS_REQUIRED,
+  HONEY_MEAD_QUEST_ITEMS,
+  KITCHEN_TABLE_COLUMNS,
+  KITCHEN_TABLE_UPGRADE_SILVER_COSTS,
+  cleanGuestAreaOnce,
+  isPlotUnlocked,
   grantFarmerCarrotSeedOnce,
+  isGuestAreaComplete,
+  getKitchenTableRowCount,
+  getKitchenTableSlotCount,
   loadPostGuestTutorialState,
   markSecondPlotThoughtSeen,
   markUpgradeIntroSeen,
-  purchaseSecondPlotUpgrade,
+  purchaseGardenPlotBuild,
+  purchasePlotYieldUpgrade,
+  purchaseTableAndChairs,
+  purchaseKitchenTableUpgrade,
+  purchaseTavernDrinkUpgrade,
+  type TavernDrinkUpgradeId,
   type PostGuestTutorialState,
 } from "@/src/game/post-guest-tutorial";
+import { loadGuestState } from "@/src/game/guest-system";
 import {
   SHARED_RESOURCE_DEFAULTS,
   SHARED_RESOURCES_KEY,
@@ -72,6 +118,29 @@ import {
   normalizePlayerAvatarId,
   type PlayerAvatarId,
 } from "@/src/game/player-avatar";
+import {
+  loadTitheState,
+  setTithePhase,
+  type TitheEventPhase,
+} from "@/src/game/tithe-system";
+import { loadExploreNavigationUnlocked } from "@/src/game/travel-system";
+import {
+  DEFAULT_SMALL_CRATE_STATE,
+  KITCHEN_SMALL_CRATE_KEY,
+  addItemToSmallCrate,
+  loadSmallCrateState,
+  moveCrateSlotToKitchen,
+  saveSmallCrateState,
+  type SmallCrateState,
+} from "@/src/game/kitchen-small-crate";
+import {
+  acceptCoachmanEscort,
+  declineCoachmanEscort,
+  getCalendarDayNumber,
+  loadCoachmanEscortState,
+  markCoachmanOfferStarted,
+  markRupertMonsterWarningSeen,
+} from "@/src/game/coachman-escort-system";
 
 // ─── Storage keys ─────────────────────────────────────────────────────────────
 
@@ -109,6 +178,7 @@ const BUBBLE_INTRO_MS   = 3500;
 const BUBBLE_INSPECT_MS = 4500;
 const BUBBLE_REJECT_MS  = 4000;
 const CONSUME_MS = 420;
+const NEW_RECIPE_HOLD_MS = 1700;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -164,12 +234,23 @@ const LOCS = [
   { id: "explore",   active: false, locked: true  },
 ];
 
+const BASE_KITCHEN_TABLE_SLOT_COUNT = 12;
+// Keep crafting slots in a separate logical range so added Kitchen rows never
+// collide with Ingredient/Tool gesture identifiers.
+const CRAFT_INGREDIENT_SLOT_BASE = 100;
+const CRAFT_TOOL_SLOT = CRAFT_INGREDIENT_SLOT_BASE + 3;
+
+function isKitchenTableSlot(slot: number): boolean {
+  return slot >= 0 && slot < CRAFT_INGREDIENT_SLOT_BASE;
+}
+
 const IMG = {
   kitchen:     require("../assets/images/kitchen1.jpg"),
-  herbsoup:    require("../assets/images/herbsoup.png"),
+  soup_herb:   require("../assets/images/soup_herb.png"),
   rupert:      require("../assets/images/rupert.png"),
   rupertsad:   require("../assets/images/rupertsad.png"),
   rupertlaugh: require("../assets/images/rupertlaugh.png"),
+  coachman:    require("../assets/images/coachman.png"),
   avLaugh:     require("../assets/images/avatar1_laugh.png"),
   avNormal:    require("../assets/images/avatar1_normal.png"),
   avSad:       require("../assets/images/avatar1_sad.png"),
@@ -184,19 +265,41 @@ const IMG = {
   loc_explore:   require("../assets/images/goexplore.png"),
   loc_storage:   require("../assets/images/gotostorage.png"),
   oldpot:        require("../assets/images/oldpot.png"),
+  garbage_bin:   require("../assets/images/garbage_bin.png"),
 };
 
 // Item image map for kitchen table items (non-soup items unpacked from bag)
-const ITEM_IMAGES: Record<string, ReturnType<typeof require>> = {
-  herbbag:     require("../assets/images/herbbag.png"),
-  carrotbag:   require("../assets/images/carrotbag.png"),
+const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
+  bag_herb:    require("../assets/images/bag_herb.png"),
+  bag_carrot:  require("../assets/images/bag_carrot.png"),
+  bag_onion:   require("../assets/images/bag_onion.png"),
+  bag_potato:  require("../assets/images/bag_potato.png"),
   carrot:      require("../assets/images/carrot.png"),
-  herbsoup:    require("../assets/images/herbsoup.png"),
+  potato:      require("../assets/images/potato.png"),
+  onion:       require("../assets/images/onion.png"),
+  soup_herb: require("../assets/images/soup_herb.png"),
+  soup_carrot: require("../assets/images/soup_carrot.png"),
+  soup_potato: require("../assets/images/soup_potato.png"),
+  soup_onion: require("../assets/images/soup_onion.png"),
+  soup_carrot_potato: require("../assets/images/soup_carrot-potato.png"),
+  stew_vegetable: require("../assets/images/stew_vegetable.png"),
+  soup_ember_egg: require("../assets/images/soup_ember_egg.png"),
+  stew_beef: require("../assets/images/stew_beef.png"),
+  stew_chicken: require("../assets/images/stew_chicken.png"),
+  stew_ember_chicken: require("../assets/images/stew_ember_chicken.png"),
+  stew_fisherman: require("../assets/images/stew_fisherman.png"),
   bucket:      require("../assets/images/bucket.png"),
   bucketwater: require("../assets/images/bucketwater.png"),
-  seed_herb:   require("../assets/images/herbseed.png"),
+  seed_herb:   require("../assets/images/seed_herb.png"),
   herbs:       require("../assets/images/herbs.png"),
   oldpot:      require("../assets/images/oldpot.png"),
+  tool_rusty_butchering_knife: require("../assets/images/tool_rusty_butchering_knife.png"),
+  armor_leather_bracers: require("../assets/images/armor_leather_bracers.png"),
+  armor_leather_armor: require("../assets/images/armor_leather_armor.png"),
+  weapon_iron_dagger: require("../assets/images/weapon_iron_dagger.png"),
+  weapon_iron_shortsword: require("../assets/images/weapon_iron_shortsword.png"),
+  crate1: require("../assets/images/crate1.png"),
+  monster_carcass: require("../assets/images/monster_carcass.png"),
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -273,20 +376,17 @@ const D_CRAFT_SUCCESS: DLine[] = [
   { id: "d_craft.0", speaker: "Rupert", portrait: "laugh", text: '"Well done! The herb soup is ready."' },
 ];
 
-// ─── Cooking Recipe ───────────────────────────────────────────────────────────
-
-const HERB_SOUP_RECIPE = {
-  ingredients: [
-    { id: "herbs",       requiredQty: 2 },
-    { id: "bucketwater", requiredQty: 1 },
-  ],
-  tool: "oldpot",
-} as const;
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function KitchenScreen() {
+  const {
+    setManagedTimeout: setTimeout,
+    clearManagedTimeout: clearTimeout,
+    setManagedInterval: setInterval,
+    clearManagedInterval: clearInterval,
+  } = useManagedTimers();
   const router = useRouter();
+  const { harvestReady, merchantPresent } = useLocationStatusBadges();
   const insets = useSafeAreaInsets();
   const { width: W, height: H } = useWindowDimensions();
   const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(DEFAULT_PLAYER_AVATAR_ID);
@@ -301,6 +401,7 @@ export default function KitchenScreen() {
 
   // ── Audio
   const audioManager = useAudioManager();
+  const { triggerHaptic } = useHaptics();
   const { crossfadeTo } = audioManager;
 
   // Restore the Kitchen theme whenever this retained stack screen regains focus.
@@ -318,9 +419,52 @@ export default function KitchenScreen() {
     return () => { void setPlaytimePaused(false); };
   }, [showMenu]);
   const [showRecipes, setShowRecipes] = useState(false);
+  const [discoveredRecipeIds, setDiscoveredRecipeIds] = useState<string[]>([]);
+  const discoveredRecipeIdsRef = useRef<string[]>([]);
+  const [newRecipePresentation, setNewRecipePresentation] = useState<{ name: string; outputId: string } | null>(null);
+  const pendingNewRecipeRef = useRef<{ name: string; outputId: string } | null>(null);
+  const newRecipeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const newRecipeScale = useSharedValue(1.18);
+  const newRecipeOpacity = useSharedValue(0);
   const [showUpgrades, setShowUpgrades] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    loadDiscoveredRecipes().then((ids) => {
+      if (!active) return;
+      discoveredRecipeIdsRef.current = ids;
+      setDiscoveredRecipeIds(ids);
+    }).catch(() => {});
+    return () => {
+      active = false;
+      if (newRecipeTimerRef.current) clearTimeout(newRecipeTimerRef.current);
+    };
+  }, [clearTimeout]);
+
+  const newRecipeAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: newRecipeOpacity.value,
+    transform: [{ scale: newRecipeScale.value }],
+  }));
+
+  function showNewRecipePresentation(recipe: { name: string; outputId: string }) {
+    if (newRecipeTimerRef.current) clearTimeout(newRecipeTimerRef.current);
+    setNewRecipePresentation(recipe);
+    newRecipeScale.value = 1.18;
+    newRecipeOpacity.value = 0;
+    newRecipeOpacity.value = withTiming(1, { duration: 120 });
+    newRecipeScale.value = withSpring(1, { damping: 14, stiffness: 190 });
+    audioManager.playSoundEffect("new-recipe-found", { maxDurationMs: 6000 });
+    newRecipeTimerRef.current = setTimeout(() => {
+      newRecipeScale.value = withTiming(0.1, { duration: 240 });
+      newRecipeOpacity.value = withTiming(0, { duration: 220 }, (done) => {
+        if (done) runOnJS(setNewRecipePresentation)(null);
+      });
+      newRecipeTimerRef.current = null;
+    }, NEW_RECIPE_HOLD_MS);
+  }
   const [upgradeBusy, setUpgradeBusy] = useState(false);
   const [upgradeMessage, setUpgradeMessage] = useState<string | null>(null);
+  const [guestCalendarDaySerial, setGuestCalendarDaySerial] = useState(0);
   const [barWidth, setBarWidth] = useState(0);
 
   // ── Game state
@@ -334,15 +478,37 @@ export default function KitchenScreen() {
   const [gardenActive, setGardenActive] = useState(false);
   const [diningUnlocked, setDiningUnlocked] = useState(false);
   const [coreTravelUnlocked, setCoreTravelUnlocked] = useState(false);
+  const [exploreUnlocked, setExploreUnlocked] = useState(false);
   const playerNameRef = useRef("Adventurer");
   const [rupertPortrait, setRupertPortrait] = useState<"normal" | "sad" | "laugh">("normal");
   // Start hidden until persisted placement is resolved. This prevents a one-frame
   // Rupert flash when Kitchen regains focus during the guest-service sequence.
   const [rupertInDining, setRupertInDining] = useState(true);
   const [postGuestState, setPostGuestState] = useState<PostGuestTutorialState>(DEFAULT_POST_GUEST_TUTORIAL_STATE);
-  const [sharedResources, setSharedResources] = useState<SharedResources>({ ...SHARED_RESOURCE_DEFAULTS });
+  const [, setSharedResources] = useState<SharedResources>({ ...SHARED_RESOURCE_DEFAULTS });
   const postGuestIntroStartedRef = useRef(false);
   const focusCountRef = useRef(0);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      let active = true;
+      loadExploreNavigationUnlocked().then((exploreAvailable) => {
+        if (active) setExploreUnlocked(exploreAvailable);
+      }).catch(() => {});
+      return () => { active = false; };
+    }, []),
+  );
+  useFocusEffect(
+    React.useCallback(() => {
+      let active = true;
+      loadSmallCrateState().then((state) => {
+        if (!active) return;
+        smallCrateRef.current = state;
+        setSmallCrate(state);
+      }).catch(() => {});
+      return () => { active = false; };
+    }, []),
+  );
   // ── Bag & Stats
   const [playerBag, setPlayerBag] = useState<PlayerBagData>(DEFAULT_BAG);
   const playerBagRef = useRef<PlayerBagData>(DEFAULT_BAG);
@@ -351,9 +517,18 @@ export default function KitchenScreen() {
   const [statusOpen, setStatusOpen] = useState(false);
 
   // ── Kitchen table items (items unpacked from bag; separate from soupSlot)
-  const [tableItems, setTableItems] = useState<(BagItem | null)[]>(Array(12).fill(null));
+  const [tableItems, setTableItems] = useState<(BagItem | null)[]>(Array(BASE_KITCHEN_TABLE_SLOT_COUNT).fill(null));
   // Mirror for stable gesture closure (refs always reflect latest value)
-  const tableItemsRef = useRef<(BagItem | null)[]>(Array(12).fill(null));
+  const tableItemsRef = useRef<(BagItem | null)[]>(Array(BASE_KITCHEN_TABLE_SLOT_COUNT).fill(null));
+  const [smallCrate, setSmallCrate] = useState<SmallCrateState>(DEFAULT_SMALL_CRATE_STATE);
+  const smallCrateRef = useRef<SmallCrateState>(DEFAULT_SMALL_CRATE_STATE);
+  const [smallCrateOpen, setSmallCrateOpen] = useState(false);
+  const [crateDropHovered, setCrateDropHovered] = useState(false);
+  const crateDropHoveredRef = useRef(false);
+  const [garbageDropHovered, setGarbageDropHovered] = useState(false);
+  const garbageDropHoveredRef = useRef(false);
+  const [discardKitchenTarget, setDiscardKitchenTarget] = useState<{ slot: number; item: BagItem } | null>(null);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   // Refs for craft state — read by the stable cooking pan gesture (avoids stale closures)
   const craftIngSlotsRef = useRef<(BagItem | null)[]>([null, null, null]);
   const craftToolRef     = useRef<BagItem | null>(null);
@@ -367,16 +542,17 @@ export default function KitchenScreen() {
   const [craftTool, setCraftTool] = useState<BagItem | null>(null);
   const [craftResult, setCraftResult] = useState<BagItem | null>(null);
   const craftingLocked = useRef(false);
+  const craftingInteractionLockedSV = useSharedValue(0);
   const cookingTutorialCompletedRef = useRef(false);
   const [selectedHerbbagSlot, setSelectedHerbbagSlot] = useState<number | null>(null);
   const [selectedCarrotbagSlot, setSelectedCarrotbagSlot] = useState<number | null>(null);
-  const [selectedHerbsSlot, setSelectedHerbsSlot] = useState<number | null>(null);
+  const [selectedSplitStack, setSelectedSplitStack] = useState<{ slot: number; itemId: string } | null>(null);
   const [selectedSoupSlot, setSelectedSoupSlot] = useState<number | null>(null);
   const [bagPulseActive, setBagPulseActive] = useState(false);
   const bagOpenedOnceDuringCooking = useRef(false);
   const cookingShareDoneRef = useRef(false);
   const cookingEatDoneRef = useRef(false);
-  const [flyingItemId, setFlyingItemId] = useState<string>("herbsoup");
+  const [flyingItemId, setFlyingItemId] = useState<string>("soup_herb");
   // Refs to pass table state safely into Reanimated worklet callbacks
   const cookingFlyTargetSlot = useRef<number>(-1);
   const cookingPendingTable  = useRef<(BagItem | null)[]>([]);
@@ -408,15 +584,141 @@ export default function KitchenScreen() {
   const [dlgIdx, setDlgIdx] = useState(0);
   const dlgDoneRef = useRef<(() => void) | null>(null);
   const lastAdvanceTimeRef = useRef(0); // anti-rapid-tap debounce
+  const [escortDialogMode, setEscortDialogMode] = useState<"rupert" | "offer" | "counteroffer" | "accepted" | "declined" | null>(null);
+  const [escortDialogLines, setEscortDialogLines] = useState<StoryDialogLine[]>([]);
+  const [escortDialogIndex, setEscortDialogIndex] = useState(0);
 
   // ── Context Speech Bubble
   const [bubble, setBubble] = useState<BubbleConfig | null>(null);
   const bubbleDoneRef = useRef<(() => void) | null>(null);
   const bubbleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [tithePhase, setLocalTithePhase] = useState<TitheEventPhase>("idle");
+  const titheKitchenStartingRef = useRef(false);
+
+  const startCivilServantKitchenEvent = React.useCallback(async () => {
+    if (titheKitchenStartingRef.current) return;
+    const tithe = await loadTitheState();
+    setLocalTithePhase(tithe.phase);
+    if (tithe.phase !== "awaiting_kitchen" && tithe.phase !== "kitchen_dialog") return;
+
+    titheKitchenStartingRef.current = true;
+    setRupertInDining(false);
+    if (tithe.phase === "awaiting_kitchen") {
+      await setTithePhase("kitchen_dialog");
+      setLocalTithePhase("kitchen_dialog");
+      audioManager.playSoundEffect("knock", { maxDurationMs: 5000 });
+      await new Promise<void>((resolve) => setTimeout(resolve, 500));
+    }
+    showBubble(
+      '"Oh, it\'s that time again."',
+      "Rupert",
+      "ALLOW_ITEM",
+      null,
+      () => {
+        void setTithePhase("awaiting_dining").then(() => {
+          setLocalTithePhase("awaiting_dining");
+          titheKitchenStartingRef.current = false;
+        });
+      },
+      `civil-servant-kitchen-${tithe.currentEventDay ?? "current"}`,
+    );
+  // showBubble is intentionally resolved from the current render; this callback is focus-triggered.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audioManager]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      const timer = setTimeout(() => { void startCivilServantKitchenEvent(); }, 450);
+      return () => clearTimeout(timer);
+    }, [startCivilServantKitchenEvent, setTimeout, clearTimeout]),
+  );
 
   // ── Logbook
   const [logbook, setLogbook] = useState<LogEntry[]>([]);
   const [showLogbook, setShowLogbook] = useState(false);
+  const logbookScrollRef = useRef<ScrollView>(null);
+
+  function openEscortDialog(mode: NonNullable<typeof escortDialogMode>, lines: StoryDialogLine[]) {
+    setEscortDialogMode(mode);
+    setEscortDialogLines(lines);
+    setEscortDialogIndex(0);
+  }
+
+  function coachmanOfferLines(): StoryDialogLine[] {
+    const playerName = playerNameRef.current;
+    return [
+      { speaker: "Coachman", portrait: IMG.coachman, text: `Good morning, ${playerName}. You’re probably wondering why I’m here.` },
+      { speaker: "Coachman", portrait: IMG.coachman, text: "Well, you might have heard the rumors about monsters nearby." },
+      { speaker: "Coachman", portrait: IMG.coachman, text: "You look strong—would you mind escorting me to town? Just for safety’s sake." },
+      { speaker: "Coachman", portrait: IMG.coachman, text: "I’ll give you an Iron Shortsword and Leather Armor if you agree. A small price for my life." },
+    ];
+  }
+
+  async function beginCoachmanKitchenOffer() {
+    await markCoachmanOfferStarted();
+    openEscortDialog("offer", coachmanOfferLines());
+  }
+
+  async function finishEscortKitchenDialog() {
+    if (escortDialogMode === "rupert") {
+      await markRupertMonsterWarningSeen();
+      setEscortDialogMode(null);
+      if (await getCalendarDayNumber() >= 10) setTimeout(() => { void beginCoachmanKitchenOffer(); }, 300);
+      return;
+    }
+    setEscortDialogMode(null);
+  }
+
+  function advanceEscortKitchenDialog() {
+    if (escortDialogIndex < escortDialogLines.length - 1) setEscortDialogIndex((index) => index + 1);
+    else void finishEscortKitchenDialog();
+  }
+
+  async function acceptEscortOffer(withCopperBonus: boolean) {
+    await acceptCoachmanEscort(withCopperBonus);
+    const rawTable = await AsyncStorage.getItem(KITCHEN_TABLE_KEY);
+    if (rawTable) {
+      const nextTable = (JSON.parse(rawTable) as (BagItem | null)[]).map(normalizeBagItem);
+      tableItemsRef.current = nextTable;
+      setTableItems(nextTable);
+    }
+    openEscortDialog("accepted", [{ speaker: "Coachman", portrait: IMG.coachman, text: "Thank you. Talk to me outside the tavern when you’re ready." }]);
+  }
+
+  function escortDialogChoices(): readonly StoryDialogChoice[] {
+    const lastLine = escortDialogIndex === escortDialogLines.length - 1;
+    if (!lastLine) return [];
+    if (escortDialogMode === "offer") return [
+      { label: "YES", onPress: () => { void acceptEscortOffer(false); } },
+      { label: "NO", onPress: () => openEscortDialog("counteroffer", [{ speaker: "Coachman", portrait: IMG.coachman, text: "What about 50 Copper Coins on top?" }]) },
+    ];
+    if (escortDialogMode === "counteroffer") return [
+      { label: "YES", onPress: () => { void acceptEscortOffer(true); } },
+      { label: "NO", onPress: () => { void declineCoachmanEscort().then(() => openEscortDialog("declined", [{ speaker: "Coachman", portrait: IMG.coachman, text: "Okay, I understand if you don’t want to put yourself in danger, too. I’m sure I’ll run into adventurers along the way; I can ask them." }])); } },
+    ];
+    return [];
+  }
+
+  useEffect(() => {
+    if (ts !== "IDLE" || dlgActive || bubble || escortDialogMode) return;
+    const timer = setTimeout(() => {
+      void (async () => {
+        const [dayNumber, escort] = await Promise.all([getCalendarDayNumber(), loadCoachmanEscortState()]);
+        if (dayNumber >= 8 && escort.phase === "locked") {
+          openEscortDialog("rupert", [{
+            speaker: "Rupert",
+            portrait: IMG.rupertsad,
+            text: `Good morning, ${playerNameRef.current}. I’ve heard that monsters are prowling around nearby—monsters that usually only live in the heart of the forest. Please be careful out there.`,
+          }]);
+        } else if (dayNumber >= 10 && (escort.phase === "rupert_warned" || escort.phase === "offer_pending")) {
+          await beginCoachmanKitchenOffer();
+        }
+      })();
+    }, 650);
+    return () => clearTimeout(timer);
+  // The day event intentionally waits for every older Kitchen tutorial overlay.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bubble, dayIdx, dlgActive, escortDialogMode, ts]);
 
   // ── Soup demo animation (visual-only, one-time)
   const [soupDemoActive, setSoupDemoActive] = useState(false);
@@ -455,7 +757,7 @@ export default function KitchenScreen() {
     let transfer = item.quantity;
 
     // Fill compatible existing stacks first
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < currentTable.length; i++) {
       if (soupSlotRef.current === i) continue;
       const t = currentTable[i];
       if (
@@ -474,7 +776,7 @@ export default function KitchenScreen() {
     // Then use empty slots
     let firstNewSlot: number | null = null;
     if (transfer > 0) {
-      for (let i = 0; i < 12; i++) {
+      for (let i = 0; i < currentTable.length; i++) {
         if (soupSlotRef.current === i) continue;
         if (!currentTable[i]) {
           const add = Math.min(transfer, TABLE_STACK_LIMIT);
@@ -554,7 +856,8 @@ export default function KitchenScreen() {
         await discardRuntimeAndRestore(parseInt(rawSlot, 10));
       }
     } catch { /* non-critical */ }
-    router.replace("/");
+    if (router.canGoBack()) router.dismissAll();
+    else router.replace("/");
   }
 
   // ── Header height (for bubble positioning)
@@ -576,6 +879,7 @@ export default function KitchenScreen() {
   const [tooltipVisible, setTooltipVisible] = useState(false);
   const [tooltipItemName, setTooltipItemName] = useState("Herb Soup");
   const [tooltipItemDesc, setTooltipItemDesc] = useState("Restores 20 Stamina.");
+  const [staminaGainDisplay, setStaminaGainDisplay] = useState(20);
   const cookingTooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Height of location bar for info panel positioning
   const [locationBarH, setLocationBarH] = useState(60);
@@ -613,13 +917,16 @@ export default function KitchenScreen() {
   const playerPortraitRef  = useRef<View>(null);
   const rupertPortraitRef  = useRef<View>(null);
   const bagIconRef         = useRef<View>(null);
-  const tableSlotRefs      = useRef<(View | null)[]>(Array(12).fill(null));
+  const smallCratePanelRef = useRef<View>(null);
+  const garbageBinRef      = useRef<View>(null);
+  const tableSlotRefs      = useRef<(View | null)[]>(Array(30).fill(null));
   const craftSlotRefs = useRef<(View | null)[]>(Array(4).fill(null));  // 0-2 ingredients, 3 = tool
   const craftResultSlotRef = useRef<View>(null);
   const layouts = useRef<{
     player: LRect | null; rupert: LRect | null; bag: LRect | null;
+    cratePanel: LRect | null; garbage: LRect | null;
     tableSlots: (LRect | null)[]; craftSlots: (LRect | null)[];
-  }>({ player: null, rupert: null, bag: null, tableSlots: Array(12).fill(null), craftSlots: Array(4).fill(null) });
+  }>({ player: null, rupert: null, bag: null, cratePanel: null, garbage: null, tableSlots: Array(30).fill(null), craftSlots: Array(4).fill(null) });
 
   // Cooking item gestures are created per occupied slot further below, next to
   // the existing Day-1 soup gesture helpers.
@@ -658,6 +965,7 @@ export default function KitchenScreen() {
   // Sync bag/table refs so drag callbacks always read current contents
   useEffect(() => { playerBagRef.current = playerBag; }, [playerBag]);
   useEffect(() => { tableItemsRef.current = tableItems; }, [tableItems]);
+  useEffect(() => { smallCrateRef.current = smallCrate; }, [smallCrate]);
   // Sync craft refs so the stable gesture always reads current craft state
   useEffect(() => { craftIngSlotsRef.current = craftIngSlots; }, [craftIngSlots]);
   useEffect(() => { craftToolRef.current = craftTool; }, [craftTool]);
@@ -670,19 +978,21 @@ export default function KitchenScreen() {
       cancelAnimation(gardenPulse);
       gardenPulse.value = withTiming(1, { duration: 200 });
     }
+    return () => cancelAnimation(gardenPulse);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ts]);
 
   // Dining gets its own story pulse after the knock/Rupert prompt.
   useEffect(() => {
-    if (ts === "WAITING_FOR_DINING_LOCATION_CLICK") {
+    if (ts === "WAITING_FOR_DINING_LOCATION_CLICK" || tithePhase === "awaiting_dining") {
       diningPulse.value = withRepeat(withTiming(1.06, { duration: 700 }), -1, true);
     } else {
       cancelAnimation(diningPulse);
       diningPulse.value = withTiming(1, { duration: 200 });
     }
+    return () => cancelAnimation(diningPulse);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ts]);
+  }, [ts, tithePhase]);
 
   // Resume the small Kitchen side of the guest intro after an app restart.
   useEffect(() => {
@@ -765,7 +1075,7 @@ export default function KitchenScreen() {
 
         // Load bag
         const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
-        if (rawBag) { try { setPlayerBag(JSON.parse(rawBag)); } catch { /* default */ } }
+        if (rawBag) { try { setPlayerBag(normalizePlayerBagData(JSON.parse(rawBag))); } catch { /* default */ } }
         const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
         let loadedMaxStamina = DEFAULT_PLAYER_STATS.maximumStamina;
         if (rawStats) {
@@ -776,15 +1086,26 @@ export default function KitchenScreen() {
             staminaMaxSV.value = loadedMaxStamina;
           } catch { /* default */ }
         }
-        // Load kitchen table items (items unpacked from bag)
+        // Load Kitchen table capacity before its items so upgraded rows appear
+        // immediately and every existing item keeps its original slot.
+        const initialPostGuestState = await loadPostGuestTutorialState();
+        setPostGuestState(initialPostGuestState);
+        const initialTableSlotCount = getKitchenTableSlotCount(initialPostGuestState);
         const rawTable = await AsyncStorage.getItem(KITCHEN_TABLE_KEY);
-        if (rawTable) { try { setTableItems(JSON.parse(rawTable)); } catch { /* default */ } }
+        if (rawTable) {
+          try {
+            const parsedTable = (JSON.parse(rawTable) as (BagItem | null)[]).map(normalizeBagItem);
+            setTableItems(Array.from({ length: Math.max(initialTableSlotCount, parsedTable.length) }, (_, index) => parsedTable[index] ?? null));
+          } catch { /* default */ }
+        } else {
+          setTableItems(Array(initialTableSlotCount).fill(null));
+        }
 
         // Load craft slot state (cooking tutorial persistence)
         const rawCraftIng = await AsyncStorage.getItem(SK.CRAFT_INGREDIENTS);
-        if (rawCraftIng) { try { setCraftIngSlots(JSON.parse(rawCraftIng)); } catch {} }
+        if (rawCraftIng) { try { setCraftIngSlots((JSON.parse(rawCraftIng) as (BagItem | null)[]).map(normalizeBagItem)); } catch {} }
         const rawCraftTool = await AsyncStorage.getItem(SK.CRAFT_TOOL_SLOT);
-        if (rawCraftTool) { try { setCraftTool(JSON.parse(rawCraftTool)); } catch {} }
+        if (rawCraftTool) { try { setCraftTool(normalizeBagItem(JSON.parse(rawCraftTool))); } catch {} }
 
         if (done === "true") {
           const rawSta = await AsyncStorage.getItem(SK.STAMINA);
@@ -817,8 +1138,8 @@ export default function KitchenScreen() {
                 const rawWat2  = await AsyncStorage.getItem("@garden:has_fetched_tutorial_water");
                 if (rawHarv2 === "true" && rawWat2 === "true" && rawBag) {
                   try {
-                    const freshBag2: PlayerBagData = JSON.parse(rawBag);
-                    const hHB = freshBag2.slots.some(s => s?.id === "herbbag");
+                    const freshBag2 = normalizePlayerBagData(JSON.parse(rawBag));
+                    const hHB = freshBag2.slots.some(s => s?.id === "bag_herb");
                     const hBW = freshBag2.slots.some(s => s?.id === "bucketwater");
                     if (hHB && hBW) {
                       await AsyncStorage.setItem(SK.CRAFTING_READY, "true");
@@ -845,8 +1166,8 @@ export default function KitchenScreen() {
                         if (step2 >= 3) {
                           setTutState("COOKING_SHARE_EAT");
                           const rawTbl2 = await AsyncStorage.getItem(KITCHEN_TABLE_KEY);
-                          const tbl2: (BagItem | null)[] = rawTbl2 ? JSON.parse(rawTbl2) : Array(12).fill(null);
-                          const soupIdx2 = tbl2.findIndex(it => it?.id === "herbsoup");
+                          const tbl2: (BagItem | null)[] = rawTbl2 ? JSON.parse(rawTbl2) : Array(BASE_KITCHEN_TABLE_SLOT_COUNT).fill(null);
+                          const soupIdx2 = tbl2.findIndex(it => it?.id === "soup_herb");
                           if (soupIdx2 >= 0) { setSoupSlot(soupIdx2); soupSlotRef.current = soupIdx2; }
                         } else if (step2 >= 2) {
                           setTutState("COOKING_CRAFT_READY");
@@ -900,8 +1221,9 @@ export default function KitchenScreen() {
   }, []);
 
   async function refreshPostGuestResources() {
-    const state = await loadPostGuestTutorialState();
+    const [state, guestState] = await Promise.all([loadPostGuestTutorialState(), loadGuestState()]);
     setPostGuestState(state);
+    setGuestCalendarDaySerial(guestState.calendarDaySerial);
     const rawResources = await AsyncStorage.getItem(SHARED_RESOURCES_KEY);
     if (rawResources) {
       try { setSharedResources({ ...SHARED_RESOURCE_DEFAULTS, ...JSON.parse(rawResources) }); }
@@ -950,21 +1272,144 @@ export default function KitchenScreen() {
     setShowUpgrades(true);
   }
 
-  async function handleSecondPlotUpgrade() {
-    if (upgradeBusy || postGuestState.secondPlotUnlocked) return;
+  async function handleGardenPlotBuild(plotNumber: 2 | 3 | 4) {
+    if (upgradeBusy || isPlotUnlocked(postGuestState, plotNumber)) return;
     setUpgradeBusy(true);
     setUpgradeMessage(null);
     try {
-      const result = await purchaseSecondPlotUpgrade();
+      const result = await purchaseGardenPlotBuild(plotNumber);
       setPostGuestState(result.state);
       setSharedResources(result.resources);
       if (!result.ok) {
-        setUpgradeMessage("Need 4 Wood and 4 Stone.");
+        setUpgradeMessage(result.reason === "prerequisite_locked"
+          ? `Build the ${plotNumber - 1}${plotNumber - 1 === 2 ? "nd" : "rd"} Plot first.`
+          : plotNumber === 2 ? "Need 4 Wood and 4 Stone." : "Need 8 Wood, 8 Stone and 4 Nails.");
       } else if (result.alreadyUnlocked) {
         setUpgradeMessage("Already unlocked.");
       } else {
-        setUpgradeMessage("2nd Plot unlocked.");
-        audioManager.playSoundEffect("bling", { maxDurationMs: 2000 });
+        setUpgradeMessage(`${plotNumber === 2 ? "2nd" : plotNumber === 3 ? "3rd" : "4th"} Plot unlocked.`);
+        audioManager.playSoundEffect("upgrade-building", { maxDurationMs: 6000 });
+      }
+    } finally {
+      setUpgradeBusy(false);
+    }
+  }
+
+  async function handlePlotYieldUpgrade(plotNumber: 1 | 2 | 3 | 4) {
+    if (upgradeBusy) return;
+    setUpgradeBusy(true);
+    setUpgradeMessage(null);
+    try {
+      const result = await purchasePlotYieldUpgrade(plotNumber);
+      setPostGuestState(result.state);
+      if (!result.ok) {
+        setUpgradeMessage(result.reason === "plot_locked"
+          ? "Build this plot first."
+          : `Need 5× ${result.level === 0 ? "Standard" : "Premium"} Fertilizer.`);
+      } else if (result.alreadyMaxed) {
+        setUpgradeMessage("This plot already has the maximum yield upgrade.");
+      } else {
+        setUpgradeMessage(`Plot upgraded. Minimum Yield is now ${result.level === 1 ? 7 : 10}.`);
+        audioManager.playSoundEffect("upgrade-building", { maxDurationMs: 6000 });
+      }
+    } finally {
+      setUpgradeBusy(false);
+    }
+  }
+
+  async function handleTableAndChairsUpgrade() {
+    if (upgradeBusy || postGuestState.tableAndChairsCompletedDaySerial !== null) return;
+    setUpgradeBusy(true);
+    setUpgradeMessage(null);
+    try {
+      const result = await purchaseTableAndChairs();
+      setPostGuestState(result.state);
+      setSharedResources(result.resources);
+      if (!result.ok) {
+        setUpgradeMessage(result.reason === "not_available"
+          ? "This upgrade becomes available the day after the guest area is ready."
+          : "Need 15 Wood, 10 Nails and 1 Paint.");
+      } else if (result.alreadyComplete) {
+        setUpgradeMessage("Already completed.");
+      } else {
+        setUpgradeMessage("New table and chairs complete. More guests can visit from tomorrow.");
+        audioManager.playSoundEffect("upgrade-building", { maxDurationMs: 6000 });
+      }
+    } finally {
+      setUpgradeBusy(false);
+    }
+  }
+
+  async function handleTavernDrinkUpgrade(upgradeId: TavernDrinkUpgradeId) {
+    if (upgradeBusy) return;
+    const alreadyUnlocked = upgradeId === "serve_ale"
+      ? postGuestState.aleServiceUnlocked
+      : postGuestState.honeyMeadServiceUnlocked;
+    if (alreadyUnlocked) return;
+    setUpgradeBusy(true);
+    setUpgradeMessage(null);
+    try {
+      const result = await purchaseTavernDrinkUpgrade(upgradeId);
+      setPostGuestState(result.state);
+      setPlayerBag(result.playerBag);
+      if (!result.ok) {
+        setUpgradeMessage(result.reason === "prerequisite_locked"
+          ? upgradeId === "serve_ale" ? "Get the guest area ready first." : "Unlock Standard Ale first."
+          : `Missing: ${result.missingItems.join(", ")}.`);
+      } else if (result.alreadyUnlocked) {
+        setUpgradeMessage("Already unlocked.");
+      } else {
+        const drinkName = upgradeId === "serve_ale" ? "Standard Ale" : "Honey Mead";
+        setUpgradeMessage(`${drinkName} is now served in the Dining Hall.`);
+        audioManager.playSoundEffect("upgrade-building", { maxDurationMs: 6000 });
+      }
+    } finally {
+      setUpgradeBusy(false);
+    }
+  }
+
+  async function handleKitchenTableUpgrade(targetLevel: 1 | 2 | 3) {
+    if (upgradeBusy || postGuestState.kitchenTableUpgradeLevel >= targetLevel) return;
+    setUpgradeBusy(true);
+    setUpgradeMessage(null);
+    try {
+      const result = await purchaseKitchenTableUpgrade(targetLevel);
+      setPostGuestState(result.state);
+      if (!result.ok) {
+        setUpgradeMessage(result.reason === "prerequisite_locked"
+          ? targetLevel === 1 ? "Get the guest area ready first." : "Complete the previous table upgrade first."
+          : `Need ${KITCHEN_TABLE_UPGRADE_SILVER_COSTS[targetLevel - 1]} Silver Coins.`);
+      } else if (result.alreadyUnlocked) {
+        setUpgradeMessage("Already unlocked.");
+      } else {
+        tableItemsRef.current = result.tableItems;
+        setTableItems(result.tableItems);
+        setUpgradeMessage(`Kitchen Table expanded to ${getKitchenTableRowCount(result.state)} rows.`);
+        audioManager.playSoundEffect("upgrade-building", { maxDurationMs: 6000 });
+      }
+    } finally {
+      setUpgradeBusy(false);
+    }
+  }
+
+  async function handleGuestAreaClean() {
+    if (upgradeBusy || isGuestAreaComplete(postGuestState)) return;
+    triggerHaptic("choice");
+    setUpgradeBusy(true);
+    setUpgradeMessage(null);
+    try {
+      const result = await cleanGuestAreaOnce();
+      setPostGuestState(result.state);
+      setStaminaCurrent(result.remainingStamina);
+      setStaminaDisplay(result.remainingStamina);
+      staminaSV.value = result.remainingStamina;
+      if (!result.ok) {
+        setUpgradeMessage(`Need ${result.staminaCost} Stamina to clean.`);
+      } else if (result.completedNow) {
+        setUpgradeMessage("The guest area is ready. Guests can visit from tomorrow.");
+        audioManager.playSoundEffect("upgrade-building", { maxDurationMs: 6000 });
+      } else {
+        setUpgradeMessage(`Cleaned ${result.state.guestAreaCleanSteps}/${GUEST_AREA_CLEAN_STEPS_REQUIRED}.`);
       }
     } finally {
       setUpgradeBusy(false);
@@ -1034,7 +1479,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
 
           // Refresh bag/stats
           const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
-          if (rawBag) { try { setPlayerBag(JSON.parse(rawBag)); } catch { /* default */ } }
+          if (rawBag) { try { setPlayerBag(normalizePlayerBagData(JSON.parse(rawBag))); } catch { /* default */ } }
           const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
           if (rawStats) {
             try {
@@ -1084,8 +1529,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                 const freshRawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
                 if (freshRawBag) {
                   try {
-                    const freshBag: PlayerBagData = JSON.parse(freshRawBag);
-                    const hasHB = freshBag.slots.some(s => s?.id === "herbbag");
+                    const freshBag = normalizePlayerBagData(JSON.parse(freshRawBag));
+                    const hasHB = freshBag.slots.some(s => s?.id === "bag_herb");
                     const hasBW = freshBag.slots.some(s => s?.id === "bucketwater");
                     if (hasHB && hasBW) {
                       await AsyncStorage.setItem(SK.CRAFTING_READY, "true");
@@ -1117,8 +1562,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                       if (step >= 3) {
                         setTutState("COOKING_SHARE_EAT");
                         const rawTbl = await AsyncStorage.getItem(KITCHEN_TABLE_KEY);
-                        const tbl: (BagItem | null)[] = rawTbl ? JSON.parse(rawTbl) : Array(12).fill(null);
-                        const soupIdx = tbl.findIndex(it => it?.id === "herbsoup");
+                        const tbl: (BagItem | null)[] = rawTbl ? JSON.parse(rawTbl) : Array(BASE_KITCHEN_TABLE_SLOT_COUNT).fill(null);
+                        const soupIdx = tbl.findIndex(it => it?.id === "soup_herb");
                         if (soupIdx >= 0) { setSoupSlot(soupIdx); soupSlotRef.current = soupIdx; }
                       } else if (step >= 2) {
                         setTutState("COOKING_CRAFT_READY");
@@ -1367,8 +1812,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   function onIntroDone() {
     measureAll();
     setTimeout(async () => {
-      // Defensive: ensure herbsoup is decoded before fly animation starts
-      await ensureAssetReady('herbsoup');
+      // Defensive: ensure soup_herb is decoded before fly animation starts
+      await ensureAssetReady('soup_herb');
       setTutState("SOUP_FLYING");
       flySoupToTable();
     }, 200);
@@ -1475,20 +1920,22 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
    * Day-1 soup gesture so the proven Day-1 behavior remains untouched.
    */
   function onCookingSoupDragBegin(sourceSlot: number, absX: number, absY: number) {
+    if (craftingLocked.current) return;
     if (tsRef.current !== "COOKING_SHARE_EAT") return;
     const item = tableItemsRef.current[sourceSlot];
-    if (!item || item.id !== "herbsoup") return;
+    if (!item || item.id !== "soup_herb") return;
 
     // Selection belongs to the item, never to the physical slot it used to occupy.
     setSelectedSoupSlot(null);
     setSelectedHerbbagSlot(null);
-    setSelectedHerbsSlot(null);
+    setSelectedCarrotbagSlot(null);
+    setSelectedSplitStack(null);
     setTooltipVisible(false);
 
     setSoupSlot(sourceSlot);
     soupSlotRef.current = sourceSlot;
     setCookingDragActiveSlot(-1);
-    setFlyingItemId("herbsoup");
+    setFlyingItemId("soup_herb");
 
     // Same anti-flicker handoff as the generic Cooking drag: leave the source
     // bowl visible until the Herb Soup overlay image has been committed.
@@ -1529,7 +1976,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     const shareTutorial = tsRef.current === "COOKING_SHARE_EAT";
     const currentTable = tableItemsRef.current;
     const stack = currentTable[sourceSlot];
-    if (!stack || stack.id !== "herbsoup" || stack.quantity <= 1) return;
+    if (!stack || stack.id !== "soup_herb" || stack.quantity <= 1) return;
 
     const freeSlot = currentTable.findIndex((item, idx) => idx !== sourceSlot && item === null);
     if (freeSlot < 0) {
@@ -1548,8 +1995,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     }
     AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(newTable)).catch(() => {});
     audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
-    setSelectedSoupSlot(null);
-    setTooltipVisible(false);
+    // Keep the source stack selected so each following tap splits another bowl.
+    setSelectedSoupSlot(sourceSlot);
 
     if (shareTutorial) {
       showBubble(
@@ -1560,22 +2007,24 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   }
 
   function handleCookingSoupTap(sourceSlot: number) {
+    if (craftingLocked.current) return;
     if (!isKitchenItemInteractionState(tsRef.current)) return;
     const stack = tableItemsRef.current[sourceSlot];
-    if (!stack || stack.id !== "herbsoup") return;
+    if (!stack || stack.id !== "soup_herb") return;
 
     if (selectedSoupSlot !== sourceSlot) {
       setSelectedSoupSlot(sourceSlot);
       setSelectedHerbbagSlot(null);
-      setSelectedHerbsSlot(null);
-      const catalogEntry = ITEM_CATALOG["herbsoup"];
-      showCookingTooltip(catalogEntry?.name ?? "Herb Soup", catalogEntry?.description ?? "Restores 20 Stamina.");
+      setSelectedCarrotbagSlot(null);
+      setSelectedSplitStack(null);
+      const catalogEntry = ITEM_CATALOG["soup_herb"];
+      showCookingTooltip(catalogEntry?.name ?? "Herb Soup", catalogEntry?.description ?? "Restores 15 Stamina.");
       return;
     }
 
     if (stack.quantity <= 1) {
-      setSelectedSoupSlot(null);
-      setTooltipVisible(false);
+      const catalogEntry = ITEM_CATALOG[stack.id];
+      showCookingTooltip(catalogEntry?.name ?? stack.name, catalogEntry?.description ?? "");
       return;
     }
 
@@ -1585,14 +2034,17 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   function createCookingSoupGesture(sourceSlot: number, quantity: number) {
     const cookingSoupTap = Gesture.Tap()
       .maxDeltaX(8).maxDeltaY(8)
-      .onEnd(() => { runOnJS(handleCookingSoupTap)(sourceSlot); });
+      .onEnd(() => {
+        if (craftingInteractionLockedSV.value === 0) runOnJS(handleCookingSoupTap)(sourceSlot);
+      });
 
     const cookingSoupLongPress = Gesture.LongPress()
       .minDuration(500)
       .onStart(() => {
+        if (craftingInteractionLockedSV.value !== 0) return;
         runOnJS(setKitchenDetailItem)({
-          id: "herbsoup",
-          itemType: "herbsoup",
+          id: "soup_herb",
+          itemType: "soup_herb",
           name: "Herb Soup",
           quantity,
           attributes: ["edible"],
@@ -1602,6 +2054,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     const cookingSoupPan = Gesture.Pan()
       .minDistance(10)
       .onStart((e) => {
+        if (craftingInteractionLockedSV.value !== 0) return;
         cancelAnimation(soupX);
         cancelAnimation(soupY);
         cancelAnimation(soupVis);
@@ -1613,6 +2066,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         runOnJS(onCookingSoupDragBegin)(sourceSlot, e.absoluteX, e.absoluteY);
       })
       .onUpdate((e) => {
+        if (craftingInteractionLockedSV.value !== 0) return;
         const itemX = e.absoluteX + dragOffsetX.value;
         const itemY = e.absoluteY + dragOffsetY.value;
         soupX.value = itemX;
@@ -1620,12 +2074,14 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         runOnJS(updateHoveredSlot)(itemX, itemY);
       })
       .onEnd((e) => {
+        if (craftingInteractionLockedSV.value !== 0) return;
         runOnJS(handleDrop)(
           e.absoluteX + dragOffsetX.value,
           e.absoluteY + dragOffsetY.value,
         );
       })
       .onFinalize((_, success) => {
+        if (craftingInteractionLockedSV.value !== 0) return;
         if (!success) {
           soupVis.value = withTiming(0, { duration: 100 });
           runOnJS(onGestureCancelled)();
@@ -1695,9 +2151,9 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
 
     // Identify current slot ref
     const curSlot = soupSlotRef.current ?? 0;
-    const slotRef = curSlot < 12
+    const slotRef = isKitchenTableSlot(curSlot)
       ? tableSlotRefs.current[curSlot]
-      : craftSlotRefs.current[curSlot - 12];
+      : craftSlotRefs.current[curSlot - CRAFT_INGREDIENT_SLOT_BASE];
 
     // Measure the slot LIVE at the moment of drag-start for up-to-date window coordinates
     // (handles foldables, orientation changes, screen-resize)
@@ -1707,7 +2163,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       soupX.value = itemCenterX;
       soupY.value = itemCenterY;
       // Also cache the fresh measurement
-      if (curSlot < 12) {
+      if (isKitchenTableSlot(curSlot)) {
         if (layouts.current.tableSlots[curSlot]) {
           const prev = layouts.current.tableSlots[curSlot]!;
           layouts.current.tableSlots[curSlot] = {
@@ -1717,7 +2173,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
           };
         }
       } else {
-        const ci = curSlot - 12;
+        const ci = curSlot - CRAFT_INGREDIENT_SLOT_BASE;
         if (layouts.current.craftSlots[ci]) {
           const prev = layouts.current.craftSlots[ci]!;
           layouts.current.craftSlots[ci] = {
@@ -1732,14 +2188,14 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     if (slotRef) {
       slotRef.measureInWindow((x, y, w, h) => {
         // Also update soupFlySize in case screen changed
-        if (curSlot < 12 && w > 0) soupFlySize.value = w * 0.80;
+        if (isKitchenTableSlot(curSlot) && w > 0) soupFlySize.value = w * 0.80;
         applyOffset(x + w / 2, y + h / 2);
       });
     } else {
       // Fallback: use cached layout or touch position
-      const cached = curSlot < 12
+      const cached = isKitchenTableSlot(curSlot)
         ? layouts.current.tableSlots[curSlot]
-        : layouts.current.craftSlots[curSlot - 12];
+        : layouts.current.craftSlots[curSlot - CRAFT_INGREDIENT_SLOT_BASE];
       applyOffset(
         cached ? cached.x + cached.w / 2 : absX,
         cached ? cached.y + cached.h / 2 : absY,
@@ -1759,10 +2215,10 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     // Cooking tutorial share/eat path
     if (tsRef.current === "COOKING_SHARE_EAT") {
       const curSlot = soupSlotRef.current;
-      const currentSoup = curSlot !== null && curSlot < 12
+      const currentSoup = curSlot !== null && isKitchenTableSlot(curSlot)
         ? tableItemsRef.current[curSlot]
         : null;
-      const stackedSoup = currentSoup?.id === "herbsoup" && currentSoup.quantity > 1;
+      const stackedSoup = currentSoup?.id === "soup_herb" && currentSoup.quantity > 1;
       const droppedOnRupert = !!lr && inRect(itemX, itemY, lr);
       const droppedOnPlayer = !!lp && inRect(itemX, itemY, lp);
 
@@ -1803,7 +2259,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         // Day-1 Herb Soup may be moved into ingredient slots 0-2 only.
         // The Tool slot is not a valid destination for this tutorial item.
         for (let i = 0; i < 3; i++) {
-          if (lcs[i] && inRect(itemX, itemY, lcs[i]!)) { target = 12 + i; break; }
+          if (lcs[i] && inRect(itemX, itemY, lcs[i]!)) { target = CRAFT_INGREDIENT_SLOT_BASE + i; break; }
         }
       }
       if (target >= 0 && target !== soupSlotRef.current) {
@@ -1826,9 +2282,9 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
 
   function returnDragToSlot(fromX: number, fromY: number) {
     const curSlot = soupSlotRef.current ?? 0;
-    const rect = curSlot < 12
+    const rect = isKitchenTableSlot(curSlot)
       ? layouts.current.tableSlots[curSlot]
-      : layouts.current.craftSlots[curSlot - 12];
+      : layouts.current.craftSlots[curSlot - CRAFT_INGREDIENT_SLOT_BASE];
     if (!rect) { endDragClean(); return; }
     const toX = rect.x + rect.w / 2;
     const toY = rect.y + rect.h / 2;
@@ -1846,7 +2302,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     const freeSlot = tableItemsRef.current.findIndex((item) => item === null);
     if (freeSlot >= 0) return freeSlot;
     const currentSlot = soupSlotRef.current;
-    return currentSlot !== null && currentSlot < 12 ? currentSlot : 0;
+    return currentSlot !== null && isKitchenTableSlot(currentSlot) ? currentSlot : 0;
   }
 
   function holdSoupAtRupert() {
@@ -1931,6 +2387,11 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   }
 
   function onDropOnPlayer(absX: number, absY: number) {
+    if (!canConsumeForStamina("soup_herb", staminaCurrent, playerStats.maximumStamina)) {
+      showPlayerBubble('"I\'m not hungry."');
+      returnDragToSlot(absX, absY);
+      return;
+    }
     if (consumedOnce.current) { endDragClean(); return; }
     consumedOnce.current = true;
     inputLocked.current = true;
@@ -1956,7 +2417,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   }
 
   function onConsumed() {
-    const newSta = Math.min(staminaCurrent + 20, playerStats.maximumStamina);
+    const newSta = applyStaminaRecovery("soup_herb", staminaCurrent, playerStats.maximumStamina);
+    setStaminaGainDisplay(Math.max(0, newSta - staminaCurrent));
     // Update portrait immediately (tired → sad) before animation
     setStaminaCurrent(newSta);
     setTutState("STAMINA_ANIMATING");
@@ -2008,6 +2470,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   // ── Question choices
   function selectWhereAmI() {
     if (inputLocked.current) return;
+    triggerHaptic("choice");
     setAskedWhere(true); askedWhereRef.current = true;
     setTutState("WHERE_AM_I");
     showDialog(D_WHERE_AM_I, () => {
@@ -2018,6 +2481,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
 
   function selectWhoAreYou() {
     if (inputLocked.current) return;
+    triggerHaptic("choice");
     setTutState("WHO_ARE_YOU");
     showDialog(D_WHO_INTRO, () => {
       setRupertNamed(true);
@@ -2128,10 +2592,20 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     setTutState("IDLE");
     // Footstep sound for outdoor transition
     audioManager.playSoundEffect('footstep', { maxDurationMs: 4000 });
-    router.push("/garden");
+    router.replace("/garden");
   }
 
   async function handleDiningTap() {
+    if (tithePhase === "awaiting_dining") {
+      if (hasNavigatedToDiningRef.current) return;
+      hasNavigatedToDiningRef.current = true;
+      dismissBubbleNoCallback();
+      const next = await setTithePhase("in_dining");
+      setLocalTithePhase(next.phase);
+      audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });
+      router.replace("/dining");
+      return;
+    }
     if (tsRef.current !== "WAITING_FOR_DINING_LOCATION_CLICK") return;
     if (hasNavigatedToDiningRef.current) return;
     hasNavigatedToDiningRef.current = true;
@@ -2141,7 +2615,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     await saveGuestTutorialIntroStep("dining_intro").catch(() => {});
     setTutState("IDLE");
     audioManager.playSoundEffect('footstep', { maxDurationMs: 4000 });
-    router.push("/dining");
+    router.replace("/dining");
   }
 
   function onPostGardenDialogDone() {
@@ -2158,7 +2632,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
 
   function startCookingTutorial() {
     // Clear any stale table items before tutorial begins
-    const emptyTable = Array(12).fill(null) as (BagItem | null)[];
+    const emptyTable = Array(Math.max(BASE_KITCHEN_TABLE_SLOT_COUNT, tableItemsRef.current.length)).fill(null) as (BagItem | null)[];
     setTableItems(emptyTable);
     AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(emptyTable)).catch(() => {});
     setTutState("COOKING_UNPACK_WAIT");
@@ -2198,7 +2672,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   function flyOldpotToTable(currentTable: (BagItem | null)[]) {
     // Find free table slot
     let freeSlot = -1;
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < currentTable.length; i++) {
       if (!currentTable[i] && soupSlotRef.current !== i) { freeSlot = i; break; }
     }
     const rL = layouts.current.rupert;
@@ -2233,22 +2707,35 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       state === "COOKING_DONE";
   }
 
+  function setCraftingInteractionLocked(locked: boolean) {
+    craftingLocked.current = locked;
+    craftingInteractionLockedSV.value = locked ? 1 : 0;
+  }
+
   function canUseRecipeSlots(state: TState) {
     return state === "COOKING_CRAFT_READY" ||
       (cookingTutorialCompletedRef.current && (state === "IDLE" || state === "COOKING_DONE"));
   }
 
   function getCookingItemAtSlot(slot: number): BagItem | null {
-    if (slot <= 11) return tableItemsRef.current[slot] ?? null;
-    if (slot <= 14) return craftIngSlotsRef.current[slot - 12] ?? null;
-    if (slot === 15) return craftToolRef.current;
+    if (isKitchenTableSlot(slot)) return tableItemsRef.current[slot] ?? null;
+    if (slot >= CRAFT_INGREDIENT_SLOT_BASE && slot < CRAFT_TOOL_SLOT) return craftIngSlotsRef.current[slot - CRAFT_INGREDIENT_SLOT_BASE] ?? null;
+    if (slot === CRAFT_TOOL_SLOT) return craftToolRef.current;
     return null;
   }
 
   function showCookingItemDetails(slot: number) {
+    if (craftingLocked.current) return;
     const item = getCookingItemAtSlot(slot);
     if (item) setKitchenDetailItem({ ...item });
   }
+
+  useEffect(() => subscribeKitchenPlayerThought((text) => {
+    if (playerBubbleTimer.current) clearTimeout(playerBubbleTimer.current);
+    const thought = text.trim().replace(/^["“”]+|["“”]+$/g, "");
+    setPlayerBubble(thought);
+    playerBubbleTimer.current = setTimeout(() => setPlayerBubble(null), 2500);
+  }), [setTimeout, clearTimeout]);
 
   /** Split one harvested bag from a compatible stack before it can be unpacked. */
   function splitHarvestBag(slot: number, bag: BagItem) {
@@ -2268,9 +2755,9 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
 
     const contents = bag.containedQuantity ?? 0;
-    const itemName = bag.id === "herbbag" ? "Herb Bag" : "Carrot Bag";
-    const itemLabel = bag.id === "herbbag" ? "herb" : "carrot";
-    if (bag.id === "herbbag") {
+    const itemName = bag.id === "bag_herb" ? "Herb Bag" : "Carrot Bag";
+    const itemLabel = bag.id === "bag_herb" ? "herb" : "carrot";
+    if (bag.id === "bag_herb") {
       setSelectedHerbbagSlot(splitSlot);
       setSelectedCarrotbagSlot(null);
     } else {
@@ -2281,19 +2768,32 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   }
 
   function handleCookingItemTap(slot: number) {
+    if (craftingLocked.current) return;
     const item = getCookingItemAtSlot(slot);
     if (!item) return;
     const cur = tsRef.current;
-    const onTable = slot <= 11;
+    const onTable = isKitchenTableSlot(slot);
+
+    if (onTable && item.id === "crate1" && isKitchenItemInteractionState(cur)) {
+      const nextOpen = !smallCrateOpen;
+      setSmallCrateOpen(nextOpen);
+      setTooltipVisible(false);
+      if (nextOpen) {
+        requestAnimationFrame(() => smallCratePanelRef.current?.measureInWindow((x, y, w, h) => {
+          layouts.current.cratePanel = { x, y, w, h };
+        }));
+      }
+      return;
+    }
 
     // Herb Bag stays a usable container after the tutorial: first tap selects it,
     // every following tap unpacks one herb while normal Kitchen interaction is allowed.
-    if (onTable && item.id === "herbbag" && isKitchenItemInteractionState(cur)) {
+    if (onTable && item.id === "bag_herb" && isKitchenItemInteractionState(cur)) {
       const remaining = item.containedQuantity ?? 0;
       if (selectedHerbbagSlot === null || selectedHerbbagSlot !== slot) {
         setSelectedHerbbagSlot(slot);
         setSelectedCarrotbagSlot(null);
-        setSelectedHerbsSlot(null);
+        setSelectedSplitStack(null);
         setSelectedSoupSlot(null);
         showCookingTooltip("Herb Bag", "Contains: " + remaining + (remaining === 1 ? " herb" : " herbs"));
       } else {
@@ -2313,12 +2813,12 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     }
 
     // Carrot Bag mirrors Herb Bag exactly: select first, then unpack one carrot per tap.
-    if (onTable && item.id === "carrotbag" && isKitchenItemInteractionState(cur)) {
+    if (onTable && item.id === "bag_carrot" && isKitchenItemInteractionState(cur)) {
       const remaining = item.containedQuantity ?? 0;
       if (selectedCarrotbagSlot === null || selectedCarrotbagSlot !== slot) {
         setSelectedCarrotbagSlot(slot);
         setSelectedHerbbagSlot(null);
-        setSelectedHerbsSlot(null);
+        setSelectedSplitStack(null);
         setSelectedSoupSlot(null);
         showCookingTooltip("Carrot Bag", "Contains: " + remaining + (remaining === 1 ? " carrot" : " carrots"));
       } else {
@@ -2338,32 +2838,36 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     }
 
     // Herb Soup follows the same select-then-split interaction as Herbs.
-    if (onTable && item.id === "herbsoup" && isKitchenItemInteractionState(cur)) {
+    if (onTable && item.id === "soup_herb" && isKitchenItemInteractionState(cur)) {
       handleCookingSoupTap(slot);
       return;
     }
 
-    // Herbs use the same select-then-split interaction whenever they are on the Table.
-    if (onTable && item.id === "herbs" && isKitchenItemInteractionState(cur)) {
-      if (selectedHerbsSlot === null || selectedHerbsSlot !== slot) {
-        setSelectedHerbsSlot(slot);
+    // Stackable ingredients and vessels stay selected after a split. Every following tap splits one
+    // more item until the player selects or drags a different item.
+    const isSplittableStack = item.id === "herbs" || item.id === "carrot" ||
+      item.id === "potato" || item.id === "onion" || item.id === "bucket" || item.id === "bucketwater";
+    if (onTable && isSplittableStack && isKitchenItemInteractionState(cur)) {
+      const isAlreadySelected = selectedSplitStack?.slot === slot && selectedSplitStack.itemId === item.id;
+      const catalogEntry = ITEM_CATALOG[item.id];
+      if (!isAlreadySelected) {
+        setSelectedSplitStack({ slot, itemId: item.id });
         setSelectedHerbbagSlot(null);
         setSelectedCarrotbagSlot(null);
         setSelectedSoupSlot(null);
-        showCookingTooltip(ITEM_CATALOG["herbs"].name, ITEM_CATALOG["herbs"].description);
+        showCookingTooltip(catalogEntry?.name ?? item.name, catalogEntry?.description ?? "");
       } else {
         if (item.quantity <= 1) {
-          setSelectedHerbsSlot(null);
-          setTooltipVisible(false);
+          showCookingTooltip(catalogEntry?.name ?? item.name, catalogEntry?.description ?? "");
           return;
         }
         const splitTable = tableItemsRef.current.slice();
         splitTable[slot] = { ...item, quantity: item.quantity - 1 };
         let splitPlaced = false;
-        for (let si = 0; si < 12; si++) {
+        for (let si = 0; si < splitTable.length; si++) {
           if (si === slot) continue;
           if (!splitTable[si]) {
-            splitTable[si] = { id: "herbs", itemType: "herbs", name: "Herbs", quantity: 1, attributes: ["ingredient"] };
+            splitTable[si] = { ...item, quantity: 1 };
             splitPlaced = true;
             break;
           }
@@ -2373,15 +2877,19 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         setTableItems(splitTable);
         AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(splitTable)).catch(() => {});
         audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
-        setSelectedHerbsSlot(null);
-        setTooltipVisible(false);
+        setSelectedSplitStack({ slot, itemId: item.id });
+        showCookingTooltip(catalogEntry?.name ?? item.name, catalogEntry?.description ?? "");
         if (cur === "COOKING_UNPACK_WAIT") checkCookingProgress(splitTable);
       }
       return;
     }
 
+    setSelectedHerbbagSlot(null);
+    setSelectedCarrotbagSlot(null);
+    setSelectedSplitStack(null);
+    setSelectedSoupSlot(null);
     const catalogEntry = ITEM_CATALOG[item.id];
-    if (item.id === "herbbag") {
+    if (item.id === "bag_herb") {
       const remaining = item.containedQuantity ?? 0;
       showCookingTooltip("Herb Bag", "Contains: " + remaining + (remaining === 1 ? " herb" : " herbs"));
     } else if (catalogEntry) {
@@ -2397,6 +2905,18 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     setBagDropHovered(next);
   }
 
+  function updateCrateDropHover(next: boolean) {
+    if (crateDropHoveredRef.current === next) return;
+    crateDropHoveredRef.current = next;
+    setCrateDropHovered(next);
+  }
+
+  function updateGarbageDropHover(next: boolean) {
+    if (garbageDropHoveredRef.current === next) return;
+    garbageDropHoveredRef.current = next;
+    setGarbageDropHovered(next);
+  }
+
   /** Update hovered slot during a generic kitchen item drag. */
   function updateCookingHoveredSlot(itemX: number, itemY: number) {
     const srcSlot = cookingDraggedSlotRef.current;
@@ -2404,6 +2924,26 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     const lts = layouts.current.tableSlots;
     const lcs = layouts.current.craftSlots;
     const bagRect = layouts.current.bag;
+    const draggedItem = getCookingItemAtSlot(srcSlot);
+    const cratePanel = layouts.current.cratePanel;
+    const garbage = layouts.current.garbage;
+
+    if (garbage && inExpandedRect(itemX, itemY, garbage, 8)) {
+      updateGarbageDropHover(true);
+      updateCrateDropHover(false);
+      updateBagDropHover(false);
+      if (hoveredSlotRef.current !== null) { hoveredSlotRef.current = null; setHoveredSlot(null); }
+      return;
+    }
+    updateGarbageDropHover(false);
+
+    if (draggedItem?.id !== "crate1" && smallCrateOpen && cratePanel && inRect(itemX, itemY, cratePanel)) {
+      updateCrateDropHover(true);
+      updateBagDropHover(false);
+      if (hoveredSlotRef.current !== null) { hoveredSlotRef.current = null; setHoveredSlot(null); }
+      return;
+    }
+    updateCrateDropHover(false);
 
     if (playerBagRef.current.unlocked && bagRect && inExpandedRect(itemX, itemY, bagRect)) {
       updateBagDropHover(true);
@@ -2418,15 +2958,15 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     let next: number | null = null;
 
     // Ingredient slots stay available for normal cooking after the tutorial.
-    if (canUseRecipeSlots(cur)) {
+    if (draggedItem?.id !== "crate1" && canUseRecipeSlots(cur)) {
       for (let i = 0; i < 3; i++) {
-        if (12 + i === srcSlot) continue;
-        if (lcs[i] && inRect(itemX, itemY, lcs[i]!)) { next = 12 + i; break; }
+        if (CRAFT_INGREDIENT_SLOT_BASE + i === srcSlot) continue;
+        if (lcs[i] && inRect(itemX, itemY, lcs[i]!)) { next = CRAFT_INGREDIENT_SLOT_BASE + i; break; }
       }
     }
     // Once crafting is finished (and in normal Kitchen IDLE), the Tool slot remains a
     // normal movable slot, but ingredient slots do not silently re-enable crafting.
-    if (next === null && cur !== "COOKING_UNPACK_WAIT" && srcSlot !== 15 &&
+    if (draggedItem?.id !== "crate1" && next === null && cur !== "COOKING_UNPACK_WAIT" && srcSlot !== 15 &&
         lcs[3] && inRect(itemX, itemY, lcs[3]!)) {
       next = 15;
     }
@@ -2444,15 +2984,17 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
 
   /** Begin a generic kitchen drag whose source slot is already known. */
   function onCookingDragStarted(slotIdx: number, itemId: string, absX: number, absY: number) {
+    if (craftingLocked.current) return;
     const cur = tsRef.current;
     if (!isKitchenItemInteractionState(cur)) return;
-    if (cur === "COOKING_UNPACK_WAIT" && slotIdx > 11) return;
+    if (cur === "COOKING_UNPACK_WAIT" && !isKitchenTableSlot(slotIdx)) return;
+    if (getCookingItemAtSlot(slotIdx)?.id !== itemId) return;
 
     // Tap-selection is transient. Once an item moves, no later occupant of that
     // physical slot may inherit the old yellow/green selection frame.
     setSelectedHerbbagSlot(null);
     setSelectedCarrotbagSlot(null);
-    setSelectedHerbsSlot(null);
+    setSelectedSplitStack(null);
     setSelectedSoupSlot(null);
     setTooltipVisible(false);
 
@@ -2461,8 +3003,16 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     setCookingDragActiveSlot(slotIdx);
     setFlyingItemId(itemId);
     updateBagDropHover(false);
+    updateCrateDropHover(false);
+    updateGarbageDropHover(false);
     bagIconRef.current?.measureInWindow((x, y, w, h) => {
       layouts.current.bag = { x, y, w, h };
+    });
+    garbageBinRef.current?.measureInWindow((x, y, w, h) => {
+      layouts.current.garbage = { x, y, w, h };
+    });
+    if (smallCrateOpen) smallCratePanelRef.current?.measureInWindow((x, y, w, h) => {
+      layouts.current.cratePanel = { x, y, w, h };
     });
 
     // Keep the source visible until React has committed the new overlay image.
@@ -2472,9 +3022,9 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       soupVis.value = 1;
     });
 
-    const slotRef = slotIdx <= 11
+    const slotRef = isKitchenTableSlot(slotIdx)
       ? tableSlotRefs.current[slotIdx]
-      : craftSlotRefs.current[slotIdx === 15 ? 3 : slotIdx - 12];
+      : craftSlotRefs.current[slotIdx === CRAFT_TOOL_SLOT ? 3 : slotIdx - CRAFT_INGREDIENT_SLOT_BASE];
 
     const applyOffset = (cx: number, cy: number) => {
       dragOffsetX.value = cx - absX;
@@ -2487,16 +3037,16 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       slotRef.measureInWindow((x, y, w, h) => {
         if (w > 0) soupFlySize.value = w * 0.80;
         const rect = { x, y, w, h, cx: x + w / 2, cy: y + h / 2 };
-        if (slotIdx <= 11) layouts.current.tableSlots[slotIdx] = rect;
-        else layouts.current.craftSlots[slotIdx === 15 ? 3 : slotIdx - 12] = rect;
+        if (isKitchenTableSlot(slotIdx)) layouts.current.tableSlots[slotIdx] = rect;
+        else layouts.current.craftSlots[slotIdx === CRAFT_TOOL_SLOT ? 3 : slotIdx - CRAFT_INGREDIENT_SLOT_BASE] = rect;
         applyOffset(rect.cx!, rect.cy!);
       });
       return;
     }
 
-    const cached = slotIdx <= 11
+    const cached = isKitchenTableSlot(slotIdx)
       ? layouts.current.tableSlots[slotIdx]
-      : layouts.current.craftSlots[slotIdx === 15 ? 3 : slotIdx - 12];
+      : layouts.current.craftSlots[slotIdx === CRAFT_TOOL_SLOT ? 3 : slotIdx - CRAFT_INGREDIENT_SLOT_BASE];
     applyOffset(
       cached ? (cached.cx ?? cached.x + cached.w / 2) : absX,
       cached ? (cached.cy ?? cached.y + cached.h / 2) : absY,
@@ -2511,6 +3061,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     hoveredSlotRef.current = null;
     setHoveredSlot(null);
     updateBagDropHover(false);
+    updateCrateDropHover(false);
+    updateGarbageDropHover(false);
   }
 
   /**
@@ -2520,15 +3072,20 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   function createCookingItemGesture(sourceSlot: number, itemId: string) {
     const itemTap = Gesture.Tap()
       .maxDeltaX(8).maxDeltaY(8)
-      .onEnd(() => { runOnJS(handleCookingItemTap)(sourceSlot); });
+      .onEnd(() => {
+        if (craftingInteractionLockedSV.value === 0) runOnJS(handleCookingItemTap)(sourceSlot);
+      });
 
     const itemLongPress = Gesture.LongPress()
       .minDuration(500)
-      .onStart(() => { runOnJS(showCookingItemDetails)(sourceSlot); });
+      .onStart(() => {
+        if (craftingInteractionLockedSV.value === 0) runOnJS(showCookingItemDetails)(sourceSlot);
+      });
 
     const itemPan = Gesture.Pan()
       .minDistance(10)
       .onStart((e) => {
+        if (craftingInteractionLockedSV.value !== 0) return;
         cancelAnimation(soupX);
         cancelAnimation(soupY);
         cancelAnimation(soupVis);
@@ -2539,6 +3096,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         runOnJS(onCookingDragStarted)(sourceSlot, itemId, e.absoluteX, e.absoluteY);
       })
       .onUpdate((e) => {
+        if (craftingInteractionLockedSV.value !== 0) return;
         const itemX = e.absoluteX + dragOffsetX.value;
         const itemY = e.absoluteY + dragOffsetY.value;
         soupX.value = itemX;
@@ -2546,13 +3104,16 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         runOnJS(updateCookingHoveredSlot)(itemX, itemY);
       })
       .onEnd((e) => {
+        if (craftingInteractionLockedSV.value !== 0) return;
         runOnJS(handleCookingItemDrop)(
           sourceSlot,
+          itemId,
           e.absoluteX + dragOffsetX.value,
           e.absoluteY + dragOffsetY.value,
         );
       })
       .onFinalize((_, success) => {
+        if (craftingInteractionLockedSV.value !== 0) return;
         if (!success) {
           soupVis.value = withTiming(0, { duration: 100 });
           runOnJS(onCookingDragCancelled)();
@@ -2563,6 +3124,11 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   }
 
   async function returnCookingItemToBag(srcSlot: number) {
+    const sourceItem = getCookingItemAtSlot(srcSlot);
+    if (sourceItem?.id === "crate1") {
+      showPlayerBubble('"The Small Crate stays in the Kitchen."');
+      return;
+    }
     const plan = planKitchenItemToBag(srcSlot, playerBagRef.current, {
       tableItems: tableItemsRef.current,
       craftIngredients: craftIngSlotsRef.current,
@@ -2584,7 +3150,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     setCraftIngSlots(plan.craftIngredients);
     setCraftTool(plan.craftTool);
     setSelectedHerbbagSlot(null);
-    setSelectedHerbsSlot(null);
+    setSelectedCarrotbagSlot(null);
+    setSelectedSplitStack(null);
     setSelectedSoupSlot(null);
     setTooltipVisible(false);
 
@@ -2604,11 +3171,15 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     }
   }
 
-  /** Consume exactly one Herb Soup serving during normal post-tutorial play. */
-  async function consumeHerbSoupNormally(srcSlot: number, absX: number, absY: number) {
+  /** Consume exactly one edible serving during normal post-tutorial play. */
+  async function consumeEdibleNormally(srcSlot: number, absX: number, absY: number) {
     if (inputLocked.current) return;
     const item = getCookingItemAtSlot(srcSlot);
-    if (!item || item.id !== "herbsoup") return;
+    if (!item || !isEdible(item)) return;
+    if (!canConsumeForStamina(item, staminaCurrent, playerStats.maximumStamina)) {
+      showPlayerBubble('"I\'m not hungry."');
+      return;
+    }
 
     inputLocked.current = true;
     const remainingQty = Math.max(0, item.quantity - 1);
@@ -2618,9 +3189,9 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     const nextIngredients = craftIngSlotsRef.current.slice() as (BagItem | null)[];
     let nextTool = craftToolRef.current;
 
-    if (srcSlot <= 11) nextTable[srcSlot] = replacement;
-    else if (srcSlot <= 14) nextIngredients[srcSlot - 12] = replacement;
-    else if (srcSlot === 15) nextTool = replacement;
+    if (isKitchenTableSlot(srcSlot)) nextTable[srcSlot] = replacement;
+    else if (srcSlot >= CRAFT_INGREDIENT_SLOT_BASE && srcSlot < CRAFT_TOOL_SLOT) nextIngredients[srcSlot - CRAFT_INGREDIENT_SLOT_BASE] = replacement;
+    else if (srcSlot === CRAFT_TOOL_SLOT) nextTool = replacement;
     else {
       inputLocked.current = false;
       return;
@@ -2642,7 +3213,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     ]).catch(() => {});
 
     audioManager.playSoundEffect('eat', { maxDurationMs: 4000 });
-    setFlyingItemId("herbsoup");
+    setFlyingItemId(item.id);
     const player = layouts.current.player;
     const toX = player ? player.x + player.w / 2 : absX;
     const toY = player ? player.y + player.h / 2 : absY;
@@ -2658,10 +3229,27 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     });
 
     const oldSta = staminaCurrent;
-    const newSta = Math.min(oldSta + 20, playerStats.maximumStamina);
+    const newSta = applyStaminaRecovery(item, oldSta, playerStats.maximumStamina);
+    setStaminaGainDisplay(Math.max(0, newSta - oldSta));
     setStaminaCurrent(newSta);
     staminaSV.value = withTiming(newSta, { duration: STA_MS });
     AsyncStorage.setItem(SK.STAMINA, String(newSta)).catch(() => {});
+
+    const newLife = applyLifeRecovery(item, lifeCurrent, playerStats.maximumLife);
+    if (newLife !== lifeCurrent) {
+      setLifeCurrent(newLife);
+      AsyncStorage.setItem(SK.LIFE, String(newLife)).catch(() => {});
+    }
+
+    const grantedEffectId = getGrantedStatusEffectId(item);
+    if (grantedEffectId) {
+      const nextStats = {
+        ...playerStats,
+        statusEffects: applyTemporaryEffect(playerStats.statusEffects, grantedEffectId),
+      };
+      setPlayerStats(nextStats);
+      AsyncStorage.setItem(PLAYER_STATS_KEY, JSON.stringify(nextStats)).catch(() => {});
+    }
 
     const gained = Math.max(0, newSta - oldSta);
     if (gained > 0) {
@@ -2698,7 +3286,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   }
 
   /** Drop a generic Kitchen item. Source is supplied by the item's own GestureDetector. */
-  function handleCookingItemDrop(srcSlot: number, absX: number, absY: number) {
+  function handleCookingItemDrop(srcSlot: number, expectedItemId: string, absX: number, absY: number) {
     cookingDraggedSlotRef.current = -1;
     cookingDragItemIdRef.current = "";
     setSoupDragging(false);
@@ -2706,20 +3294,34 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     setHoveredSlot(null);
     hoveredSlotRef.current = null;
     updateBagDropHover(false);
+    updateCrateDropHover(false);
+    updateGarbageDropHover(false);
     soupVis.value = withTiming(0, { duration: 100 });
 
+    if (craftingLocked.current) return;
     const cur = tsRef.current;
     if (!isKitchenItemInteractionState(cur)) return;
-    if (cur === "COOKING_UNPACK_WAIT" && srcSlot > 11) return;
+    if (cur === "COOKING_UNPACK_WAIT" && !isKitchenTableSlot(srcSlot)) return;
 
     const draggedItem = getCookingItemAtSlot(srcSlot);
+    if (!draggedItem || draggedItem.id !== expectedItemId) return;
+    const garbageRect = layouts.current.garbage;
+    if (garbageRect && inExpandedRect(absX, absY, garbageRect, 8)) {
+      setDiscardKitchenTarget({ slot: srcSlot, item: { ...draggedItem } });
+      return;
+    }
+    const cratePanelRect = layouts.current.cratePanel;
+    if (draggedItem.id !== "crate1" && smallCrateOpen && cratePanelRect && inRect(absX, absY, cratePanelRect)) {
+      void transferCookingItemToCrate(srcSlot);
+      return;
+    }
     const playerRect = layouts.current.player;
-    if (rupertInDining && draggedItem?.id === "herbsoup" && playerRect && inRect(absX, absY, playerRect)) {
+    if (rupertInDining && draggedItem?.id === "soup_herb" && playerRect && inRect(absX, absY, playerRect)) {
       showPlayerBubble('"I need to cook herb soup for the guest."');
       return;
     }
-    if (!rupertInDining && draggedItem?.id === "herbsoup" && playerRect && inRect(absX, absY, playerRect)) {
-      void consumeHerbSoupNormally(srcSlot, absX, absY);
+    if (draggedItem && isEdible(draggedItem) && playerRect && inRect(absX, absY, playerRect)) {
+      void consumeEdibleNormally(srcSlot, absX, absY);
       return;
     }
 
@@ -2734,14 +3336,14 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     let destSlot = -1;
 
     // Ingredient slots remain valid destinations after the tutorial for normal cooking.
-    if (canUseRecipeSlots(cur)) {
+    if (draggedItem.id !== "crate1" && canUseRecipeSlots(cur)) {
       for (let i = 0; i < 3; i++) {
-        if (lcs[i] && inRect(absX, absY, lcs[i]!)) { destSlot = 12 + i; break; }
+        if (lcs[i] && inRect(absX, absY, lcs[i]!)) { destSlot = CRAFT_INGREDIENT_SLOT_BASE + i; break; }
       }
     }
     // Tool is available after Rupert introduces it, including after crafting / normal IDLE.
-    if (destSlot < 0 && cur !== "COOKING_UNPACK_WAIT" && lcs[3] && inRect(absX, absY, lcs[3]!)) {
-      destSlot = 15;
+    if (draggedItem.id !== "crate1" && destSlot < 0 && cur !== "COOKING_UNPACK_WAIT" && lcs[3] && inRect(absX, absY, lcs[3]!)) {
+      destSlot = CRAFT_TOOL_SLOT;
     }
     if (destSlot < 0) {
       for (let i = 0; i < lts.length; i++) {
@@ -2755,32 +3357,36 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     const curIng = craftIngSlotsRef.current;
     const curTool = craftToolRef.current;
     const getItem = (slot: number): BagItem | null => {
-      if (slot <= 11) return curTable[slot];
-      if (slot <= 14) return curIng[slot - 12];
-      if (slot === 15) return curTool;
+      if (isKitchenTableSlot(slot)) return curTable[slot];
+      if (slot >= CRAFT_INGREDIENT_SLOT_BASE && slot < CRAFT_TOOL_SLOT) return curIng[slot - CRAFT_INGREDIENT_SLOT_BASE];
+      if (slot === CRAFT_TOOL_SLOT) return curTool;
       return null;
     };
 
     const srcItem = getItem(srcSlot);
     if (!srcItem) return;
     const destItem = getItem(destSlot);
+    if (destItem?.id === "crate1" && srcItem.id !== "crate1") {
+      void transferCookingItemToCrate(srcSlot);
+      return;
+    }
 
     const newTable = curTable.slice();
     const newIng = curIng.slice() as (BagItem | null)[];
     let newTool = curTool;
 
     const setItemAtSlot = (slot: number, item: BagItem | null) => {
-      if (slot <= 11) newTable[slot] = item;
-      else if (slot <= 14) newIng[slot - 12] = item;
-      else if (slot === 15) newTool = item;
+      if (isKitchenTableSlot(slot)) newTable[slot] = item;
+      else if (slot >= CRAFT_INGREDIENT_SLOT_BASE && slot < CRAFT_TOOL_SLOT) newIng[slot - CRAFT_INGREDIENT_SLOT_BASE] = item;
+      else if (slot === CRAFT_TOOL_SLOT) newTool = item;
     };
 
     // Kitchen Table stacks merge when the dragged item is dropped onto a
     // compatible table stack. Recipe Ingredient/Tool slots intentionally keep
     // their existing swap behavior so crafting semantics do not change here.
     const canMergeOnTable =
-      srcSlot <= 11 &&
-      destSlot <= 11 &&
+      isKitchenTableSlot(srcSlot) &&
+      isKitchenTableSlot(destSlot) &&
       destItem !== null &&
       canStack(srcItem, destItem);
 
@@ -2826,9 +3432,9 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   function placeOldpotOnTable() {
     const targetSlot   = cookingFlyTargetSlot.current;
     const currentTable = cookingPendingTable.current;
-    setFlyingItemId("herbsoup");
+    setFlyingItemId("soup_herb");
     const newTable = [...currentTable];
-    if (targetSlot >= 0 && targetSlot < 12) {
+    if (targetSlot >= 0 && targetSlot < newTable.length && isKitchenTableSlot(targetSlot)) {
       newTable[targetSlot] = { id: "oldpot", itemType: "oldpot", name: "Old Pot", quantity: 1, attributes: ["tool"] };
     }
     setTableItems(newTable);
@@ -2842,27 +3448,27 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     ), 300);
   }
 
-  /** Unpack one herb from herbbag on the table. */
-  function unpackOneHerb(herbbagSlot: number, herbbag: BagItem) {
-    const qty = herbbag.containedQuantity ?? 0;
+  /** Unpack one herb from bag_herb on the table. */
+  function unpackOneHerb(herbBagSlot: number, herbBag: BagItem) {
+    const qty = herbBag.containedQuantity ?? 0;
     if (qty <= 0) { showPlayerBubble('"The bag is empty."'); return; }
 
     const newTable = tableItems.slice();
-    // Decrement contained qty on herbbag
+    // Decrement contained quantity on bag_herb.
     const newQty = qty - 1;
     if (newQty <= 0) {
-      // Remove empty herbbag from table
-      newTable[herbbagSlot] = null;
+      // Remove empty bag_herb from table.
+      newTable[herbBagSlot] = null;
       setSelectedHerbbagSlot(null);
     } else {
-      newTable[herbbagSlot] = { ...herbbag, containedQuantity: newQty };
+      newTable[herbBagSlot] = { ...herbBag, containedQuantity: newQty };
     }
 
     // Find free slot for 1×herbs (merge with existing stack first)
     const TABLE_STACK = 20;
     let placed = false;
-    for (let i = 0; i < 12; i++) {
-      if (i === herbbagSlot) continue;
+    for (let i = 0; i < newTable.length; i++) {
+      if (i === herbBagSlot) continue;
       const t = newTable[i];
       if (t && t.id === "herbs" && t.quantity < TABLE_STACK) {
         newTable[i] = { ...t, quantity: t.quantity + 1 };
@@ -2870,8 +3476,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       }
     }
     if (!placed) {
-      for (let i = 0; i < 12; i++) {
-        if (i === herbbagSlot) continue;
+      for (let i = 0; i < newTable.length; i++) {
+        if (i === herbBagSlot) continue;
         if (!newTable[i]) {
           newTable[i] = { id: "herbs", itemType: "herbs", name: "Herbs", quantity: 1, attributes: ["ingredient"] };
           placed = true; break;
@@ -2886,24 +3492,24 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     checkCookingProgress(newTable);
   }
 
-  /** Unpack one carrot from carrotbag on the table. */
-  function unpackOneCarrot(carrotbagSlot: number, carrotbag: BagItem) {
-    const qty = carrotbag.containedQuantity ?? 0;
+  /** Unpack one carrot from bag_carrot on the table. */
+  function unpackOneCarrot(carrotBagSlot: number, carrotBag: BagItem) {
+    const qty = carrotBag.containedQuantity ?? 0;
     if (qty <= 0) { showPlayerBubble('"The bag is empty."'); return; }
 
     const newTable = tableItems.slice();
     const newQty = qty - 1;
     if (newQty <= 0) {
-      newTable[carrotbagSlot] = null;
+      newTable[carrotBagSlot] = null;
       setSelectedCarrotbagSlot(null);
     } else {
-      newTable[carrotbagSlot] = { ...carrotbag, containedQuantity: newQty };
+      newTable[carrotBagSlot] = { ...carrotBag, containedQuantity: newQty };
     }
 
     const TABLE_STACK = 20;
     let placed = false;
-    for (let i = 0; i < 12; i++) {
-      if (i === carrotbagSlot) continue;
+    for (let i = 0; i < newTable.length; i++) {
+      if (i === carrotBagSlot) continue;
       const t = newTable[i];
       if (t && t.id === "carrot" && t.quantity < TABLE_STACK) {
         newTable[i] = { ...t, quantity: t.quantity + 1 };
@@ -2912,8 +3518,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       }
     }
     if (!placed) {
-      for (let i = 0; i < 12; i++) {
-        if (i === carrotbagSlot) continue;
+      for (let i = 0; i < newTable.length; i++) {
+        if (i === carrotBagSlot) continue;
         if (!newTable[i]) {
           newTable[i] = { id: "carrot", itemType: "carrot", name: "Carrot", quantity: 1, attributes: ["ingredient"] };
           placed = true;
@@ -2962,39 +3568,124 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   }
 
   /** Recompute the recipe result preview from current craft state. */
+  function createCraftResultPreview(
+    ingredients: readonly (BagItem | null)[],
+    tool: BagItem | null,
+  ): BagItem | null {
+    const recipe = findCookingRecipe(ingredients, tool);
+    if (!recipe) return null;
+    const craftCount = getCraftableRecipeCount(ingredients, recipe, tool);
+    return craftCount > 0
+      ? createCraftedItem(recipe.outputId, recipe.outputQuantity * craftCount)
+      : null;
+  }
+
+  async function transferCookingItemToCrate(srcSlot: number) {
+    const sourceItem = getCookingItemAtSlot(srcSlot);
+    if (!sourceItem || sourceItem.id === "crate1") return;
+    const plan = addItemToSmallCrate(sourceItem, smallCrateRef.current);
+    if (plan.transferred <= 0) {
+      showPlayerBubble('"The Small Crate is full."');
+      return;
+    }
+
+    const replacement = plan.remainder > 0 ? { ...sourceItem, quantity: plan.remainder } : null;
+    const nextTable = tableItemsRef.current.slice();
+    const nextIngredients = craftIngSlotsRef.current.slice() as (BagItem | null)[];
+    let nextTool = craftToolRef.current;
+    if (isKitchenTableSlot(srcSlot)) nextTable[srcSlot] = replacement;
+    else if (srcSlot >= CRAFT_INGREDIENT_SLOT_BASE && srcSlot < CRAFT_TOOL_SLOT) nextIngredients[srcSlot - CRAFT_INGREDIENT_SLOT_BASE] = replacement;
+    else if (srcSlot === CRAFT_TOOL_SLOT) nextTool = replacement;
+    else return;
+
+    smallCrateRef.current = plan.state;
+    tableItemsRef.current = nextTable;
+    craftIngSlotsRef.current = nextIngredients;
+    craftToolRef.current = nextTool;
+    setSmallCrate(plan.state);
+    setTableItems(nextTable);
+    setCraftIngSlots(nextIngredients);
+    setCraftTool(nextTool);
+    await Promise.all([
+      saveSmallCrateState(plan.state),
+      AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(nextTable)),
+      AsyncStorage.setItem(SK.CRAFT_INGREDIENTS, JSON.stringify(nextIngredients)),
+      AsyncStorage.setItem(SK.CRAFT_TOOL_SLOT, JSON.stringify(nextTool)),
+    ]).catch(() => {});
+    audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
+    if (plan.remainder > 0) showPlayerBubble('"That is all I can fit."');
+    if (canUseRecipeSlots(tsRef.current)) setTimeout(updateCraftResultPreview, 50);
+  }
+
+  async function returnCrateSlotToKitchen(crateSlot: number) {
+    const plan = moveCrateSlotToKitchen(crateSlot, smallCrateRef.current, tableItemsRef.current);
+    if (plan.transferred <= 0) {
+      showPlayerBubble('"No free space available."');
+      return;
+    }
+    smallCrateRef.current = plan.state;
+    tableItemsRef.current = plan.kitchenSlots;
+    setSmallCrate(plan.state);
+    setTableItems(plan.kitchenSlots);
+    await Promise.all([
+      saveSmallCrateState(plan.state),
+      AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(plan.kitchenSlots)),
+    ]).catch(() => {});
+    audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
+  }
+
+  async function confirmKitchenDiscard() {
+    const target = discardKitchenTarget;
+    setDiscardKitchenTarget(null);
+    if (!target) return;
+    const current = getCookingItemAtSlot(target.slot);
+    if (!current || current.id !== target.item.id) return;
+
+    const nextTable = tableItemsRef.current.slice();
+    const nextIngredients = craftIngSlotsRef.current.slice() as (BagItem | null)[];
+    let nextTool = craftToolRef.current;
+    if (isKitchenTableSlot(target.slot)) nextTable[target.slot] = null;
+    else if (target.slot >= CRAFT_INGREDIENT_SLOT_BASE && target.slot < CRAFT_TOOL_SLOT) nextIngredients[target.slot - CRAFT_INGREDIENT_SLOT_BASE] = null;
+    else if (target.slot === CRAFT_TOOL_SLOT) nextTool = null;
+    else return;
+
+    const tasks: Promise<unknown>[] = [
+      AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(nextTable)),
+      AsyncStorage.setItem(SK.CRAFT_INGREDIENTS, JSON.stringify(nextIngredients)),
+      AsyncStorage.setItem(SK.CRAFT_TOOL_SLOT, JSON.stringify(nextTool)),
+    ];
+    if (current.id === "crate1") {
+      const emptied: SmallCrateState = { ...DEFAULT_SMALL_CRATE_STATE, slots: Array(6).fill(null) };
+      smallCrateRef.current = emptied;
+      setSmallCrate(emptied);
+      setSmallCrateOpen(false);
+      tasks.push(AsyncStorage.setItem(KITCHEN_SMALL_CRATE_KEY, JSON.stringify(emptied)));
+    }
+    tableItemsRef.current = nextTable;
+    craftIngSlotsRef.current = nextIngredients;
+    craftToolRef.current = nextTool;
+    setTableItems(nextTable);
+    setCraftIngSlots(nextIngredients);
+    setCraftTool(nextTool);
+    await Promise.all(tasks).catch(() => {});
+    audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
+    if (canUseRecipeSlots(tsRef.current)) setTimeout(updateCraftResultPreview, 50);
+  }
+
   function updateCraftResultPreview() {
-    // Need current refs - use immediate state via functional setter
-    setCraftIngSlots(prevIng => {
-      setCraftTool(prevTool => {
-        // Herb Soup is an exact recipe: 2 herbs + 1 bucket of water + 1 old pot.
-        // Any additional ingredient item makes the recipe invalid.
-        let herbsQty = 0;
-        let bucketwaterQty = 0;
-        let hasUnexpectedIngredient = false;
-        for (const slot of prevIng) {
-          if (!slot) continue;
-          if (slot.id === "herbs") herbsQty += slot.quantity;
-          else if (slot.id === "bucketwater") bucketwaterQty += slot.quantity;
-          else hasUnexpectedIngredient = true;
-        }
-        const toolMet = prevTool?.id === HERB_SOUP_RECIPE.tool && prevTool.quantity === 1;
-        const ingredientsMet = !hasUnexpectedIngredient && herbsQty === 2 && bucketwaterQty === 1;
-        setCraftResult(
-          (toolMet && ingredientsMet)
-            ? { id: "herbsoup", itemType: "herbsoup", name: "Herb Soup", quantity: 2, attributes: ["edible"] }
-            : null,
-        );
-        return prevTool;
-      });
-      return prevIng;
-    });
+    setCraftResult(createCraftResultPreview(craftIngSlotsRef.current, craftToolRef.current));
   }
 
   function finishCraft(tutorialCraft: boolean, completedTable: (BagItem | null)[]) {
+    const newlyDiscoveredRecipe = pendingNewRecipeRef.current;
+    pendingNewRecipeRef.current = null;
+    if (newlyDiscoveredRecipe) showNewRecipePresentation(newlyDiscoveredRecipe);
+
     if (!tutorialCraft) {
       setTutState("IDLE");
       tsRef.current = "IDLE";
-      setTimeout(() => { craftingLocked.current = false; }, 350);
+      setCraftResult(createCraftResultPreview(craftIngSlotsRef.current, craftToolRef.current));
+      setTimeout(() => { setCraftingInteractionLocked(false); }, 350);
       return;
     }
 
@@ -3004,17 +3695,17 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     setTimeout(() => showDialog(D_CRAFT_SUCCESS, () => {
       setTutState("COOKING_SHARE_EAT");
       tsRef.current = "COOKING_SHARE_EAT";
-      setFlyingItemId("herbsoup");
+      setFlyingItemId("soup_herb");
       // Track the first soup for compatibility with the existing tutorial flow.
       // In COOKING_SHARE_EAT every soup stack gets its own GestureDetector below.
-      const soup1 = completedTable.findIndex(it => it?.id === "herbsoup");
+      const soup1 = completedTable.findIndex(it => it?.id === "soup_herb");
       if (soup1 >= 0) { setSoupSlot(soup1); soupSlotRef.current = soup1; }
       showBubble(
         '"We made enough for two. Can you please split them into 2 bowls?"',
         "Rupert", "ALLOW_ITEM", null, () => {}, "bubble.cooking.split_soup_request",
       );
-    }), 400);
-    setTimeout(() => { craftingLocked.current = false; }, 2000);
+    }), newlyDiscoveredRecipe ? NEW_RECIPE_HOLD_MS + 450 : 400);
+    setTimeout(() => { setCraftingInteractionLocked(false); }, 2000);
   }
 
   function flyNextCraftOutput(outputIndex: number, tutorialCraft: boolean) {
@@ -3089,84 +3780,68 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   function handleCraft() {
     if (craftingLocked.current) return;
     if (!craftResult) return;
-    craftingLocked.current = true;
+    setCraftingInteractionLocked(true);
     const tutorialCraft = !cookingTutorialCompletedRef.current;
 
-    // Defensive execution-time validation so a stale preview can never consume
-    // unrelated items or craft a recipe that is no longer exact.
-    let herbsQty = 0;
-    let bucketwaterCount = 0;
-    let hasUnexpectedIngredient = false;
-    for (const slot of craftIngSlots) {
-      if (!slot) continue;
-      if (slot.id === "herbs") herbsQty += slot.quantity;
-      else if (slot.id === "bucketwater") bucketwaterCount += slot.quantity;
-      else hasUnexpectedIngredient = true;
-    }
-    const exactRecipe =
-      !hasUnexpectedIngredient &&
-      herbsQty === 2 &&
-      bucketwaterCount === 1 &&
-      craftTool?.id === HERB_SOUP_RECIPE.tool &&
-      craftTool.quantity === 1;
-    if (!exactRecipe) {
-      craftingLocked.current = false;
+    // Validate again at execution time so a stale preview cannot consume items.
+    const recipe = findCookingRecipe(craftIngSlots, craftTool);
+    if (!recipe || recipe.outputId !== craftResult.id) {
+      setCraftingInteractionLocked(false);
       setCraftResult(null);
       showPlayerBubble('"There is no recipe for that."');
       return;
     }
 
-    audioManager.playSoundEffect('cookingpot', { maxDurationMs: 6000 });
-
-    // Output: 2 herb soups + the emptied bucket. The old pot is reusable and stays.
-    const outputs: BagItem[] = [
-      { id: "herbsoup", itemType: "herbsoup", name: "Herb Soup", quantity: 2, attributes: ["edible"] },
-      { id: "bucket",   itemType: "bucket",   name: "Empty Bucket", quantity: 1, attributes: ["vessel"] },
-    ];
-    const newTable = tableItems.slice();
-    const targetSlots: number[] = [];
-    for (let i = 0; i < 12 && targetSlots.length < outputs.length; i++) {
-      if (!newTable[i] && soupSlotRef.current !== i) targetSlots.push(i);
-    }
-    if (targetSlots.length < outputs.length) {
-      craftingLocked.current = false;
-      showPlayerBubble('"No free space available."');
-      return;
-    }
-
-    // Consume only recipe ingredients. Never blanket-clear input slots.
-    let herbsToConsume = 2;
-    let waterToConsume = 1;
-    const newIng = craftIngSlots.map((slot): BagItem | null => {
-      if (!slot) return null;
-      if (slot.id === "herbs" && herbsToConsume > 0) {
-        const consumed = Math.min(slot.quantity, herbsToConsume);
-        herbsToConsume -= consumed;
-        const remaining = slot.quantity - consumed;
-        return remaining > 0 ? { ...slot, quantity: remaining } : null;
-      }
-      if (slot.id === "bucketwater" && waterToConsume > 0) {
-        const consumed = Math.min(slot.quantity, waterToConsume);
-        waterToConsume -= consumed;
-        const remaining = slot.quantity - consumed;
-        return remaining > 0 ? { ...slot, quantity: remaining } : null;
-      }
-      return slot;
-    });
-
-    if (herbsToConsume !== 0 || waterToConsume !== 0) {
-      craftingLocked.current = false;
+    const availableCraftCount = getCraftableRecipeCount(craftIngSlotsRef.current, recipe, craftToolRef.current);
+    const craftCount = tutorialCraft ? 1 : availableCraftCount;
+    if (craftCount < 1) {
+      setCraftingInteractionLocked(false);
+      setCraftResult(null);
       showPlayerBubble('"There is no recipe for that."');
       return;
     }
 
+    const outputs = createRecipeOutputs(recipe, craftCount, getContainerStackLimit("kitchenTable"), playerStats.luck, craftTool);
+    const newTable = tableItemsRef.current.slice();
+    const targetSlots: number[] = [];
+    for (let i = 0; i < newTable.length && targetSlots.length < outputs.length; i++) {
+      if (!newTable[i] && soupSlotRef.current !== i) targetSlots.push(i);
+    }
+    if (targetSlots.length < outputs.length) {
+      setCraftingInteractionLocked(false);
+      showPlayerBubble('"No free space available."');
+      return;
+    }
+
+    const newIng = consumeRecipeIngredients(craftIngSlotsRef.current, recipe, craftCount);
+    if (!newIng) {
+      setCraftingInteractionLocked(false);
+      showPlayerBubble('"There is no recipe for that."');
+      return;
+    }
+
+    triggerHaptic("craft");
+    audioManager.playSoundEffect('cookingpot', { maxDurationMs: 6000 });
+
     // Keep refs synchronous with state so the next interaction sees the new contents.
+    const newTool = applyRecipeToolUse(craftToolRef.current, recipe, craftCount);
     craftIngSlotsRef.current = newIng;
-    craftToolRef.current = craftTool;
+    craftToolRef.current = newTool;
 
     setCraftIngSlots(newIng);
+    setCraftTool(newTool);
     AsyncStorage.setItem(SK.CRAFT_INGREDIENTS, JSON.stringify(newIng)).catch(() => {});
-    AsyncStorage.setItem(SK.CRAFT_TOOL_SLOT, JSON.stringify(craftTool)).catch(() => {});
+    AsyncStorage.setItem(SK.CRAFT_TOOL_SLOT, JSON.stringify(newTool)).catch(() => {});
+    if (!discoveredRecipeIdsRef.current.includes(recipe.id)) {
+      pendingNewRecipeRef.current = { name: recipe.name, outputId: recipe.outputId };
+      const reservedIds = [...discoveredRecipeIdsRef.current, recipe.id];
+      discoveredRecipeIdsRef.current = reservedIds;
+      setDiscoveredRecipeIds(reservedIds);
+    }
+    discoverRecipe(recipe.id).then((ids) => {
+      discoveredRecipeIdsRef.current = ids;
+      setDiscoveredRecipeIds(ids);
+    }).catch(() => {});
     startCraftOutputFlight(outputs, targetSlots, newTable, tutorialCraft);
   }
 
@@ -3175,7 +3850,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     cookingShareDoneRef.current = true;
     const curSlot = soupSlotRef.current;
     const newTable = tableItemsRef.current.slice();
-    if (curSlot !== null && curSlot < 12) newTable[curSlot] = null;
+    if (curSlot !== null && isKitchenTableSlot(curSlot)) newTable[curSlot] = null;
     tableItemsRef.current = newTable;
     setSoupSlot(null); soupSlotRef.current = null;
     setTableItems(newTable);
@@ -3189,11 +3864,16 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   }
 
   function onCookingEatSoup(absX: number, absY: number) {
+    if (!canConsumeForStamina("soup_herb", staminaCurrent, playerStats.maximumStamina)) {
+      showPlayerBubble('"I\'m not hungry."');
+      returnDragToSlot(absX, absY);
+      return;
+    }
     if (cookingEatDoneRef.current) { endDragClean(); return; }
     cookingEatDoneRef.current = true;
     const curSlot = soupSlotRef.current;
     const newTable = tableItemsRef.current.slice();
-    if (curSlot !== null && curSlot < 12) newTable[curSlot] = null;
+    if (curSlot !== null && isKitchenTableSlot(curSlot)) newTable[curSlot] = null;
     tableItemsRef.current = newTable;
     setSoupSlot(null); soupSlotRef.current = null;
     setSoupDragging(false);
@@ -3214,7 +3894,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       if (done) runOnJS(onCookingEatConsumed)();
     });
 
-    const newSta = Math.min(staminaCurrent + 20, playerStats.maximumStamina);
+    const newSta = applyStaminaRecovery("soup_herb", staminaCurrent, playerStats.maximumStamina);
+    setStaminaGainDisplay(Math.max(0, newSta - staminaCurrent));
     setStaminaCurrent(newSta);
     staminaSV.value = withTiming(newSta, { duration: STA_MS });
     plusY.value = 0; plusOp.value = 0;
@@ -3241,7 +3922,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     const shareDone = cookingShareDoneRef.current;
     const eatDone   = cookingEatDoneRef.current;
     if (shareDone && eatDone) { setTimeout(finishCookingTutorial, 500); return; }
-    const remainingSlot = updatedTable.findIndex(it => it?.id === "herbsoup");
+    const remainingSlot = updatedTable.findIndex(it => it?.id === "soup_herb");
     if (remainingSlot < 0) { setTimeout(finishCookingTutorial, 500); return; }
     setSoupSlot(remainingSlot); soupSlotRef.current = remainingSlot;
     if (shareDone && !eatDone) {
@@ -3318,7 +3999,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       // Day-1 Herb Soup may use ingredient slots 0-2, but never the Tool slot (index 3).
       for (let i = 0; i < 3; i++) {
         if (lcs[i] && inRect(itemX, itemY, lcs[i]!)) {
-          const t = 12 + i; next = t !== soupSlotRef.current ? t : null; break;
+          const t = CRAFT_INGREDIENT_SLOT_BASE + i; next = t !== soupSlotRef.current ? t : null; break;
         }
       }
     }
@@ -3337,8 +4018,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     .onStart(() => {
       // Show detailed item info for herb soup
       runOnJS(setKitchenDetailItem)({
-        id: "herbsoup",
-        itemType: "herbsoup",
+        id: "soup_herb",
+        itemType: "soup_herb",
         name: "Herb Soup",
         quantity: 1,
       });
@@ -3416,7 +4097,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
             {/* Image hidden while dragging or during demo — flying overlay takes over visually.
                 The GestureDetector wrapper stays mounted so onUpdate/onEnd complete. */}
             {!soupDragging && !soupDemoActive && (
-              <Image source={IMG.herbsoup} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
+              <Image source={IMG.soup_herb} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
             )}
           </View>
         </GestureDetector>
@@ -3425,7 +4106,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     return (
       <View style={styles.soupSlotTouch} pointerEvents="none">
         {!soupDragging && !soupDemoActive && (
-          <Image source={IMG.herbsoup} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
+          <Image source={IMG.soup_herb} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
         )}
       </View>
     );
@@ -3437,15 +4118,15 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     if (!item) return null;
     const imgSrc = ITEM_IMAGES[item.id] ?? null;
 
-    const isSelectedHerbbag   = selectedHerbbagSlot === slotIdx && item.id === "herbbag";
-    const isSelectedCarrotbag = selectedCarrotbagSlot === slotIdx && item.id === "carrotbag";
-    const isSelectedHerbs     = selectedHerbsSlot === slotIdx && item.id === "herbs";
-    const isSelectedSoup      = selectedSoupSlot === slotIdx && item.id === "herbsoup";
-    const showHerbbagTapHint = isKitchenItemInteractionState(ts) && item.id === "herbbag" && isSelectedHerbbag;
-    const showCarrotbagTapHint = isKitchenItemInteractionState(ts) && item.id === "carrotbag" && isSelectedCarrotbag;
+    const isSelectedHerbbag   = selectedHerbbagSlot === slotIdx && item.id === "bag_herb";
+    const isSelectedCarrotbag = selectedCarrotbagSlot === slotIdx && item.id === "bag_carrot";
+    const isSelectedSplitStack = selectedSplitStack?.slot === slotIdx && selectedSplitStack.itemId === item.id;
+    const isSelectedSoup      = selectedSoupSlot === slotIdx && item.id === "soup_herb";
+    const showHerbbagTapHint = isKitchenItemInteractionState(ts) && item.id === "bag_herb" && isSelectedHerbbag;
+    const showCarrotbagTapHint = isKitchenItemInteractionState(ts) && item.id === "bag_carrot" && isSelectedCarrotbag;
 
     // Herb Soup keeps its dedicated share/eat tutorial behavior after crafting.
-    if (ts === "COOKING_SHARE_EAT" && item.id === "herbsoup") {
+    if (ts === "COOKING_SHARE_EAT" && item.id === "soup_herb") {
       const isBeingDragged =
         soupDragging && cookingDragActiveSlot < 0 && soupSlot === slotIdx;
       const gesture = createCookingSoupGesture(slotIdx, item.quantity);
@@ -3483,7 +4164,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
               styles.soupSlotTouch,
               isSelectedHerbbag   && { borderWidth: 2, borderColor: "#E8B84B", borderRadius: 6 },
               isSelectedCarrotbag && { borderWidth: 2, borderColor: "#E8B84B", borderRadius: 6 },
-              isSelectedHerbs     && { borderWidth: 2, borderColor: "#7EC87E", borderRadius: 6 },
+              isSelectedSplitStack && { borderWidth: 2, borderColor: "#7EC87E", borderRadius: 6 },
               isSelectedSoup    && { borderWidth: 2, borderColor: "#7EC87E", borderRadius: 6 },
             ]}
           >
@@ -3503,12 +4184,12 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                 <Text style={{ color: "#2C1810", fontSize: 8, fontWeight: "700" }}>{item.quantity > 1 ? "SPLIT" : "TAP"}</Text>
               </View>
             )}
-            {!isBeingDragged && item.id === "herbs" && isSelectedHerbs && item.quantity > 1 && (
+            {!isBeingDragged && (item.id === "herbs" || item.id === "carrot" || item.id === "potato" || item.id === "onion" || item.id === "bucket" || item.id === "bucketwater") && isSelectedSplitStack && item.quantity > 1 && (
               <View style={{ position: "absolute", bottom: 2, right: 2, backgroundColor: "#7EC87E", borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1 }}>
                 <Text style={{ color: "#2C1810", fontSize: 8, fontWeight: "700" }}>SPLIT</Text>
               </View>
             )}
-            {!isBeingDragged && item.id === "herbsoup" && isSelectedSoup && item.quantity > 1 && (
+            {!isBeingDragged && item.id === "soup_herb" && isSelectedSoup && item.quantity > 1 && (
               <View style={{ position: "absolute", bottom: 2, right: 2, backgroundColor: "#7EC87E", borderRadius: 8, paddingHorizontal: 4, paddingVertical: 1 }}>
                 <Text style={{ color: "#2C1810", fontSize: 8, fontWeight: "700" }}>SPLIT</Text>
               </View>
@@ -3536,12 +4217,42 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       </Pressable>
     );
   }
-
-
+  const guestAreaComplete = isGuestAreaComplete(postGuestState);
+  const guestAreaCleanCost = calcEffectiveStaminaCost(
+    GUEST_AREA_CLEAN_STAMINA_COST,
+    playerStats.endurance,
+    getActiveStaminaBuffReduction(playerStats),
+  );
+  const canCleanGuestArea = !guestAreaComplete && staminaCurrent >= guestAreaCleanCost;
+  const tableAndChairsAvailable = postGuestState.tableAndChairsCompletedDaySerial !== null || (
+    guestAreaComplete &&
+    postGuestState.guestAreaCompletedDaySerial !== null &&
+    guestCalendarDaySerial > postGuestState.guestAreaCompletedDaySerial
+  );
 
   return (
-    <View ref={rootRef} style={styles.root}>
-      <CurrencyHud />
+    <View
+      ref={rootRef}
+      style={styles.root}
+      onTouchStart={(event) => {
+        touchStartRef.current = { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY };
+      }}
+      onTouchEnd={(event) => {
+        if (!smallCrateOpen || !touchStartRef.current) return;
+        const x = event.nativeEvent.pageX;
+        const y = event.nativeEvent.pageY;
+        const distance = Math.hypot(x - touchStartRef.current.x, y - touchStartRef.current.y);
+        touchStartRef.current = null;
+        if (distance > 8) return;
+        const panel = layouts.current.cratePanel;
+        if (panel && inRect(x, y, panel)) return;
+        const crateSlotIndex = tableItemsRef.current.findIndex((item) => item?.id === "crate1");
+        const crateSlotRect = crateSlotIndex >= 0 ? layouts.current.tableSlots[crateSlotIndex] : null;
+        if (crateSlotRect && inRect(x, y, crateSlotRect)) return;
+        setSmallCrateOpen(false);
+        updateCrateDropHover(false);
+      }}
+    >
       {/* ── Hidden portrait preload – forces RN/browser to decode all portrait images
            immediately on mount. Combined with AssetManager preload in game-loading.tsx
            this guarantees zero-delay portrait display. ── */}
@@ -3557,7 +4268,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         <Image source={IMG.avSad}       style={{ width: 1, height: 1 }} />
         <Image source={IMG.avTired}     style={{ width: 1, height: 1 }} />
         <Image source={IMG.avSick}      style={{ width: 1, height: 1 }} />
-        <Image source={IMG.herbsoup}    style={{ width: 1, height: 1 }} />
+        <Image source={IMG.soup_herb}    style={{ width: 1, height: 1 }} />
         <Image source={IMG.oldpot}      style={{ width: 1, height: 1 }} />
       </View>
 
@@ -3587,7 +4298,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                 </View>
                 {/* Always starts just below the right end of the Stamina bar. */}
                 <Animated.View style={[styles.plusFloat, plusFloatStyle]} pointerEvents="none">
-                  <Text style={styles.plusFloatText}>+20</Text>
+                  <Text style={styles.plusFloatText}>+{staminaGainDisplay}</Text>
                 </Animated.View>
               </View>
               <Text style={styles.statBarText}>{staminaDisplay}/{playerStats.maximumStamina}</Text>
@@ -3601,16 +4312,19 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
               <Text style={styles.statBarText}>{lifeCurrent}/30</Text>
             </View>
           </View>
-          <View style={styles.rightHeader}>
-            <View style={styles.dayBadge}><Text style={styles.dayText}>{DAYS[dayIdx]}</Text></View>
-            <TouchableOpacity
-              style={styles.menuRoundBtn}
-              onPress={() => setShowMenu(true)}
-              activeOpacity={0.8}
-              disabled={tutActive && !(ts === "COOKING_UNPACK_WAIT" || ts === "COOKING_CRAFT_READY" || ts === "COOKING_SHARE_EAT" || ts === "COOKING_DONE" || ts === "CRAFTING_TUTORIAL_READY" || ts === "WAITING_FOR_GARDEN_LOCATION_CLICK" || ts === "TUESDAY_KITCHEN_GARDEN_PROMPT" || ts === "POST_GARDEN_DIALOG" || ts === "WAITING_FOR_DINING_LOCATION_CLICK")}
-            >
-              <Ionicons name="menu" size={22} color="#F5E6C8" />
-            </TouchableOpacity>
+          <View style={styles.rightHeaderColumn}>
+            <View style={styles.rightHeader}>
+              <View style={styles.dayBadge}><Text style={styles.dayText}>{DAYS[dayIdx]}</Text></View>
+              <TouchableOpacity
+                style={styles.menuRoundBtn}
+                onPress={() => setShowMenu(true)}
+                activeOpacity={0.8}
+                disabled={tutActive && !(ts === "COOKING_UNPACK_WAIT" || ts === "COOKING_CRAFT_READY" || ts === "COOKING_SHARE_EAT" || ts === "COOKING_DONE" || ts === "CRAFTING_TUTORIAL_READY" || ts === "WAITING_FOR_GARDEN_LOCATION_CLICK" || ts === "TUESDAY_KITCHEN_GARDEN_PROMPT" || ts === "POST_GARDEN_DIALOG" || ts === "WAITING_FOR_DINING_LOCATION_CLICK")}
+              >
+                <Ionicons name="menu" size={22} color="#F5E6C8" />
+              </TouchableOpacity>
+            </View>
+            <CurrencyHud inline compact />
           </View>
         </View>
         <Text style={styles.locationName}>Kitchen</Text>
@@ -3643,6 +4357,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
           <View ref={bagIconRef} collapsable={false} style={styles.bagDropTarget}>
             <BagIconButton
               unlocked={playerBag.unlocked}
+              bagId={playerBag.bagId}
               onPress={() => {
                 setBagOpen(true);
                 if (ts === "COOKING_UNPACK_WAIT" && !bagOpenedOnceDuringCooking.current) {
@@ -3660,6 +4375,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         {/* Craft grid + Table grid. During COOKING_CRAFT_READY each occupied input slot
              owns its own Pan gesture, matching the reliable Day-1 soup architecture. */}
         {(() => {
+          const previewRecipe = findCookingRecipe(craftIngSlots, craftTool);
+          const previewDiscovered = !!previewRecipe && discoveredRecipeIds.includes(previewRecipe.id);
           const craftGrid = (
             <View style={styles.gridContainer}>
               <View style={styles.gridRow}>
@@ -3667,19 +4384,19 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                 {[0, 1, 2].map((i) => {
                   const craftItem = craftIngSlots[i];
                   const craftImgSrc = craftItem ? (ITEM_IMAGES[craftItem.id] ?? null) : null;
-                  const craftBeingDragged = soupDragging && cookingDragActiveSlot === (12 + i);
+                  const craftBeingDragged = soupDragging && cookingDragActiveSlot === (CRAFT_INGREDIENT_SLOT_BASE + i);
                   return (
                     <View
                       key={i}
                       ref={(r) => { craftSlotRefs.current[i] = r; }}
                       style={[
                         styles.craftSlot,
-                        hoveredSlot === (12 + i) && soupDragging && styles.slotHovered,
+                        hoveredSlot === (CRAFT_INGREDIENT_SLOT_BASE + i) && soupDragging && styles.slotHovered,
                       ]}
                     >
                       {craftItem ? (
                         isKitchenItemInteractionState(ts) ? (
-                          <GestureDetector gesture={createCookingItemGesture(12 + i, craftItem.id)}>
+                          <GestureDetector gesture={createCookingItemGesture(CRAFT_INGREDIENT_SLOT_BASE + i, craftItem.id)}>
                             <View style={styles.soupSlotTouch}>
                               {!craftBeingDragged && craftImgSrc && (
                                 <Image source={craftImgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
@@ -3698,7 +4415,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                           </Pressable>
                         )
                       ) : (
-                        renderSoupInSlot(12 + i)
+                        renderSoupInSlot(CRAFT_INGREDIENT_SLOT_BASE + i)
                       )}
                     </View>
                   );
@@ -3706,16 +4423,16 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                 {/* Tool slot */}
                 <View
                   ref={(r) => { craftSlotRefs.current[3] = r; }}
-                  style={[styles.craftSlot, styles.craftSlotTool, hoveredSlot === 15 && soupDragging && styles.slotHovered]}
+                  style={[styles.craftSlot, styles.craftSlotTool, hoveredSlot === CRAFT_TOOL_SLOT && soupDragging && styles.slotHovered]}
                 >
                   {!craftTool && <Ionicons name="hand-right-outline" size={26} color="#8B6914" />}
                   {craftTool && isKitchenItemInteractionState(ts) ? (
-                    <GestureDetector gesture={createCookingItemGesture(15, craftTool.id)}>
+                    <GestureDetector gesture={createCookingItemGesture(CRAFT_TOOL_SLOT, craftTool.id)}>
                       <View style={styles.soupSlotTouch}>
-                        {!(soupDragging && cookingDragActiveSlot === 15) && ITEM_IMAGES[craftTool.id] && (
+                        {!(soupDragging && cookingDragActiveSlot === CRAFT_TOOL_SLOT) && ITEM_IMAGES[craftTool.id] && (
                           <Image source={ITEM_IMAGES[craftTool.id]} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
                         )}
-                        {!(soupDragging && cookingDragActiveSlot === 15) && craftTool.quantity > 1 && (
+                        {!(soupDragging && cookingDragActiveSlot === CRAFT_TOOL_SLOT) && craftTool.quantity > 1 && (
                           <Text style={styles.tableItemQty}>{craftTool.quantity}</Text>
                         )}
                       </View>
@@ -3729,19 +4446,26 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                   ) : null}
                 </View>
                 {/* Result / Recipe slot — output only, never a drag target */}
-                <View ref={craftResultSlotRef} collapsable={false}>
+                <View ref={craftResultSlotRef} collapsable={false} style={styles.craftResultSlotFrame}>
                   <TouchableOpacity
-                    style={[styles.craftSlot, styles.craftSlotRecipe, craftResult ? { borderColor: "#5A9F5A", borderWidth: 1.5 } : {}]}
+                    style={[
+                      styles.craftSlot,
+                      styles.craftResultSlotFill,
+                      styles.craftSlotRecipe,
+                      craftResult ? { borderColor: "#5A9F5A", borderWidth: 1.5 } : {},
+                    ]}
                     activeOpacity={0.7}
                     onPress={() => !craftResult && !tutActive && setShowRecipes(true)}
                     disabled={!!craftResult}
                   >
                     {craftResult ? (
                       <View style={{ width: "100%", height: "100%", alignItems: "center", justifyContent: "center" }}>
-                        {ITEM_IMAGES[craftResult.id] && (
+                        {!previewDiscovered ? (
+                          <Ionicons name="help" size={30} color="#E7C77A" />
+                        ) : ITEM_IMAGES[craftResult.id] ? (
                           <Image source={ITEM_IMAGES[craftResult.id]} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
-                        )}
-                        {craftResult.quantity > 1 && <Text style={styles.tableItemQty}>{craftResult.quantity}</Text>}
+                        ) : null}
+                        {previewDiscovered && craftResult.quantity > 1 && <Text style={styles.tableItemQty}>{craftResult.quantity}</Text>}
                       </View>
                     ) : (
                       <Text style={styles.craftSlotText}>Recipe</Text>
@@ -3762,7 +4486,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
           );
           const tableGrid = (
             <View style={[styles.gridContainer, styles.tableContainer]}>
-              {[0, 1].map((row) => (
+              {Array.from({ length: getKitchenTableRowCount(postGuestState) }, (_, row) => row).map((row) => (
                 <View key={row} style={styles.gridRow}>
                   {[0, 1, 2, 3, 4, 5].map((col) => {
                     const idx = row * 6 + col;
@@ -3787,6 +4511,56 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         })()}
       </ScrollView>
 
+      {smallCrateOpen && smallCrate.owned && (
+        <View
+          ref={smallCratePanelRef}
+          collapsable={false}
+          onLayout={() => requestAnimationFrame(() => smallCratePanelRef.current?.measureInWindow((x, y, w, h) => {
+            layouts.current.cratePanel = { x, y, w, h };
+          }))}
+          style={[styles.smallCratePanel, { top: headerH + 8 }, crateDropHovered && styles.storageDropHovered]}
+        >
+          <View style={styles.smallCrateHeader}>
+            <View style={styles.smallCrateTitleRow}>
+              <Image source={ITEM_IMAGES.crate1} style={styles.smallCrateTitleImage} resizeMode="contain" />
+              <Text style={styles.smallCrateTitle}>Small Crate</Text>
+            </View>
+            <TouchableOpacity onPress={() => setSmallCrateOpen(false)} style={styles.smallCrateClose} hitSlop={10}>
+              <Ionicons name="close" size={20} color="#F5E6C8" />
+            </TouchableOpacity>
+          </View>
+          <View style={styles.smallCrateGrid}>
+            {smallCrate.slots.map((item, index) => (
+              <TouchableOpacity
+                key={index}
+                style={styles.smallCrateSlot}
+                disabled={!item}
+                onPress={() => { void returnCrateSlotToKitchen(index); }}
+                activeOpacity={0.75}
+              >
+                {item && ITEM_IMAGES[item.id] ? (
+                  <Image source={ITEM_IMAGES[item.id]} style={styles.smallCrateItemImage} resizeMode="contain" />
+                ) : null}
+                {item && !ITEM_IMAGES[item.id] && <Text style={styles.smallCrateFallback} numberOfLines={2}>{item.name}</Text>}
+                {item && item.quantity > 1 && <Text style={styles.smallCrateQuantity}>{item.quantity}</Text>}
+              </TouchableOpacity>
+            ))}
+          </View>
+          <Text style={styles.smallCrateHint}>Drag items here to store them · Tap an item to return it</Text>
+        </View>
+      )}
+
+      <View
+        ref={garbageBinRef}
+        collapsable={false}
+        onLayout={() => requestAnimationFrame(() => garbageBinRef.current?.measureInWindow((x, y, w, h) => {
+          layouts.current.garbage = { x, y, w, h };
+        }))}
+        style={[styles.garbageBinSlot, { bottom: locationBarH + 10 }, garbageDropHovered && styles.storageDropHovered]}
+      >
+        <Image source={IMG.garbage_bin} style={styles.garbageBinImage} resizeMode="contain" />
+      </View>
+
       {/* ── Location bar */}
       <View
         style={[styles.locationBar, { paddingBottom: insets.bottom + 4 }]}
@@ -3799,17 +4573,23 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
           const isGardenBtn = loc.id === "garden";
           const isDormBtn = loc.id === "dormitory";
           const isDiningBtn = loc.id === "dining";
+          const isMailBtn = loc.id === "mail";
           const enabledInGardenPrompt = isGardenPrompt && isGardenBtn;
           const enabledInDiningPrompt = isDiningPrompt && isDiningBtn;
+          const titheTravelLocked = tithePhase === "kitchen_dialog" || tithePhase === "awaiting_dining";
+          const enabledForTithe = tithePhase === "awaiting_dining" && isDiningBtn;
 
-          const isEffectivelyActive =
+          const ordinarilyActive =
             loc.active ||
             enabledInGardenPrompt ||
             enabledInDiningPrompt ||
-            (coreTravelUnlocked && (isGardenBtn || isDormBtn || isDiningBtn)) ||
+            enabledForTithe ||
+            (coreTravelUnlocked && (isGardenBtn || isDormBtn || isDiningBtn || isMailBtn)) ||
             (isGardenBtn && gardenActive) ||
             (isDormBtn && dormitoryUnlocked) ||
             (isDiningBtn && diningUnlocked);
+          const availableThroughExploreUnlock = loc.id === "explore" && exploreUnlocked;
+          const isEffectivelyActive = titheTravelLocked ? enabledForTithe : (ordinarilyActive || availableThroughExploreUnlock);
 
           // Resolve location image (mail has no custom PNG → fallback icon)
           const locImgKey = `loc_${loc.id}` as keyof typeof IMG;
@@ -3836,11 +4616,12 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       activeOpacity={0.8}
     >
       <Animated.View style={gardenPulseStyle}>{renderLocContent(true)}</Animated.View>
+      {harvestReady && <LocationStatusBadge kind="harvest" />}
     </TouchableOpacity>
   );
 }
 
-if (enabledInDiningPrompt) {
+if (enabledInDiningPrompt || enabledForTithe) {
   return (
     <TouchableOpacity
       key={loc.id}
@@ -3873,25 +4654,35 @@ if (isDiningBtn && diningUnlocked) {
   // the return trip with Herb Soup.
   locOnPress = () => {
     audioManager.playSoundEffect('footstep', { maxDurationMs: 4000 });
-    router.push("/dining");
+    router.replace("/dining");
   };
 } else if (!tutActive && isEffectivelyActive) {
   if (isGardenBtn && (gardenActive || coreTravelUnlocked)) {
     locOnPress = () => {
       audioManager.playSoundEffect('footstep', { maxDurationMs: 4000 });
-      router.push("/garden");
+      router.replace("/garden");
     };
   } else if (isDormBtn && (dormitoryUnlocked || coreTravelUnlocked)) {
     locOnPress = rupertInDining
       ? () => showPlayerBubble('"I need to cook herb soup for the guest."')
       : () => {
           audioManager.playSoundEffect('walking-on-wood', { maxDurationMs: 5000 });
-          router.push("/dormitory");
+          router.replace("/dormitory");
         };
+  } else if (isMailBtn && coreTravelUnlocked) {
+    locOnPress = () => {
+      audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });
+      router.replace("/mail");
+    };
+  } else if (loc.id === "explore" && exploreUnlocked) {
+    locOnPress = () => {
+      audioManager.playSoundEffect("footstep", { maxDurationMs: 4000 });
+      router.replace({ pathname: "/outside-tavern", params: { returnTo: "kitchen" } });
+    };
   }
 }
 
-const blockedByTutorial = tutActive && !(isDiningBtn && diningUnlocked);
+const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (titheTravelLocked && !enabledForTithe);
           return (
             <TouchableOpacity
               key={loc.id}
@@ -3906,6 +4697,8 @@ const blockedByTutorial = tutActive && !(isDiningBtn && diningUnlocked);
               activeOpacity={0.8}
             >
               {renderLocContent(isEffectivelyActive)}
+              {isGardenBtn && harvestReady && <LocationStatusBadge kind="harvest" />}
+              {loc.id === "explore" && merchantPresent && <LocationStatusBadge kind="merchant" />}
             </TouchableOpacity>
           );
         })}
@@ -3914,7 +4707,7 @@ const blockedByTutorial = tutActive && !(isDiningBtn && diningUnlocked);
       {/* ── Flying / dragging item (absolute, always rendered) */}
       <Animated.View style={flyStyle} pointerEvents="none">
         <Image
-          source={ITEM_IMAGES[flyingItemId] ?? IMG.herbsoup}
+          source={ITEM_IMAGES[flyingItemId] ?? IMG.soup_herb}
           style={{ width: "100%", height: "100%" }}
           resizeMode="contain"
           resizeMethod="resize"
@@ -3924,7 +4717,7 @@ const blockedByTutorial = tutActive && !(isDiningBtn && diningUnlocked);
       {/* ── Item Info Panel (compact, non-modal, above location bar) */}
       {tooltipVisible && (
         <View
-          style={[styles.infoPanel, { bottom: locationBarH + 8 }]}
+          style={[styles.infoPanel, { bottom: locationBarH + 80 }]}
           pointerEvents="box-none"
         >
           <TouchableOpacity
@@ -4054,61 +4847,23 @@ const blockedByTutorial = tutActive && !(isDiningBtn && diningUnlocked);
         const rupertL = layouts.current.rupert;
         // Position just below portraits (rupertL.y + rupertL.h gives portrait bottom in window)
         const bubbleTopPos = rupertL
-          ? rupertL.y + rupertL.h + 8
-          : (headerH > 0 ? headerH + 128 : insets.top + 190);
+          ? rupertL.y + rupertL.h + 12
+          : (headerH > 0 ? headerH + 140 : insets.top + 202);
         const arrowCenterX = rupertL ? rupertL.x + rupertL.w / 2 : W * 0.5;
-        // Size to the current content, then cap it for comfortable mobile wrapping.
-        const bubbleWidthTarget = Math.min(
-          W * 0.78,
-          Math.max(180, Math.min(420, Math.max(bubble.text.length * 7.2, bubble.speaker.length * 9) + 48)),
-        );
-        const bubbleLeftCalc = Math.max(16, Math.min(arrowCenterX - bubbleWidthTarget / 2, W * 0.32));
-        const bubbleRightCalc = Math.max(12, W - bubbleLeftCalc - bubbleWidthTarget);
-        const arrowOffset = Math.max(12, Math.min(
-          arrowCenterX - bubbleLeftCalc - 10,
-          W - bubbleLeftCalc - bubbleRightCalc - 32,
-        ));
-
-        const bubbleCard = (
-          <View style={{ position: "relative" }}>
-            <View style={[styles.bubbleArrowBorder, { left: arrowOffset }]} />
-            <View style={[styles.bubbleArrowFill, { left: arrowOffset + 2 }]} />
-            <View style={styles.bubbleCardInner}>
-              <Text style={styles.bubbleSpeaker}>{bubble.speaker}</Text>
-              <Text style={styles.bubbleText}>{bubble.text}</Text>
-            </View>
-          </View>
-        );
-
-        if (bubble.policy === "ALLOW_ITEM" || bubble.policy === "GARDEN_PROMPT") {
-          return (
-            // Fullscreen dismiss backdrop (behind bubble, but global dismiss via Pressable)
-            <Pressable
-              style={[StyleSheet.absoluteFill, { zIndex: 400 }]}
-              onPress={dismissBubble}
-              key="bubble-allow"
-            >
-              <TouchableOpacity
-                style={{ position: "absolute", top: bubbleTopPos, left: bubbleLeftCalc, right: bubbleRightCalc }}
-                onPress={dismissBubble}
-                activeOpacity={0.88}
-              >
-                {bubbleCard}
-              </TouchableOpacity>
-            </Pressable>
-          );
-        }
-
-        // BLOCK_ALL or LOCK_TUTORIAL — absorb all touches, global tap dismisses
         return (
-          <Pressable style={[StyleSheet.absoluteFill, { zIndex: 401 }]} onPress={dismissBubble} key="bubble-block">
-            <TouchableOpacity
-              style={{ position: "absolute", top: bubbleTopPos, left: bubbleLeftCalc, right: bubbleRightCalc }}
-              onPress={dismissBubble}
-              activeOpacity={0.88}
-            >
-              {bubbleCard}
-            </TouchableOpacity>
+          <Pressable
+            style={[StyleSheet.absoluteFill, { zIndex: bubble.policy === "ALLOW_ITEM" || bubble.policy === "GARDEN_PROMPT" ? 400 : 401 }]}
+            onPress={dismissBubble}
+            key="context-bubble"
+          >
+            <PortraitBubble
+              anchorX={arrowCenterX}
+              screenWidth={W}
+              speaker={bubble.speaker}
+              text={bubble.text}
+              top={bubbleTopPos}
+              variant="speech"
+            />
           </Pressable>
         );
       })()}
@@ -4116,9 +4871,16 @@ const blockedByTutorial = tutActive && !(isDiningBtn && diningUnlocked);
       {/* ── Demo soup animation overlay (above bubble, zIndex 402) */}
       {soupDemoActive && (
         <Animated.View style={demoStyle} pointerEvents="none">
-          <Image source={require("../assets/images/herbsoup.png")} style={{ width: 56, height: 56 }} resizeMode="contain" resizeMethod="resize" />
+          <Image source={require("../assets/images/soup_herb.png")} style={{ width: 56, height: 56 }} resizeMode="contain" resizeMethod="resize" />
         </Animated.View>
       )}
+
+      <StoryDialogOverlay
+        visible={escortDialogMode !== null}
+        line={escortDialogLines[escortDialogIndex] ?? null}
+        choices={escortDialogChoices()}
+        onContinue={advanceEscortKitchenDialog}
+      />
 
       {/* ── Menu Modal */}
       <Modal visible={showMenu} transparent animationType="fade">
@@ -4143,8 +4905,15 @@ const blockedByTutorial = tutActive && !(isDiningBtn && diningUnlocked);
       </Modal>
 
       {/* ── Logbook Modal */}
-      <Modal visible={showLogbook} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
+      <Modal
+        visible={showLogbook}
+        transparent
+        animationType="fade"
+        onShow={() => {
+          requestAnimationFrame(() => logbookScrollRef.current?.scrollToEnd({ animated: false }));
+        }}
+      >
+        {showLogbook && (<View style={styles.modalOverlay}>
           <View style={[styles.menuPanel, { maxHeight: "80%", minWidth: W * 0.88 }]}>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <Text style={styles.panelTitle}>Logbook</Text>
@@ -4153,7 +4922,16 @@ const blockedByTutorial = tutActive && !(isDiningBtn && diningUnlocked);
               </TouchableOpacity>
             </View>
             <View style={styles.divider} />
-            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+            <ScrollView
+              ref={logbookScrollRef}
+              style={{ flex: 1 }}
+              showsVerticalScrollIndicator={false}
+              onContentSizeChange={() => {
+                if (showLogbook && logbook.length > 0) {
+                  logbookScrollRef.current?.scrollToEnd({ animated: false });
+                }
+              }}
+            >
               {logbook.length === 0 ? (
                 <Text style={{ color: "rgba(240,232,213,0.45)", fontFamily: "Oldenburg", fontSize: 13, textAlign: "center", marginTop: 16 }}>
                   No entries yet.
@@ -4175,7 +4953,7 @@ const blockedByTutorial = tutActive && !(isDiningBtn && diningUnlocked);
               )}
             </ScrollView>
           </View>
-        </View>
+        </View>)}
       </Modal>
 
       {/* ── Rupert Upgrades Modal */}
@@ -4191,25 +4969,165 @@ const blockedByTutorial = tutActive && !(isDiningBtn && diningUnlocked);
             </View>
             <View style={styles.divider} />
 
-            <View style={styles.upgradeCard}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.upgradeName}>2nd Plot</Text>
-                <Text style={styles.upgradeCost}>4 Wood + 4 Stone</Text>
-                <Text style={styles.upgradeOwned}>
-                  You have {sharedResources.wood} Wood · {sharedResources.stone} Stone
-                </Text>
+            <ScrollView
+              style={styles.rupertUpgradeScroll}
+              contentContainerStyle={styles.rupertUpgradeScrollContent}
+              contentInsetAdjustmentBehavior="automatic"
+              showsVerticalScrollIndicator
+            >
+              <Text style={styles.upgradeSectionTitle}>Garden</Text>
+
+              {([2, 3, 4] as const).map((plotNumber) => {
+                const unlocked = isPlotUnlocked(postGuestState, plotNumber);
+                const prerequisiteUnlocked = isPlotUnlocked(postGuestState, (plotNumber - 1) as 1 | 2 | 3);
+                const ordinal = plotNumber === 2 ? "2nd" : plotNumber === 3 ? "3rd" : "4th";
+                return (
+                  <View key={`build-${plotNumber}`} style={styles.upgradeCard}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.upgradeName}>Build {ordinal} Plot</Text>
+                      <Text style={styles.upgradeCost}>
+                        {plotNumber === 2 ? "4 Wood + 4 Stone" : "8 Wood + 8 Stone + 4 Nails"}
+                      </Text>
+                      {!prerequisiteUnlocked && <Text style={styles.upgradeLockedText}>Requires the previous plot.</Text>}
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.upgradeBuildBtn, unlocked && styles.upgradeBuildBtnDone, !prerequisiteUnlocked && styles.upgradeBuildBtnDisabled]}
+                      disabled={upgradeBusy || unlocked || !prerequisiteUnlocked}
+                      onPress={() => { void handleGardenPlotBuild(plotNumber); }}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.upgradeBuildText}>{unlocked ? "Unlocked" : upgradeBusy ? "..." : "Build"}</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+
+              {([1, 2, 3, 4] as const).filter((plotNumber) => isPlotUnlocked(postGuestState, plotNumber)).map((plotNumber) => {
+                const plotId = `garden_plot_0${plotNumber}`;
+                const level = postGuestState.plotYieldUpgradeLevels[plotId] ?? 0;
+                const ordinal = plotNumber === 1 ? "1st" : plotNumber === 2 ? "2nd" : plotNumber === 3 ? "3rd" : "4th";
+                return (
+                  <View key={`yield-${plotNumber}`} style={styles.upgradeCard}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.upgradeName}>Upgrade {ordinal} Plot</Text>
+                      <Text style={styles.upgradeCost}>
+                        {level === 0 ? "5× Standard Fertilizer" : level === 1 ? "5× Premium Fertilizer" : "Maximum level"}
+                      </Text>
+                      <Text style={styles.upgradeOwned}>Minimum Yield: {level === 0 ? 5 : level === 1 ? 7 : 10}</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.upgradeBuildBtn, level >= 2 && styles.upgradeBuildBtnDone]}
+                      disabled={upgradeBusy || level >= 2}
+                      onPress={() => { void handlePlotYieldUpgrade(plotNumber); }}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={styles.upgradeBuildText}>{level >= 2 ? "Maxed" : upgradeBusy ? "..." : "Upgrade"}</Text>
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+
+              <Text style={styles.upgradeSectionTitle}>Tavern</Text>
+
+              <View style={styles.upgradeCard}>
+                <View style={styles.guestAreaUpgradeContent}>
+                  <Text style={styles.upgradeName}>Get the guest area ready for guests.</Text>
+                  <View style={styles.guestAreaProgressRow}>
+                    {Array.from({ length: GUEST_AREA_CLEAN_STEPS_REQUIRED }).map((_, index) => (
+                      <View key={index} style={[styles.guestAreaProgressStep, index < postGuestState.guestAreaCleanSteps && styles.guestAreaProgressStepFilled]} />
+                    ))}
+                  </View>
+                  <Text style={styles.upgradeOwned}>{postGuestState.guestAreaCleanSteps}/{GUEST_AREA_CLEAN_STEPS_REQUIRED} cleaned</Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.upgradeBuildBtn, guestAreaComplete && styles.upgradeBuildBtnDone, !guestAreaComplete && !canCleanGuestArea && styles.upgradeBuildBtnDisabled]}
+                  disabled={upgradeBusy || guestAreaComplete || !canCleanGuestArea}
+                  onPress={handleGuestAreaClean}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.upgradeBuildText}>{guestAreaComplete ? "Ready" : upgradeBusy ? "..." : "Clean"}</Text>
+                  {!guestAreaComplete && <View style={styles.upgradeStaminaCostRow}><Text style={styles.upgradeStaminaCost}>-{guestAreaCleanCost}</Text><Ionicons name="flash" size={12} color="#E8B84B" /></View>}
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity
-                style={[styles.upgradeBuildBtn, postGuestState.secondPlotUnlocked && styles.upgradeBuildBtnDone]}
-                disabled={upgradeBusy || postGuestState.secondPlotUnlocked}
-                onPress={handleSecondPlotUpgrade}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.upgradeBuildText}>
-                  {postGuestState.secondPlotUnlocked ? "Unlocked" : upgradeBusy ? "..." : "Build"}
-                </Text>
-              </TouchableOpacity>
-            </View>
+
+              {tableAndChairsAvailable && (
+                <View style={styles.upgradeCard}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.upgradeName}>New table and chairs.</Text>
+                    <Text style={styles.upgradeCost}>15 Wood + 10 Nails + 1 Paint</Text>
+                    <Text style={styles.upgradeOwned}>Attract more guests · Maximum guests +1</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.upgradeBuildBtn, postGuestState.tableAndChairsCompletedDaySerial !== null && styles.upgradeBuildBtnDone]}
+                    disabled={upgradeBusy || postGuestState.tableAndChairsCompletedDaySerial !== null}
+                    onPress={() => { void handleTableAndChairsUpgrade(); }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.upgradeBuildText}>{postGuestState.tableAndChairsCompletedDaySerial !== null ? "Complete" : upgradeBusy ? "..." : "Build"}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {guestAreaComplete && ([1, 2, 3] as const)
+                .filter((level) => level <= postGuestState.kitchenTableUpgradeLevel + 1)
+                .map((level) => {
+                  const names = ["Large Table", "Bigger Table", "Biggest Table"] as const;
+                  const unlocked = postGuestState.kitchenTableUpgradeLevel >= level;
+                  return (
+                    <View key={`kitchen-table-${level}`} style={styles.upgradeCard}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.upgradeName}>{names[level - 1]}</Text>
+                        <Text style={styles.upgradeCost}>{KITCHEN_TABLE_UPGRADE_SILVER_COSTS[level - 1]} Silver Coins</Text>
+                        <Text style={styles.upgradeOwned}>Kitchen Table · +1 row · {2 + level}×{KITCHEN_TABLE_COLUMNS} slots</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={[styles.upgradeBuildBtn, unlocked && styles.upgradeBuildBtnDone]}
+                        disabled={upgradeBusy || unlocked}
+                        onPress={() => { void handleKitchenTableUpgrade(level); }}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={styles.upgradeBuildText}>{unlocked ? "Unlocked" : upgradeBusy ? "..." : "Upgrade"}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
+
+              {guestAreaComplete && (
+                <View style={styles.upgradeCard}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.upgradeName}>Serve Ale</Text>
+                    <Text style={styles.upgradeCost}>{ALE_QUEST_ITEMS.map((item) => item.name).join(" · ")}</Text>
+                    <Text style={styles.upgradeOwned}>Standard Ale · Unlimited · 5 Copper</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.upgradeBuildBtn, postGuestState.aleServiceUnlocked && styles.upgradeBuildBtnDone]}
+                    disabled={upgradeBusy || postGuestState.aleServiceUnlocked}
+                    onPress={() => { void handleTavernDrinkUpgrade("serve_ale"); }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.upgradeBuildText}>{postGuestState.aleServiceUnlocked ? "Unlocked" : upgradeBusy ? "..." : "Unlock"}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {postGuestState.aleServiceUnlocked && (
+                <View style={styles.upgradeCard}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.upgradeName}>Serve Honey Mead</Text>
+                    <Text style={styles.upgradeCost}>{HONEY_MEAD_QUEST_ITEMS.map((item) => item.name).join(" · ")}</Text>
+                    <Text style={styles.upgradeOwned}>Honey Mead · Unlimited · 11 Copper</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.upgradeBuildBtn, postGuestState.honeyMeadServiceUnlocked && styles.upgradeBuildBtnDone]}
+                    disabled={upgradeBusy || postGuestState.honeyMeadServiceUnlocked}
+                    onPress={() => { void handleTavernDrinkUpgrade("serve_honey_mead"); }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.upgradeBuildText}>{postGuestState.honeyMeadServiceUnlocked ? "Unlocked" : upgradeBusy ? "..." : "Unlock"}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </ScrollView>
 
             {upgradeMessage && <Text style={styles.upgradeMessage}>{upgradeMessage}</Text>}
 
@@ -4229,7 +5147,36 @@ const blockedByTutorial = tutActive && !(isDiningBtn && diningUnlocked);
               <Text style={styles.panelTitle}> Recipes</Text>
             </View>
             <View style={styles.divider} />
-            <Text style={styles.recipeEmpty}>No recipes learned yet.{"\n"}Keep exploring the kitchen!</Text>
+            <ScrollView style={styles.recipeList} contentContainerStyle={styles.recipeListContent}>
+              {COOKING_RECIPES.filter((recipe) => discoveredRecipeIds.includes(recipe.id)).map((recipe) => (
+                <View key={recipe.id} style={styles.recipeRow}>
+                  {ITEM_IMAGES[recipe.outputId] ? (
+                    <Image source={ITEM_IMAGES[recipe.outputId]} style={styles.recipeImage} resizeMode="contain" resizeMethod="resize" />
+                  ) : (
+                    <Ionicons name="restaurant-outline" size={30} color="#C4943A" />
+                  )}
+                  <View style={styles.recipeInfo}>
+                    <Text style={styles.recipeName}>{recipe.name}</Text>
+                    <Text style={styles.recipeTags}>Stage {recipe.stage} · {recipe.rarity} · {recipe.unlock}</Text>
+                    <Text style={styles.recipeIngredients}>
+                      {recipe.ingredients.map((item) => `${item.quantity}× ${ITEM_CATALOG[item.id]?.name ?? item.id}`).join(" + ")}
+                      {recipe.toolId ? ` · Tool: ${ITEM_CATALOG[recipe.toolId]?.name ?? recipe.toolId}` : ""}
+                    </Text>
+                    <Text style={styles.recipeEffects}>
+                      {recipe.sellPriceCopper} Copper · +{recipe.staminaRecovery} Stamina
+                      {recipe.lifeRecovery > 0 ? ` · +${recipe.lifeRecovery} Life` : ""}
+                    </Text>
+                    <Text style={styles.recipeTags}>{recipe.tags.join(" · ")}</Text>
+                    {recipe.buff && (
+                      <Text style={styles.recipeEffects}>{recipe.buff.name} · {recipe.buff.durationDays} day</Text>
+                    )}
+                  </View>
+                </View>
+              ))}
+              {discoveredRecipeIds.length === 0 && (
+                <Text style={styles.recipeEmpty}>No recipes discovered yet.{"\n"}Try combining ingredients in the kitchen.</Text>
+              )}
+            </ScrollView>
             <TouchableOpacity style={styles.closeBtn} onPress={() => setShowRecipes(false)} activeOpacity={0.8}>
               <Text style={styles.closeBtnText}>Close</Text>
             </TouchableOpacity>
@@ -4261,6 +5208,34 @@ const blockedByTutorial = tutActive && !(isDiningBtn && diningUnlocked);
         onShowThoughtBubble={showPlayerBubble}
       />
 
+      <Modal
+        visible={discardKitchenTarget !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDiscardKitchenTarget(null)}
+      >
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setDiscardKitchenTarget(null)}>
+          <TouchableOpacity activeOpacity={1} onPress={() => {}}>
+            <View style={styles.garbageConfirmPanel}>
+              <Image source={IMG.garbage_bin} style={styles.garbageConfirmImage} resizeMode="contain" />
+              <Text style={styles.garbageConfirmTitle}>Dispose item?</Text>
+              <Text style={styles.garbageConfirmText}>
+                Do you really want to dispose {discardKitchenTarget ? (ITEM_CATALOG[discardKitchenTarget.item.id]?.name ?? discardKitchenTarget.item.name) : "this item"}?
+                {discardKitchenTarget?.item.id === "crate1" ? " Everything stored inside will also be lost." : ""}
+              </Text>
+              <View style={styles.garbageConfirmButtons}>
+                <TouchableOpacity style={[styles.garbageConfirmButton, styles.garbageCancelButton]} onPress={() => setDiscardKitchenTarget(null)}>
+                  <Text style={styles.garbageCancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.garbageConfirmButton, styles.garbageDeleteButton]} onPress={() => { void confirmKitchenDiscard(); }}>
+                  <Text style={styles.garbageDeleteText}>Dispose</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
       {/* ── Kitchen detail modal (long press on table items) */}
       {kitchenDetailItem && (
         <Modal visible transparent animationType="fade" onRequestClose={() => setKitchenDetailItem(null)}>
@@ -4271,12 +5246,15 @@ const blockedByTutorial = tutActive && !(isDiningBtn && diningUnlocked);
           >
             <TouchableOpacity activeOpacity={1} onPress={() => setKitchenDetailItem(null)}>
               <View style={styles.detailPanel}>
-                <Image source={ITEM_IMAGES[kitchenDetailItem.id] ?? ITEM_IMAGES.herbsoup} style={styles.detailImg} resizeMode="contain" resizeMethod="resize" />
-                <Text style={styles.detailName}>{ITEM_CATALOG[kitchenDetailItem.id]?.name ?? kitchenDetailItem.name}</Text>
+                <Image source={ITEM_IMAGES[kitchenDetailItem.id] ?? ITEM_IMAGES.soup_herb} style={styles.detailImg} resizeMode="contain" resizeMethod="resize" />
+                <Text style={styles.detailName}>{kitchenDetailItem.id === "monster_carcass" ? kitchenDetailItem.name : (ITEM_CATALOG[kitchenDetailItem.id]?.name ?? kitchenDetailItem.name)}</Text>
                 {kitchenDetailItem.containedItem && kitchenDetailItem.containedQuantity != null && (
                   <Text style={styles.detailContents}>Contains: {kitchenDetailItem.containedQuantity}× {kitchenDetailItem.containedItem}</Text>
                 )}
                 <Text style={styles.detailDesc}>{ITEM_CATALOG[kitchenDetailItem.id]?.description ?? ""}</Text>
+                {(ITEM_CATALOG[kitchenDetailItem.id]?.attributes.includes("weapon") || ITEM_CATALOG[kitchenDetailItem.id]?.attributes.includes("armor")) && (
+                  <Text style={styles.detailContents}>Carry it with you to equip.</Text>
+                )}
                 {(() => {
                   const attrs = ITEM_CATALOG[kitchenDetailItem.id]?.attributes ?? [];
                   if (!attrs.length) return null;
@@ -4318,20 +5296,40 @@ const blockedByTutorial = tutActive && !(isDiningBtn && diningUnlocked);
         }}
       />
 
+      {/* First-time recipe discovery celebration. It is intentionally rendered
+          above gameplay only after the crafted output has reached the table. */}
+      {newRecipePresentation && (
+        <View style={[StyleSheet.absoluteFill, styles.newRecipeOverlay]} pointerEvents="none">
+          <Animated.View style={[styles.newRecipeCelebration, newRecipeAnimatedStyle]}>
+            <Text style={styles.newRecipeLabel}>NEW RECIPE</Text>
+            <View
+              style={[
+                styles.newRecipeImageFrame,
+                { width: Math.min(W * 0.48, 190), height: Math.min(W * 0.48, 190) },
+              ]}
+            >
+              <Image
+                source={ITEM_IMAGES[newRecipePresentation.outputId] ?? IMG.soup_herb}
+                style={styles.newRecipeImage}
+                resizeMode="contain"
+                resizeMethod="resize"
+              />
+            </View>
+            <Text style={styles.newRecipeName}>{newRecipePresentation.name}</Text>
+          </Animated.View>
+        </View>
+      )}
+
       {/* ── Player thought bubble */}
       {playerBubble && (() => {
         const playerL = layouts.current.player;
         const topPos = playerL
-          ? playerL.y + playerL.h + 8
-          : (headerH > 0 ? headerH + 128 : insets.top + 190);
+          ? playerL.y + playerL.h + 12
+          : (headerH > 0 ? headerH + 140 : insets.top + 202);
+        const anchorX = playerL ? playerL.x + playerL.w / 2 : W * 0.18;
         return (
           <View style={[StyleSheet.absoluteFill, { zIndex: 410 }]} pointerEvents="none">
-            <View style={{ position: "absolute", top: topPos, left: 10, right: Math.max(10, W - Math.min(W * 0.75, 420) - 10) }}>
-              <View style={styles.playerBubbleArrow} />
-              <View style={styles.playerBubbleCard}>
-                <Text style={styles.playerBubbleText}>{playerBubble}</Text>
-              </View>
-            </View>
+            <PortraitBubble anchorX={anchorX} screenWidth={W} text={playerBubble} top={topPos} />
           </View>
         );
       })()}
@@ -4344,6 +5342,42 @@ const blockedByTutorial = tutActive && !(isDiningBtn && diningUnlocked);
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#0A0500", position: "relative" },
   bgOverlay: { backgroundColor: "rgba(0,0,0,0.28)", zIndex: 0, pointerEvents: "none" as "none" },
+
+  newRecipeOverlay: {
+    zIndex: 850,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.20)",
+  },
+  newRecipeCelebration: { alignItems: "center", justifyContent: "center", gap: 8 },
+  newRecipeLabel: {
+    color: "#F5E6C8",
+    fontSize: 18,
+    fontFamily: "Oldenburg",
+    letterSpacing: 2,
+    textShadowColor: "#2A1000",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 5,
+  },
+  newRecipeImageFrame: {
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 26,
+    borderWidth: 2,
+    borderColor: "rgba(245,230,200,0.85)",
+    backgroundColor: "rgba(22,11,3,0.86)",
+    padding: 12,
+  },
+  newRecipeImage: { width: "100%", height: "100%" },
+  newRecipeName: {
+    color: "#F5E6C8",
+    fontSize: 16,
+    fontFamily: "Oldenburg",
+    textAlign: "center",
+    textShadowColor: "#2A1000",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+  },
 
   // Header
   header: {
@@ -4384,7 +5418,8 @@ const styles = StyleSheet.create({
   },
   plusFloatText: { color: "#FFF", fontSize: 12, fontFamily: "Oldenburg", fontWeight: "700" },
   locationName: { color: "#F0E8D5", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 1, textAlign: "center", marginTop: 4 },
-  rightHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginLeft: 10 },
+  rightHeaderColumn: { alignItems: "flex-end", alignSelf: "flex-start", gap: 4, marginLeft: 10, transform: [{ translateY: -2 }] },
+  rightHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
   dayBadge: {
     width: 38, height: 38, borderRadius: 8,
     backgroundColor: "rgba(196,148,58,0.16)",
@@ -4430,10 +5465,12 @@ const styles = StyleSheet.create({
   gridContainer: {
     marginHorizontal: 8, marginVertical: 5,
     backgroundColor: "rgba(10,6,1,0.90)", borderRadius: 12,
-    borderWidth: 1, borderColor: "rgba(90,65,30,0.35)", padding: 5, overflow: "hidden",
+    borderWidth: 1, borderColor: "rgba(90,65,30,0.35)",
+    paddingTop: 5, paddingHorizontal: 5, paddingBottom: 7,
+    overflow: "visible",
   },
   tableContainer: { gap: 4 },
-  gridRow: { flexDirection: "row", gap: 4 },
+  gridRow: { flexDirection: "row", alignItems: "stretch", gap: 4 },
   craftSlot: {
     flex: 1, aspectRatio: 1,
     backgroundColor: "rgba(20,11,3,0.93)", borderRadius: 8,
@@ -4447,6 +5484,8 @@ const styles = StyleSheet.create({
     minHeight: 44, alignItems: "center", justifyContent: "center",
   },
   craftSlotTool: { borderColor: "rgba(130,95,45,0.55)", backgroundColor: "rgba(25,14,4,0.95)" },
+  craftResultSlotFrame: { flex: 1, aspectRatio: 1, minHeight: 44, alignSelf: "stretch" },
+  craftResultSlotFill: { flex: 1, width: "100%", minHeight: 44 },
   craftSlotRecipe: { borderColor: "rgba(130,95,45,0.55)", backgroundColor: "rgba(25,14,4,0.95)" },
   craftSlotCraft: { borderWidth: 2, borderColor: "#C4943A", backgroundColor: "rgba(30,17,4,0.97)" },
   craftSlotText: { color: "rgba(200,165,90,0.70)", fontSize: 10, fontFamily: "Oldenburg", textAlign: "center" },
@@ -4491,6 +5530,49 @@ const styles = StyleSheet.create({
   locBtnGardenHighlight: { borderColor: "#C4943A", borderWidth: 2, backgroundColor: "rgba(196,148,58,0.30)" },
   locBtnImg: { width: 42, height: 42 },
   locBtnImgLocked: { opacity: 0.20 },
+
+  smallCratePanel: {
+    position: "absolute", left: 12, right: 12, zIndex: 230,
+    borderRadius: 15, borderWidth: 1.5, borderColor: "rgba(196,148,58,0.78)",
+    backgroundColor: "rgba(22,11,3,0.97)", padding: 10,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.65, shadowRadius: 10, elevation: 18,
+  },
+  smallCrateHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 7 },
+  smallCrateTitleRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+  smallCrateTitleImage: { width: 30, height: 24 },
+  smallCrateTitle: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 14 },
+  smallCrateClose: { width: 30, height: 30, alignItems: "center", justifyContent: "center" },
+  smallCrateGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  smallCrateSlot: {
+    width: "31.5%", aspectRatio: 1.45, borderRadius: 9, borderWidth: 1,
+    borderColor: "rgba(196,148,58,0.38)", backgroundColor: "rgba(255,255,255,0.035)",
+    alignItems: "center", justifyContent: "center",
+  },
+  smallCrateItemImage: { width: "72%", height: "72%" },
+  smallCrateFallback: { color: "#F0E8D5", fontFamily: "Oldenburg", fontSize: 9, textAlign: "center" },
+  smallCrateQuantity: { position: "absolute", right: 4, bottom: 2, color: "#FFF", fontFamily: "Oldenburg", fontSize: 10, textShadowColor: "#000", textShadowRadius: 2 },
+  smallCrateHint: { color: "rgba(240,232,213,0.52)", fontSize: 9, textAlign: "center", marginTop: 7 },
+  garbageBinSlot: {
+    position: "absolute", right: 12, width: 62, height: 62, zIndex: 225,
+    borderRadius: 12, borderWidth: 1.5, borderColor: "rgba(196,148,58,0.55)",
+    backgroundColor: "rgba(22,11,3,0.94)", alignItems: "center", justifyContent: "center",
+  },
+  garbageBinImage: { width: 50, height: 50 },
+  storageDropHovered: { borderColor: "#F5F0C8", borderWidth: 2.5, backgroundColor: "rgba(196,148,58,0.28)" },
+  garbageConfirmPanel: {
+    width: 300, maxWidth: "88%", borderRadius: 18, borderWidth: 1.5,
+    borderColor: "rgba(196,148,58,0.58)", backgroundColor: "#160B03", padding: 20,
+    alignItems: "center", gap: 10,
+  },
+  garbageConfirmImage: { width: 62, height: 62 },
+  garbageConfirmTitle: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 17 },
+  garbageConfirmText: { color: "rgba(240,232,213,0.76)", fontSize: 12, lineHeight: 18, textAlign: "center" },
+  garbageConfirmButtons: { flexDirection: "row", gap: 10, marginTop: 4 },
+  garbageConfirmButton: { minWidth: 108, paddingVertical: 10, borderRadius: 10, alignItems: "center", borderWidth: 1 },
+  garbageCancelButton: { borderColor: "rgba(196,148,58,0.44)", backgroundColor: "rgba(196,148,58,0.10)" },
+  garbageDeleteButton: { borderColor: "rgba(205,76,54,0.78)", backgroundColor: "rgba(150,38,24,0.48)" },
+  garbageCancelText: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 12 },
+  garbageDeleteText: { color: "#FFE8E2", fontFamily: "Oldenburg", fontSize: 12 },
 
   // Item Info Panel (non-modal, compact, above location bar)
   infoPanel: {
@@ -4600,13 +5682,16 @@ const styles = StyleSheet.create({
   menuRow: { flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 13, paddingHorizontal: 6, borderRadius: 10 },
   menuRowText: { color: "#F0E8D5", fontSize: 15, fontFamily: "Oldenburg", letterSpacing: 0.4 },
   upgradePanel: {
-    width: "88%", backgroundColor: "#160B03", borderRadius: 20, padding: 20,
+    width: "90%", maxHeight: "84%", backgroundColor: "#160B03", borderRadius: 20, padding: 20,
     borderWidth: 1.5, borderColor: "rgba(196,148,58,0.38)",
     shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.6, shadowRadius: 16, elevation: 24,
   },
   upgradeTitleRow: { flexDirection: "row", alignItems: "center", gap: 12 },
   upgradeRupert: { width: 52, height: 52, borderRadius: 26, borderWidth: 1.5, borderColor: "#C4943A" },
   upgradeSubtitle: { color: "rgba(240,232,213,0.48)", fontSize: 11, fontFamily: "Oldenburg", textAlign: "center", marginTop: 2 },
+  rupertUpgradeScroll: { width: "100%", flexShrink: 1 },
+  rupertUpgradeScrollContent: { gap: 10, paddingBottom: 8 },
+  upgradeSectionTitle: { color: "#F5E6C8", fontSize: 16, fontFamily: "Oldenburg", paddingTop: 4, paddingBottom: 2 },
   upgradeCard: {
     flexDirection: "row", alignItems: "center", gap: 12,
     backgroundColor: "rgba(255,255,255,0.04)", borderRadius: 12, padding: 14,
@@ -4615,21 +5700,47 @@ const styles = StyleSheet.create({
   upgradeName: { color: "#C4943A", fontSize: 14, fontFamily: "Oldenburg", marginBottom: 5 },
   upgradeCost: { color: "#F0E8D5", fontSize: 12, fontFamily: "Oldenburg" },
   upgradeOwned: { color: "rgba(240,232,213,0.52)", fontSize: 10, fontFamily: "Oldenburg", marginTop: 5 },
+  upgradeLockedText: { color: "#C76A52", fontSize: 10, fontFamily: "Oldenburg", marginTop: 5 },
   upgradeBuildBtn: {
     minWidth: 82, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10,
     backgroundColor: "rgba(196,148,58,0.20)", borderWidth: 1, borderColor: "rgba(196,148,58,0.48)",
     alignItems: "center",
   },
   upgradeBuildBtnDone: { opacity: 0.55 },
+  upgradeBuildBtnDisabled: { opacity: 0.38 },
   upgradeBuildText: { color: "#F5E6C8", fontSize: 12, fontFamily: "Oldenburg" },
+  guestAreaUpgradeCard: { marginTop: 10 },
+  guestAreaUpgradeContent: { flex: 1 },
+  guestAreaProgressRow: { flexDirection: "row", gap: 4, marginTop: 3 },
+  guestAreaProgressStep: {
+    flex: 1, height: 9, borderRadius: 5,
+    backgroundColor: "rgba(196,148,58,0.12)",
+    borderWidth: 1, borderColor: "rgba(196,148,58,0.34)",
+  },
+  guestAreaProgressStepFilled: { backgroundColor: "#C4943A", borderColor: "#E8B84B" },
+  upgradeStaminaCostRow: { flexDirection: "row", alignItems: "center", gap: 2, marginTop: 3 },
+  upgradeStaminaCost: { color: "#E8B84B", fontSize: 10, fontFamily: "Oldenburg" },
   upgradeMessage: { color: "#C4943A", fontSize: 11, fontFamily: "Oldenburg", textAlign: "center", marginTop: 10 },
 
   recipePanel: {
-    width: "85%", backgroundColor: "#160B03", borderRadius: 20, padding: 24,
+    width: "90%", maxHeight: "78%", backgroundColor: "#160B03", borderRadius: 20, padding: 20,
     borderWidth: 1.5, borderColor: "rgba(196,148,58,0.38)", alignItems: "center",
     shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.6, shadowRadius: 16, elevation: 24,
   },
   recipeTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "center" },
+  recipeList: { width: "100%", maxHeight: 430 },
+  recipeListContent: { gap: 10, paddingVertical: 4 },
+  recipeRow: {
+    width: "100%", minHeight: 78, flexDirection: "row", alignItems: "center", gap: 12,
+    padding: 10, borderRadius: 12, borderWidth: 1, borderColor: "rgba(196,148,58,0.28)",
+    backgroundColor: "rgba(48,27,7,0.62)",
+  },
+  recipeImage: { width: 48, height: 48 },
+  recipeInfo: { flex: 1, gap: 4 },
+  recipeName: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 13 },
+  recipeIngredients: { color: "rgba(240,232,213,0.68)", fontSize: 10, lineHeight: 15 },
+  recipeEffects: { color: "#C4943A", fontFamily: "Oldenburg", fontSize: 9, lineHeight: 13 },
+  recipeTags: { color: "rgba(130,185,107,0.82)", fontSize: 9, lineHeight: 13 },
   recipeEmpty: { color: "rgba(240,232,213,0.5)", fontSize: 14, fontStyle: "italic", textAlign: "center", lineHeight: 22, marginVertical: 20 },
   closeBtn: {
     alignSelf: "center",
@@ -4641,89 +5752,4 @@ const styles = StyleSheet.create({
   },
   closeBtnText: { color: "#F5E6C8", fontSize: 14, fontFamily: "Oldenburg", letterSpacing: 0.5 },
 
-  // Context Speech Bubble
-  bubbleArrowBorder: {
-    position: "absolute",
-    top: -11,
-    width: 0,
-    height: 0,
-    borderStyle: "solid",
-    borderLeftWidth: 11,
-    borderRightWidth: 11,
-    borderBottomWidth: 11,
-    borderTopWidth: 0,
-    borderLeftColor: "transparent",
-    borderRightColor: "transparent",
-    borderBottomColor: "rgba(196,148,58,0.55)",
-  },
-  bubbleArrowFill: {
-    position: "absolute",
-    top: -7,
-    width: 0,
-    height: 0,
-    borderStyle: "solid",
-    borderLeftWidth: 9,
-    borderRightWidth: 9,
-    borderBottomWidth: 9,
-    borderTopWidth: 0,
-    borderLeftColor: "transparent",
-    borderRightColor: "transparent",
-    borderBottomColor: "rgba(250, 242, 218, 0.97)",
-  },
-  bubbleCardInner: {
-    backgroundColor: "rgba(250, 242, 218, 0.97)",
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 14,
-    borderWidth: 1.5,
-    borderColor: "rgba(196,148,58,0.55)",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.28,
-    shadowRadius: 8,
-    elevation: 12,
-    gap: 6,
-  },
-  bubbleSpeaker: {
-    color: "#7A4800",
-    fontSize: 13,
-    fontFamily: "Oldenburg",
-    letterSpacing: 1,
-  },
-  bubbleText: {
-    color: "#2A1000",
-    fontSize: 15,
-    lineHeight: 22,
-    fontFamily: "RobotoRegular",
-  },
-  // Player thought bubble — match the standard light player-thought style used in Garden.
-  playerBubbleArrow: {
-    width: 0, height: 0,
-    borderLeftWidth: 8, borderRightWidth: 8, borderBottomWidth: 10,
-    borderLeftColor: "transparent", borderRightColor: "transparent",
-    borderBottomColor: "rgba(240,230,200,0.95)",
-    marginLeft: 16,
-  },
-  playerBubbleCard: {
-    backgroundColor: "rgba(240,230,200,0.95)",
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: "rgba(196,148,58,0.50)",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    alignSelf: "flex-start" as const,
-    maxWidth: "100%",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.4,
-    shadowRadius: 7,
-    elevation: 14,
-  },
-  playerBubbleText: {
-    color: "#2A1000",
-    fontSize: 13,
-    fontFamily: "RobotoItalic",
-    lineHeight: 18,
-  },
 });

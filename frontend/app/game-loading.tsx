@@ -16,7 +16,7 @@
  *  5. Navigate to destination (/intro for new-game, /kitchen for load-game)
  *
  * Error path:
- *  If critical assets (herbsoup, herbbag, bucket, bucketwater, portraits, bg_kitchen)
+ *  If critical assets (soup_herb, bag_herb, bucket, bucketwater, portraits, bg_kitchen)
  *  fail to load, show a Retry / Main Menu screen.
  *
  * Architecture constraints:
@@ -46,6 +46,7 @@ import {
 } from "@/src/assets/AssetManager";
 import { restoreFromSnapshot } from "@/src/game/save-manager";
 import { audioEngine } from "@/src/audio/audioEngine";
+import { NEXT_RUN_INTRO_PENDING_KEY } from "@/src/game/tithe-system";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const BG = require("../assets/images/bg-tavern.jpg");
@@ -110,6 +111,7 @@ export default function GameLoading() {
     const failures: string[] = [];
     let cancelled = false;
     let restoredLocation: "kitchen" | "garden" | "dormitory" | "dining" = "kitchen";
+    let nextRunIntroPending = false;
 
     const run = async () => {
       // 1. Restore gameplay snapshot (load-game only)
@@ -117,6 +119,7 @@ export default function GameLoading() {
       if (params.from === "load-game") {
         try {
           await restoreFromSnapshot(slotId);
+          nextRunIntroPending = await AsyncStorage.getItem(NEXT_RUN_INTRO_PENDING_KEY) === "true";
           const savedLocation = await AsyncStorage.getItem("@game:save_location");
           if (savedLocation === "kitchen" || savedLocation === "garden" || savedLocation === "dormitory" || savedLocation === "dining") {
             restoredLocation = savedLocation;
@@ -173,11 +176,12 @@ export default function GameLoading() {
       // (new-game → intro has no music; load-game → kitchen will crossfade to Kitchen-Theme)
       audioEngine.stopGameplayMusic(0);
 
-      if (params.from === "new-game") {
+      if (params.from === "new-game" || nextRunIntroPending) {
+        const restoredName = params.characterName ?? await AsyncStorage.getItem("@game:player_name") ?? "";
         router.replace({
           pathname: "/intro",
           params: {
-            characterName: params.characterName ?? "",
+            characterName: restoredName,
             slotId: params.slotId ?? "1",
           },
         });
@@ -249,7 +253,10 @@ export default function GameLoading() {
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.mainMenuBtn}
-              onPress={() => router.replace("/")}
+              onPress={() => {
+                if (router.canGoBack()) router.dismissAll();
+                else router.replace("/");
+              }}
               activeOpacity={0.8}
             >
               <Text style={styles.mainMenuText}>Main Menu</Text>

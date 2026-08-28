@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { useManagedTimers } from "@/src/hooks/use-managed-timers";
 import {
   View,
   Text,
@@ -27,6 +28,7 @@ import {
   ROOM_UPGRADES_DEFAULT,
   calcSleepRecovery,
   canAfford,
+  deductUpgradeCost,
   type RoomUpgrade,
 } from "@/src/game/room-config";
 import {
@@ -40,11 +42,13 @@ import {
 import SceneBackground from "@/src/components/SceneBackground";
 import CurrencyHud from "@/src/components/CurrencyHud";
 import StatusModal from "@/src/components/StatusModal";
+import PortraitBubble from "@/src/components/portrait-bubble";
+import TavernLocationTransition from "@/src/components/tavern-location-transition";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
-import { PLAYER_BAG_KEY, DEFAULT_BAG } from "@/src/game/item-system";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
 import { setPlaytimePaused } from "@/src/game/playtime-tracker";
 import { loadGuestTutorialIntroStep } from "@/src/game/guest-tutorial";
+import { ELAPSED_DAYS_KEY, prepareTitheForDay } from "@/src/game/tithe-system";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
   PLAYER_AVATAR_KEY,
@@ -93,7 +97,7 @@ type RoomState =
 // ─── Assets ───────────────────────────────────────────────────────────────────
 
 const IMG = {
-  room_evening: require("../assets/images/room1_evening.jpg"),
+  room_evening: require("../assets/images/room1_evening.png"),
   room_morning: require("../assets/images/room1_morning.jpg"),
   avLaugh:      require("../assets/images/avatar1_laugh.png"),
   avNormal:     require("../assets/images/avatar1_normal.png"),
@@ -143,6 +147,10 @@ function processPlotDayChange(p: GardenPlotData): GardenPlotData {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function DormitoryScreen() {
+  const {
+    setManagedTimeout: setTimeout,
+    clearManagedTimeout: clearTimeout,
+  } = useManagedTimers();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { width: W } = useWindowDimensions();
@@ -162,7 +170,7 @@ export default function DormitoryScreen() {
   const [lifeCurrent, setLifeCurrent]       = useState(15);
   const [playerStats, setPlayerStats]       = useState<PlayerStats>(DEFAULT_PLAYER_STATS);
   const [dayIdx, setDayIdx]                 = useState(0);
-  const [barWidth, setBarWidth]             = useState(0);
+  const [elapsedDayCount, setElapsedDayCount] = useState(0);
 
   // ── Room state
   const [roomState, setRoomState]   = useState<RoomState>("LOADING");
@@ -202,6 +210,7 @@ export default function DormitoryScreen() {
   }, [showMenu]);
   const [upgradeMsg, setUpgradeMsg]               = useState<string | null>(null);
   const upgradeMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const roomUpgradeBusyRef = useRef(false);
 
   // ── Sleep transition
   const [sleepTransitioning, setSleepTransitioning] = useState(false);
@@ -291,16 +300,16 @@ export default function DormitoryScreen() {
   useEffect(() => {
     const t = setTimeout(measurePortrait, 600);
     return () => clearTimeout(t);
-  }, [W, insets.top]);
+  }, [W, insets.top, setTimeout, clearTimeout]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Pure helper: determine dormitory time-of-day and intro flag
   //
-  // Days 1 & 2 (dayIdx 0, 1): tutorial-controlled via saved flags
-  // Day 3+  (dayIdx >= 2):    dynamic — staminaSpentToday >= 20 → evening
+  // Days 1 & 2 (elapsed day counts 0, 1): tutorial-controlled via saved flags
+  // Day 3+  (elapsed day count >= 2): dynamic — staminaSpentToday >= 10 → evening
   // ─────────────────────────────────────────────────────────────────────────
   function resolveDormitoryTimeOfDay(
-    di: number,
+    elapsedDays: number,
     spent: number,
     flags: {
       firstSleepDone: boolean;
@@ -309,7 +318,7 @@ export default function DormitoryScreen() {
       savedTimeOfDay: TimeOfDay;
     },
   ): { timeOfDay: TimeOfDay; showEveningIntro: boolean } {
-    if (di <= 1) {
+    if (elapsedDays <= 1) {
       // Tutorial days: respect saved time-of-day and intro flags
       if (flags.savedTimeOfDay === "morning" && flags.firstSleepDone) {
         return { timeOfDay: "morning", showEveningIntro: false };
@@ -320,7 +329,7 @@ export default function DormitoryScreen() {
       return { timeOfDay: "evening", showEveningIntro: false };
     }
     // Day 3+: fully dynamic
-    return { timeOfDay: spent >= 20 ? "evening" : "morning", showEveningIntro: false };
+    return { timeOfDay: spent >= 10 ? "evening" : "morning", showEveningIntro: false };
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -354,6 +363,9 @@ export default function DormitoryScreen() {
         const rawDay = await AsyncStorage.getItem(DSK.DAY_INDEX);
         const di = rawDay !== null ? parseInt(rawDay, 10) : 0;
         setDayIdx(di);
+        const rawElapsedDays = await AsyncStorage.getItem(ELAPSED_DAYS_KEY);
+        const elapsedDays = Math.max(0, Number.parseInt(rawElapsedDays ?? "0", 10) || 0);
+        setElapsedDayCount(elapsedDays);
         const guestTutorialStep = await loadGuestTutorialIntroStep();
 
         // Daily stamina spend (cross-screen, written by garden.tsx deductStamina)
@@ -407,13 +419,13 @@ export default function DormitoryScreen() {
 
         // ── Resolve room state via central helper ──────────────────────────
         const resolvedRoom = resolveDormitoryTimeOfDay(
-          di, spent,
+          elapsedDays, spent,
           { firstSleepDone: fs, hasSeenEveThought: evt, hasEntered: rawHasEntered === "true", savedTimeOfDay: tod },
         );
         // The first guest tutorial completes Day 2's required progression. Once it
         // is finished, the player may sleep and move on to Day 3 even though Day 2
         // originally began in the tutorial-controlled morning state.
-        const postGuestDayTwoEvening = di === 1 && guestTutorialStep === "service_complete";
+        const postGuestDayTwoEvening = elapsedDays === 1 && guestTutorialStep === "service_complete";
         const resolvedTod: TimeOfDay = postGuestDayTwoEvening ? "evening" : resolvedRoom.timeOfDay;
         const showEveningIntro = postGuestDayTwoEvening ? false : resolvedRoom.showEveningIntro;
         if (postGuestDayTwoEvening && tod !== "evening") {
@@ -424,7 +436,7 @@ export default function DormitoryScreen() {
         if (resolvedTod === "morning") {
           setRS("ROOM_MORNING");
           // Ambient: morning birds on Day 3+ morning entry
-          if (di >= 2) {
+          if (elapsedDays >= 2) {
             playMorningBirdsOnce();
           }
         } else if (showEveningIntro) {
@@ -436,7 +448,7 @@ export default function DormitoryScreen() {
         } else {
           setRS("ROOM_EVENING_INTERACTIVE");
           // Ambient: owl on Day 3+ evening entry
-          if (di >= 2) {
+          if (elapsedDays >= 2) {
             audioManager.playSoundEffect('owl', { maxDurationMs: 30000 });
           }
         }
@@ -445,14 +457,14 @@ export default function DormitoryScreen() {
       }
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [clearTimeout]);
 
   useEffect(() => {
     return () => {
       if (playerBubbleTimer.current) clearTimeout(playerBubbleTimer.current);
       if (upgradeMsgTimer.current) clearTimeout(upgradeMsgTimer.current);
     };
-  }, []);
+  }, [clearTimeout]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Player thought bubble
@@ -491,7 +503,7 @@ export default function DormitoryScreen() {
   function handleGoToSleep() {
     if (timeOfDay === "morning") {
       // Day 3+: "not tired enough yet"; Day 1 & 2: "too early to sleep again"
-      if (dayIdx >= 2) {
+      if (elapsedDayCount >= 2) {
         showPlayerBubble('"I\'m not tired enough to sleep yet."', 2500);
       } else {
         showPlayerBubble('"It\'s too early to sleep again."', 2500);
@@ -533,8 +545,15 @@ export default function DormitoryScreen() {
       const rawDay = await AsyncStorage.getItem(DSK.DAY_INDEX);
       const oldDay = rawDay !== null ? parseInt(rawDay, 10) : 0;
       const newDay = (oldDay + 1) % 7;
-      await AsyncStorage.setItem(DSK.DAY_INDEX, String(newDay));
+      const rawElapsedDays = await AsyncStorage.getItem(ELAPSED_DAYS_KEY);
+      const elapsedDays = Math.max(0, Number.parseInt(rawElapsedDays ?? "0", 10) || 0) + 1;
+      await AsyncStorage.multiSet([
+        [DSK.DAY_INDEX, String(newDay)],
+        [ELAPSED_DAYS_KEY, String(elapsedDays)],
+      ]);
+      await prepareTitheForDay(elapsedDays);
       setDayIdx(newDay);
+      setElapsedDayCount(elapsedDays);
 
       // ── 2. Process garden plot growth
       const rawPlot = await AsyncStorage.getItem(DSK.PLOT_DATA);
@@ -731,7 +750,8 @@ export default function DormitoryScreen() {
         await discardRuntimeAndRestore(parseInt(rawSlot, 10));
       }
     } catch { /* non-critical */ }
-    router.replace("/");
+    if (router.canGoBack()) router.dismissAll();
+    else router.replace("/");
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -745,7 +765,7 @@ export default function DormitoryScreen() {
   async function handleGoDownstairs() {
     // Day 3+: always allow going downstairs (player can check and come back)
     // Day 1 & 2: tutorial restriction (must sleep before first leaving)
-    if (dayIdx <= 1 && mustSleep && !firstSleepDone) {
+    if (elapsedDayCount <= 1 && mustSleep && !firstSleepDone) {
       showPlayerBubble('"I should go to sleep."', 2000);
       return;
     }
@@ -770,18 +790,39 @@ export default function DormitoryScreen() {
     setRS("UPGRADE_MODAL");
   }
 
-  function handleUpgradeTap(upgrade: RoomUpgrade) {
-    if (upgrade.completed) return;
+  async function handleUpgradeTap(upgrade: RoomUpgrade) {
+    if (upgrade.completed || roomUpgradeBusyRef.current) return;
     if (!canAfford(upgrade, sharedResources)) {
       if (upgradeMsgTimer.current) clearTimeout(upgradeMsgTimer.current);
       setUpgradeMsg("Not enough resources.");
       upgradeMsgTimer.current = setTimeout(() => setUpgradeMsg(null), 2500);
       return;
     }
-    // Future: open confirmation and execute purchase
-    // For now, show "not enough resources" until implementation is complete
-    setUpgradeMsg("Purchase confirmed! (requires sufficient resources)");
-    upgradeMsgTimer.current = setTimeout(() => setUpgradeMsg(null), 2500);
+
+    const nextResources = deductUpgradeCost(upgrade, sharedResources);
+    if (!nextResources) return;
+    const nextUpgrades = roomUpgrades.map((entry) => (
+      entry.id === upgrade.id ? { ...entry, completed: true } : entry
+    ));
+
+    roomUpgradeBusyRef.current = true;
+    try {
+      await AsyncStorage.multiSet([
+        [DSK.UPGRADES, JSON.stringify(nextUpgrades)],
+        [SHARED_RESOURCES_KEY, JSON.stringify(nextResources)],
+      ]);
+      setRoomUpgrades(nextUpgrades);
+      setSharedResources(nextResources);
+      if (upgrade.effects.unlockRoomStorage) setRoomStorageUnlocked(true);
+      audioManager.playSoundEffect("upgrade-building", { maxDurationMs: 6000 });
+      setUpgradeMsg(`${upgrade.displayName} complete.`);
+    } catch {
+      setUpgradeMsg("Upgrade failed.");
+    } finally {
+      roomUpgradeBusyRef.current = false;
+      if (upgradeMsgTimer.current) clearTimeout(upgradeMsgTimer.current);
+      upgradeMsgTimer.current = setTimeout(() => setUpgradeMsg(null), 2500);
+    }
   }
 
   function closeUpgradeModal() {
@@ -812,7 +853,7 @@ export default function DormitoryScreen() {
   // Day 3+: always allowed to go downstairs (not-tired-enough is not a lock)
   // Day 1 & 2: tutorial restricts until first sleep
   // staminaSpentToday is kept in state so it can be displayed/used in future features
-  const canGoDownstairs      = dayIdx >= 2 ? (staminaSpentToday >= 0) : (isMorning || (!mustSleep && firstSleepDone));
+  const canGoDownstairs      = elapsedDayCount >= 2 ? (staminaSpentToday >= 0) : (isMorning || (!mustSleep && firstSleepDone));
   const optionsInteractive   = roomState === "ROOM_EVENING_INTERACTIVE" || roomState === "ROOM_MORNING";
   const incompleteUpgrades   = roomUpgrades.filter(u => !u.completed);
 
@@ -828,7 +869,8 @@ export default function DormitoryScreen() {
   function renderPlayerBubble() {
     if (!playerBubble) return null;
     const L = playerPortraitLayout.current;
-    const topPos = L ? L.y + L.h + 8 : (headerH > 0 ? headerH + 128 : insets.top + 200);
+    const topPos = L ? L.y + L.h - 16 : (headerH > 0 ? headerH + 112 : insets.top + 184);
+    const anchorX = L ? L.x + L.w / 2 : W * 0.32;
     const isEveningIntroState = roomState === "ROOM_EVENING_INTRO";
     return (
       <TouchableOpacity
@@ -836,20 +878,7 @@ export default function DormitoryScreen() {
         onPress={() => isEveningIntroState ? dismissPlayerBubble(true) : dismissPlayerBubble(false)}
         activeOpacity={1}
       >
-        <View
-          style={{
-            position: "absolute",
-            top: topPos,
-            left: W * 0.18,
-            width: Math.min(W * 0.75, Math.max(150, playerBubble.length * 6.6 + 32)),
-          }}
-          pointerEvents="none"
-        >
-          <View style={styles.playerBubbleArrow} />
-          <View style={styles.playerBubbleCard}>
-            <Text style={styles.playerBubbleText}>{playerBubble}</Text>
-          </View>
-        </View>
+        <PortraitBubble anchorX={anchorX} screenWidth={W} text={playerBubble} top={topPos} />
       </TouchableOpacity>
     );
   }
@@ -858,8 +887,8 @@ export default function DormitoryScreen() {
   // JSX
   // ─────────────────────────────────────────────────────────────────────────
   return (
+    <TavernLocationTransition location="dormitory">
     <View style={styles.root}>
-      <CurrencyHud />
       {/* ── Background (responsive, top-aligned, no cover zoom) ── */}
       <SceneBackground source={isEvening ? IMG.room_evening : IMG.room_morning} topOffset={headerH} />
       <View style={[StyleSheet.absoluteFill, { top: headerH }, styles.bgOverlay]} pointerEvents="none" />
@@ -880,7 +909,6 @@ export default function DormitoryScreen() {
                   onLayout={(e) => {
                     const w = e.nativeEvent.layout.width;
                     barWidthSV.value = w;
-                    setBarWidth(w);
                   }}
                 >
                   <Animated.View style={[styles.statBarFill, styles.staminaFill, staminaFillStyle]}>
@@ -912,13 +940,16 @@ export default function DormitoryScreen() {
             </View>
           </View>
 
-          <View style={styles.rightHeader}>
-            <View style={styles.dayBadge}>
-              <Text style={styles.dayText}>{DAYS[dayIdx]}</Text>
+          <View style={styles.rightHeaderColumn}>
+            <View style={styles.rightHeader}>
+              <View style={styles.dayBadge}>
+                <Text style={styles.dayText}>{DAYS[dayIdx]}</Text>
+              </View>
+              <TouchableOpacity style={styles.menuBtn} onPress={() => setShowMenu(true)} activeOpacity={0.8}>
+                <Ionicons name="menu" size={22} color="#F5E6C8" />
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity style={styles.menuBtn} onPress={() => setShowMenu(true)} activeOpacity={0.8}>
-              <Ionicons name="menu" size={22} color="#F5E6C8" />
-            </TouchableOpacity>
+            <CurrencyHud inline compact />
           </View>
         </View>
         <Text style={styles.locationName}>{roomDisplayName}</Text>
@@ -1057,7 +1088,7 @@ export default function DormitoryScreen() {
                     key={upg.id}
                     upgrade={upg}
                     resources={sharedResources}
-                    onTap={() => handleUpgradeTap(upg)}
+                    onTap={() => { void handleUpgradeTap(upg); }}
                   />
                 ))
               )}
@@ -1128,6 +1159,7 @@ export default function DormitoryScreen() {
       {/* ── Player thought bubble ── */}
       {renderPlayerBubble()}
     </View>
+    </TavernLocationTransition>
   );
 }
 
@@ -1242,7 +1274,8 @@ const styles = StyleSheet.create({
   regenStaText: { color: "#C4943A", fontFamily: "Oldenburg", fontSize: 13, fontWeight: "700" },
   regenLifeText:{ color: "#CC2200", fontFamily: "Oldenburg", fontSize: 13, fontWeight: "700" },
   locationName: { color: "#F0E8D5", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 1, textAlign: "center", marginTop: 4 },
-  rightHeader:  { flexDirection: "row", alignItems: "center", gap: 8, marginLeft: 10 },
+  rightHeaderColumn: { alignItems: "flex-end", alignSelf: "flex-start", gap: 4, marginLeft: 10, transform: [{ translateY: -2 }] },
+  rightHeader:  { flexDirection: "row", alignItems: "center", gap: 8 },
   dayBadge: {
     width: 38, height: 38, borderRadius: 8,
     backgroundColor: "rgba(196,148,58,0.16)",
@@ -1304,24 +1337,6 @@ const styles = StyleSheet.create({
   morningGreet: {
     textAlign: "center", color: "rgba(196,148,58,0.55)", fontStyle: "italic",
     fontFamily: "Oldenburg", fontSize: 14, marginTop: 20,
-  },
-
-  // Player bubble
-  playerBubbleCard: {
-    backgroundColor: "rgba(240,230,200,0.95)", borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 10,
-    borderWidth: 1.5, borderColor: "rgba(196,148,58,0.50)",
-    shadowColor: "#000", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.4, shadowRadius: 7, elevation: 14,
-    alignSelf: "flex-start" as const,
-  },
-  playerBubbleText:  { color: "#2A1000", fontSize: 13, fontFamily: "RobotoItalic", lineHeight: 20 },
-  playerBubbleArrow: {
-    width: 0, height: 0, borderStyle: "solid",
-    borderLeftWidth: 8, borderRightWidth: 8,
-    borderBottomWidth: 9, borderTopWidth: 0,
-    borderLeftColor: "transparent", borderRightColor: "transparent",
-    borderBottomColor: "rgba(240,230,200,0.95)",
-    alignSelf: "flex-start", marginLeft: 20,
   },
 
   // Modals

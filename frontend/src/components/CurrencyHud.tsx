@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, Image, StyleSheet, Text, View } from "react-native";
 import { usePathname } from "expo-router";
+import { useIsFocused } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAudioManager } from "@/src/audio/AudioProvider";
 
 import {
   DEFAULT_CURRENCY_COPPER,
@@ -21,7 +23,9 @@ function isGameplayRoute(pathname: string): boolean {
     pathname === "/garden" ||
     pathname === "/dormitory" ||
     pathname === "/dining" ||
-    pathname === "/dining-hall";
+    pathname === "/dining-hall" ||
+    pathname === "/mail" ||
+    pathname === "/outside-tavern";
 }
 
 /**
@@ -32,27 +36,49 @@ function isGameplayRoute(pathname: string): boolean {
  * room during Stack transitions instead of floating as a persistent global overlay.
  * Pointer events are disabled so it never interferes with gameplay/header controls.
  */
-export default function CurrencyHud() {
+type CurrencyHudProps = {
+  compact?: boolean;
+  inline?: boolean;
+};
+
+export default function CurrencyHud({ compact = false, inline = false }: CurrencyHudProps) {
   const pathname = usePathname();
+  const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
+  const { playSoundEffect } = useAudioManager();
   const [totalCopper, setTotalCopper] = useState(DEFAULT_CURRENCY_COPPER);
+  const lastCopperRef = useRef<number | null>(null);
+  const isFocusedRef = useRef(isFocused);
   const opacity = useRef(new Animated.Value(0)).current;
   const translateX = useRef(new Animated.Value(18)).current;
+
+  useEffect(() => {
+    isFocusedRef.current = isFocused;
+  }, [isFocused]);
 
   // Currency persistence/subscription is independent from navigation.
   useEffect(() => {
     let active = true;
     loadCurrencyCopper().then((value) => {
-      if (active) setTotalCopper(value);
+      if (active) {
+        lastCopperRef.current = value;
+        setTotalCopper(value);
+      }
     });
     const unsubscribe = subscribeCurrency((value) => {
-      if (active) setTotalCopper(value);
+      if (!active) return;
+      const previous = lastCopperRef.current;
+      lastCopperRef.current = value;
+      setTotalCopper(value);
+      if (previous !== null && previous !== value && isFocusedRef.current) {
+        playSoundEffect("money", { maxDurationMs: 4000 });
+      }
     });
     return () => {
       active = false;
       unsubscribe();
     };
-  }, []);
+  }, [playSoundEffect]);
 
   // Follow room navigation visually instead of staying pinned during Stack transitions.
   useEffect(() => {
@@ -90,38 +116,40 @@ export default function CurrencyHud() {
     <Animated.View
       pointerEvents="none"
       style={[
-        styles.root,
-        {
-          top: insets.top + 72,
-          opacity,
-          transform: [{ translateX }],
-        },
+        inline ? styles.inlineRoot : [styles.overlayRoot, { top: insets.top + 72 }],
+        { opacity, transform: [{ translateX }] },
       ]}
     >
       <View style={styles.denomination}>
-        <Image source={COIN_IMAGES.gold} style={styles.coin} resizeMode="contain" />
-        <Text style={styles.amount}>{balance.gold}</Text>
+        <Image source={COIN_IMAGES.gold} style={[styles.coin, compact && styles.coinCompact]} resizeMode="contain" />
+        <Text style={[styles.amount, compact && styles.amountCompact]}>{balance.gold}</Text>
       </View>
       <View style={styles.denomination}>
-        <Image source={COIN_IMAGES.silver} style={styles.coin} resizeMode="contain" />
-        <Text style={styles.amount}>{balance.silver}</Text>
+        <Image source={COIN_IMAGES.silver} style={[styles.coin, compact && styles.coinCompact]} resizeMode="contain" />
+        <Text style={[styles.amount, compact && styles.amountCompact]}>{balance.silver}</Text>
       </View>
       <View style={styles.denomination}>
-        <Image source={COIN_IMAGES.copper} style={styles.coin} resizeMode="contain" />
-        <Text style={styles.amount}>{balance.copper}</Text>
+        <Image source={COIN_IMAGES.copper} style={[styles.coin, compact && styles.coinCompact]} resizeMode="contain" />
+        <Text style={[styles.amount, compact && styles.amountCompact]}>{balance.copper}</Text>
       </View>
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
+  overlayRoot: {
     position: "absolute",
     right: 14,
     zIndex: 1000,
     flexDirection: "row",
     alignItems: "center",
     gap: 7,
+  },
+  inlineRoot: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 6,
   },
   denomination: {
     flexDirection: "row",
@@ -132,10 +160,17 @@ const styles = StyleSheet.create({
     width: 18,
     height: 18,
   },
+  coinCompact: {
+    width: 16,
+    height: 16,
+  },
   amount: {
     color: "#F0E8D5",
     fontSize: 11,
     fontFamily: "Oldenburg",
     fontWeight: "700",
+  },
+  amountCompact: {
+    fontSize: 10,
   },
 });

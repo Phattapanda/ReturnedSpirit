@@ -4,15 +4,23 @@ import {
   DEFAULT_BAG,
   PLAYER_BAG_KEY,
   planAddToBag,
+  getItemMealTags,
   type BagItem,
   type MealTag,
 } from "@/src/game/item-system";
 import { MEAL_TAG } from "@/src/game/item-system";
 import { addKarmaPoints } from "@/src/game/progression";
+import {
+  areExpandedGuestsUnlockedForDay,
+  areRegularGuestsUnlockedForDay,
+  loadPostGuestTutorialState,
+} from "@/src/game/post-guest-tutorial";
 
 export const GUEST_STATE_KEY = "@game:guest_state";
 
-export type GuestId = "old_farmer" | "coachman" | (string & {});
+export type GuestId = "old_farmer" | "coachman" | "merchant" | "traveler" | "city_guard" | "local_boozer" | (string & {});
+
+export type GuestExchangeMode = "daily_roll" | "meal_value" | "none";
 
 export type GuestFavorTier = {
   minFavor: number;
@@ -46,11 +54,16 @@ export type GuestProfile = {
   dislikedMealTags: readonly MealTag[];
   /** Default exchange pool. Favor tiers can replace it. */
   exchangePool: readonly GuestExchangeOffer[];
+  /** Meal-value exchanges are resolved only after the player selects a meal. */
+  exchangeMode?: GuestExchangeMode;
+  /** Non-relationship guests never earn favor rewards. */
+  usesFavor?: boolean;
 };
 
 export type GuestVisitTrade = {
   daySerial: number;
   offer: GuestExchangeOffer;
+  claimed: boolean;
 };
 
 export type PendingFavorGift = {
@@ -59,7 +72,7 @@ export type PendingFavorGift = {
 };
 
 export type GuestState = {
-  version: 2;
+  version: 3;
   /** Monotonic in-game day counter used to distinguish visits across week wraps. */
   calendarDaySerial: number;
   /** Current weekday in the game's existing MO=0 ... SU=6 format. */
@@ -71,6 +84,8 @@ export type GuestState = {
   rewardedFavorTiers: Record<string, number[]>;
   pendingFavorGifts: Record<string, PendingFavorGift[]>;
   giftDialogDaySerial: Record<string, number>;
+  /** The day on which each guest has already received food or water. */
+  servedDaySerial: Record<string, number>;
 };
 
 export type GuestVisitView = {
@@ -99,6 +114,19 @@ function exchangeOffer(itemId: string, name: string, quantity: number, weight: n
   return { itemId, name, quantity, weight };
 }
 
+const LEGACY_EXCHANGE_ITEM_IDS: Record<string, string> = {
+  carrotseed: "seed_carrot",
+  herbseed: "seed_herb",
+  onionseed: "seed_onion",
+  potatoseed: "seed_potato",
+  standardfertilizer: "standard_fertilizer",
+  premiumfertilizer: "premium_fertilizer",
+};
+
+export function normalizeGuestExchangeItemId(itemId: string): string {
+  return LEGACY_EXCHANGE_ITEM_IDS[itemId] ?? itemId;
+}
+
 const OLD_FARMER_VISIT_DAYS = [1, 2, 4, 5, 6] as const;
 const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6] as const;
 
@@ -113,8 +141,8 @@ export const OLD_FARMER_PROFILE: GuestProfile = {
       exchangePool: [
         exchangeOffer("potato", "Potato", 1, 25),
         exchangeOffer("carrot", "Carrot", 1, 25),
-        exchangeOffer("standardfertilizer", "Standard Fertilizer", 2, 25),
-        exchangeOffer("carrotseed", "Carrot Seed", 1, 25),
+        exchangeOffer("standard_fertilizer", "Standard Fertilizer", 2, 25),
+        exchangeOffer("seed_carrot", "Carrot Seed", 1, 25),
       ],
     },
     {
@@ -123,46 +151,46 @@ export const OLD_FARMER_PROFILE: GuestProfile = {
         exchangeOffer("potato", "Potato", 2, 12.5),
         exchangeOffer("carrot", "Carrot", 2, 12.5),
         exchangeOffer("onion", "Onion", 2, 12.5),
-        exchangeOffer("standardfertilizer", "Standard Fertilizer", 3, 25),
-        exchangeOffer("potatoseed", "Potato Seed", 1, 12.5),
-        exchangeOffer("carrotseed", "Carrot Seed", 1, 12.5),
-        exchangeOffer("onionseed", "Onion Seed", 1, 12.5),
+        exchangeOffer("standard_fertilizer", "Standard Fertilizer", 3, 25),
+        exchangeOffer("seed_potato", "Potato Seed", 1, 12.5),
+        exchangeOffer("seed_carrot", "Carrot Seed", 1, 12.5),
+        exchangeOffer("seed_onion", "Onion Seed", 1, 12.5),
       ],
     },
     {
       minFavor: 50, maxFavor: 74, visitDays: OLD_FARMER_VISIT_DAYS,
       exchangePool: [
-        exchangeOffer("premiumfertilizer", "Premium Fertilizer", 2, 25),
-        exchangeOffer("potatoseed", "Potato Seed", 1, 18.75),
-        exchangeOffer("carrotseed", "Carrot Seed", 1, 18.75),
-        exchangeOffer("onionseed", "Onion Seed", 1, 18.75),
+        exchangeOffer("premium_fertilizer", "Premium Fertilizer", 2, 25),
+        exchangeOffer("seed_potato", "Potato Seed", 1, 18.75),
+        exchangeOffer("seed_carrot", "Carrot Seed", 1, 18.75),
+        exchangeOffer("seed_onion", "Onion Seed", 1, 18.75),
         exchangeOffer("healthymuffin", "Healthy Muffin", 1, 18.75),
       ],
     },
     {
       minFavor: 75, maxFavor: 99, visitDays: EVERY_DAY,
       exchangePool: [
-        exchangeOffer("premiumfertilizer", "Premium Fertilizer", 3, 25),
-        exchangeOffer("potatoseed", "Potato Seed", 2, 18.75),
-        exchangeOffer("carrotseed", "Carrot Seed", 2, 18.75),
-        exchangeOffer("onionseed", "Onion Seed", 2, 18.75),
+        exchangeOffer("premium_fertilizer", "Premium Fertilizer", 3, 25),
+        exchangeOffer("seed_potato", "Potato Seed", 2, 18.75),
+        exchangeOffer("seed_carrot", "Carrot Seed", 2, 18.75),
+        exchangeOffer("seed_onion", "Onion Seed", 2, 18.75),
         exchangeOffer("healthymuffin", "Healthy Muffin", 1, 18.75),
       ],
     },
     {
       minFavor: 100, maxFavor: 100, visitDays: EVERY_DAY,
       exchangePool: [
-        exchangeOffer("premiumfertilizer", "Premium Fertilizer", 3, 25),
-        exchangeOffer("potatoseed", "Potato Seed", 2, 17.5),
-        exchangeOffer("carrotseed", "Carrot Seed", 2, 17.5),
-        exchangeOffer("onionseed", "Onion Seed", 2, 17.5),
+        exchangeOffer("premium_fertilizer", "Premium Fertilizer", 3, 25),
+        exchangeOffer("seed_potato", "Potato Seed", 2, 17.5),
+        exchangeOffer("seed_carrot", "Carrot Seed", 2, 17.5),
+        exchangeOffer("seed_onion", "Onion Seed", 2, 17.5),
         exchangeOffer("healthymuffin", "Healthy Muffin", 1, 17.5),
         exchangeOffer("goldenapple", "Golden Apple", 1, 5),
       ],
     },
   ],
   initialFavor: 0,
-  favoriteDishId: "carrotsoup",
+  favoriteDishId: "soup_carrot",
   leastFavoriteDishId: null,
   preferredMealTags: [],
   dislikedMealTags: [],
@@ -184,7 +212,7 @@ export const COACHMAN_PROFILE: GuestProfile = {
   ],
   initialFavor: 0,
   // Reserved canonical IDs; the actual recipes/items can be added later.
-  favoriteDishId: "beefstew", // Beef Stew
+  favoriteDishId: "stew_beef", // Beef Stew
   leastFavoriteDishId: "snowberrysherbet", // Snowberry Sherbet
   preferredMealTags: [MEAL_TAG.HEARTY, MEAL_TAG.WARM],
   dislikedMealTags: [MEAL_TAG.COLD],
@@ -192,10 +220,83 @@ export const COACHMAN_PROFILE: GuestProfile = {
   exchangePool: [],
 };
 
-export const GUEST_PROFILES: readonly GuestProfile[] = [OLD_FARMER_PROFILE, COACHMAN_PROFILE];
+export const MERCHANT_PROFILE: GuestProfile = {
+  id: "merchant",
+  name: "Merchant",
+  portraitKey: "merchant",
+  visitDays: EVERY_DAY,
+  initialFavor: 0,
+  favoriteDishId: null,
+  leastFavoriteDishId: null,
+  preferredMealTags: [],
+  dislikedMealTags: [],
+  exchangePool: [],
+  exchangeMode: "meal_value",
+  usesFavor: false,
+};
+
+export const TRAVELER_PROFILE: GuestProfile = {
+  id: "traveler",
+  name: "Traveler",
+  portraitKey: "traveler",
+  visitDays: EVERY_DAY,
+  initialFavor: 0,
+  favoriteDishId: null,
+  leastFavoriteDishId: null,
+  preferredMealTags: [],
+  dislikedMealTags: [],
+  exchangePool: [
+    exchangeOffer("seed_herb", "Herb Seed", 1, 80),
+    exchangeOffer("bucket", "Empty Bucket", 1, 20),
+  ],
+  exchangeMode: "daily_roll",
+  usesFavor: false,
+};
+
+export const CITY_GUARD_PROFILE: GuestProfile = {
+  id: "city_guard",
+  name: "City Guard",
+  portraitKey: "city_guard",
+  visitDays: EVERY_DAY,
+  initialFavor: 0,
+  favoriteDishId: null,
+  leastFavoriteDishId: null,
+  preferredMealTags: [],
+  dislikedMealTags: [],
+  exchangePool: [
+    exchangeOffer("cloth", "Cloth", 1, 30),
+    exchangeOffer("nails", "Nails", 1, 70),
+  ],
+  exchangeMode: "daily_roll",
+  usesFavor: false,
+};
+
+export const LOCAL_BOOZER_PROFILE: GuestProfile = {
+  id: "local_boozer",
+  name: "Local Boozer",
+  portraitKey: "local_boozer",
+  visitDays: EVERY_DAY,
+  initialFavor: 0,
+  favoriteDishId: null,
+  leastFavoriteDishId: null,
+  preferredMealTags: [MEAL_TAG.ALCOHOLIC],
+  dislikedMealTags: [],
+  exchangePool: [],
+};
+
+/** Scheduled guests are capped before the Traveler is added as the single filler guest. */
+export const CURRENT_MAX_DAILY_GUESTS = 3;
+export const GUEST_PROFILES: readonly GuestProfile[] = [
+  OLD_FARMER_PROFILE,
+  COACHMAN_PROFILE,
+  MERCHANT_PROFILE,
+  TRAVELER_PROFILE,
+  CITY_GUARD_PROFILE,
+  LOCAL_BOOZER_PROFILE,
+];
 
 export const DEFAULT_GUEST_STATE: GuestState = {
-  version: 2,
+  version: 3,
   calendarDaySerial: 0,
   calendarWeekday: 0,
   favors: {},
@@ -204,6 +305,7 @@ export const DEFAULT_GUEST_STATE: GuestState = {
   rewardedFavorTiers: {},
   pendingFavorGifts: {},
   giftDialogDaySerial: {},
+  servedDaySerial: {},
 };
 
 function normalizeWeekday(value: number): number {
@@ -238,8 +340,9 @@ function normalizeGuestState(raw: unknown): GuestState {
         if (typeof offer.itemId === "string" && Number(offer.quantity) > 0) {
           visitTrades[guestId] = {
             daySerial,
+            claimed: Boolean(t.claimed),
             offer: {
-              itemId: offer.itemId,
+              itemId: normalizeGuestExchangeItemId(offer.itemId),
               name: String(offer.name || offer.itemId),
               quantity: Math.max(1, Math.floor(Number(offer.quantity) || 1)),
               weight: Math.max(0, Number(offer.weight) || 0),
@@ -277,8 +380,15 @@ function normalizeGuestState(raw: unknown): GuestState {
     }
   }
 
+  const servedDaySerial: Record<string, number> = {};
+  if (candidate.servedDaySerial && typeof candidate.servedDaySerial === "object") {
+    for (const [guestId, daySerial] of Object.entries(candidate.servedDaySerial)) {
+      servedDaySerial[guestId] = Math.max(0, Math.floor(Number(daySerial) || 0));
+    }
+  }
+
   return {
-    version: 2,
+    version: 3,
     calendarDaySerial: Math.max(0, Math.floor(Number(candidate.calendarDaySerial) || 0)),
     calendarWeekday: normalizeWeekday(Number(candidate.calendarWeekday) || 0),
     favors,
@@ -287,6 +397,7 @@ function normalizeGuestState(raw: unknown): GuestState {
     rewardedFavorTiers,
     pendingFavorGifts,
     giftDialogDaySerial,
+    servedDaySerial,
   };
 }
 
@@ -324,6 +435,20 @@ export function getGuestTransportDiscountPercent(profile: GuestProfile, favor: n
 
 export function getGuestExchangePool(profile: GuestProfile, favor: number): readonly GuestExchangeOffer[] {
   return getGuestFavorTier(profile, favor)?.exchangePool ?? profile.exchangePool;
+}
+
+export function getMerchantExchangeOffer(mealValueCopper: number): GuestExchangeOffer | null {
+  const value = Math.max(0, Math.floor(mealValueCopper));
+  if (value >= 9 && value <= 15) return exchangeOffer("nails", "Nails", 1, 100);
+  if (value >= 16 && value <= 22) return exchangeOffer("cloth", "Cloth", 1, 100);
+  if (value >= 23 && value <= 29) return exchangeOffer("paint", "Paint", 1, 100);
+  if (value >= 30 && value <= 36) return exchangeOffer("potion_healing_low_grade", "Low Quality Healing Potion", 1, 100);
+  if (value >= 37 && value <= 44) return exchangeOffer("potion_stamina_low_grade", "Low Quality Stamina Potion", 1, 100);
+  if (value >= 45 && value <= 50) return exchangeOffer("ingot_iron", "Iron Ingot", 1, 100);
+  if (value >= 51 && value <= 57) return exchangeOffer("ingot_copper", "Copper Ingot", 1, 100);
+  if (value >= 58 && value <= 64) return exchangeOffer("shard_mana", "Mana Shard", 2, 100);
+  if (value >= 65 && value <= 71) return exchangeOffer("stone_mana", "Mana Stone", 1, 100);
+  return null;
 }
 
 export function isGuestScheduled(
@@ -400,9 +525,33 @@ function normalizePlayerBag(raw: string | null) {
  */
 export async function prepareGuestsForDay(dayIndex: number): Promise<GuestVisitView[]> {
   let state = await syncGuestCalendar(dayIndex);
+  const postGuestState = await loadPostGuestTutorialState();
+  const regularGuestsUnlocked = areRegularGuestsUnlockedForDay(postGuestState, state.calendarDaySerial);
+  const expandedGuestsUnlocked = areExpandedGuestsUnlockedForDay(postGuestState, state.calendarDaySerial);
+  const maximumGuests = expandedGuestsUnlocked ? CURRENT_MAX_DAILY_GUESTS + 1 : CURRENT_MAX_DAILY_GUESTS;
 
   const favorFor = (profile: GuestProfile) => clampFavor(state.favors[profile.id] ?? profile.initialFavor);
-  const scheduled = GUEST_PROFILES.filter((profile) => isGuestScheduled(profile, dayIndex, favorFor(profile)));
+  const available = (profile: GuestProfile) => state.servedDaySerial[profile.id] !== state.calendarDaySerial;
+  const scheduled: GuestProfile[] = [OLD_FARMER_PROFILE].filter((profile) => (
+    isGuestScheduled(profile, dayIndex, favorFor(profile)) && available(profile)
+  ));
+  if (regularGuestsUnlocked) {
+    if (isGuestScheduled(COACHMAN_PROFILE, dayIndex, favorFor(COACHMAN_PROFILE)) && available(COACHMAN_PROFILE)) {
+      scheduled.push(COACHMAN_PROFILE);
+    }
+    // Day serial 0 is game day 1; the Merchant visits on game days 4, 8, 12, ...
+    if ((state.calendarDaySerial + 1) % 4 === 0 && available(MERCHANT_PROFILE)) {
+      scheduled.push(MERCHANT_PROFILE);
+    }
+    if (scheduled.length < maximumGuests && available(TRAVELER_PROFILE)) {
+      scheduled.push(TRAVELER_PROFILE);
+    }
+    const rotatingGuest = state.calendarDaySerial % 2 === 0 ? CITY_GUARD_PROFILE : LOCAL_BOOZER_PROFILE;
+    if (expandedGuestsUnlocked && scheduled.length < maximumGuests && available(rotatingGuest)) {
+      scheduled.push(rotatingGuest);
+    }
+  }
+  scheduled.splice(maximumGuests);
   let changed = false;
 
   const scheduledIds = new Set(scheduled.map((profile) => profile.id));
@@ -422,7 +571,7 @@ export async function prepareGuestsForDay(dayIndex: number): Promise<GuestVisitV
   let bagChanged = false;
 
   for (const profile of scheduled) {
-    if (nextFavors[profile.id] === undefined) {
+    if (profile.usesFavor !== false && nextFavors[profile.id] === undefined) {
       nextFavors[profile.id] = clampFavor(profile.initialFavor);
       changed = true;
     }
@@ -442,13 +591,14 @@ export async function prepareGuestsForDay(dayIndex: number): Promise<GuestVisitV
           nextTrades[profile.id] = {
             daySerial: state.calendarDaySerial,
             offer,
+            claimed: false,
           };
           changed = true;
         }
       }
     }
 
-    const pending = nextPendingGifts[profile.id] ?? [];
+    const pending = profile.usesFavor === false ? [] : (nextPendingGifts[profile.id] ?? []);
     if (pending.length > 0 && nextGiftDialogDays[profile.id] !== state.calendarDaySerial) {
       const gift = pending[0];
       const plan = playerBag.unlocked ? planAddToBag(gift.item, playerBag) : null;
@@ -489,7 +639,9 @@ export async function prepareGuestsForDay(dayIndex: number): Promise<GuestVisitV
       profile,
       favor,
       exchangeOffer: getGuestExchangePool(profile, favor).length > 0
-        ? state.visitTrades[profile.id]?.offer ?? null
+        ? state.visitTrades[profile.id]?.claimed
+          ? null
+          : state.visitTrades[profile.id]?.offer ?? null
         : null,
       transportDiscountPercent: getGuestTransportDiscountPercent(profile, favor),
       selected: state.activeGuestId === profile.id,
@@ -501,6 +653,47 @@ export async function prepareGuestsForDay(dayIndex: number): Promise<GuestVisitV
 export async function setActiveGuest(guestId: GuestId | null): Promise<GuestState> {
   const state = await loadGuestState();
   return saveGuestState({ ...state, activeGuestId: guestId });
+}
+
+/** Persist a value-based offer so the normal atomic exchange path can validate it. */
+export async function setCurrentGuestExchangeOffer(
+  guestId: GuestId,
+  offer: GuestExchangeOffer,
+): Promise<GuestState> {
+  const state = await loadGuestState();
+  return saveGuestState({
+    ...state,
+    visitTrades: {
+      ...state.visitTrades,
+      [guestId]: { daySerial: state.calendarDaySerial, offer, claimed: false },
+    },
+  });
+}
+
+export async function markGuestServed(guestId: GuestId): Promise<GuestState> {
+  const state = await loadGuestState();
+  return saveGuestState({
+    ...state,
+    activeGuestId: state.activeGuestId === guestId ? null : state.activeGuestId,
+    servedDaySerial: { ...state.servedDaySerial, [guestId]: state.calendarDaySerial },
+  });
+}
+
+export type GuestMealReaction = "favorite" | "favored" | "neutral" | "disliked" | "least_favorite";
+
+export function evaluateGuestMealFavor(
+  profile: GuestProfile,
+  item: BagItem,
+): { favorDelta: number; reaction: GuestMealReaction } {
+  if (item.id === profile.favoriteDishId) return { favorDelta: 3, reaction: "favorite" };
+  if (item.id === profile.leastFavoriteDishId) return { favorDelta: -2, reaction: "least_favorite" };
+  const tags = new Set(getItemMealTags(item));
+  const hasFavored = profile.preferredMealTags.some((tag) => tags.has(tag));
+  const hasDisliked = profile.dislikedMealTags.some((tag) => tags.has(tag));
+  if (hasFavored && hasDisliked) return { favorDelta: 0, reaction: "neutral" };
+  if (hasFavored) return { favorDelta: 1, reaction: "favored" };
+  if (hasDisliked) return { favorDelta: -1, reaction: "disliked" };
+  return { favorDelta: 0, reaction: "neutral" };
 }
 
 const FAVOR_REWARD_THRESHOLDS = [25, 50, 75, 100] as const;

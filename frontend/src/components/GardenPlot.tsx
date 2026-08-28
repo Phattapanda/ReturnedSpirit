@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
   TouchableOpacity,
   Image,
   StyleSheet,
+  type ImageSourcePropType,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Animated, {
@@ -19,19 +20,24 @@ import {
 } from "@/src/game/item-system";
 import { commitHarvestBag } from "@/src/game/garden-harvest";
 import { addKarmaPoints } from "@/src/game/progression";
+import { recordTitheHarvest } from "@/src/game/tithe-system";
 import {
   createGardenPlotFromSeed,
+  createEmptyGardenPlot,
   createHarvestBagForCrop,
+  gardenPlotStorageKey,
   getCropYieldLabel,
-  loadSecondGardenPlot,
-  saveSecondGardenPlot,
-  SECOND_GARDEN_PLOT_EMPTY,
+  type GardenPlotNumber,
 } from "@/src/game/garden-crop-system";
 import {
   guestTutorialRupertHasLeftGarden,
   loadGuestTutorialIntroStep,
 } from "@/src/game/guest-tutorial";
 import { useGardenRuntime } from "@/src/game/garden-runtime-context";
+import {
+  getGardenFertilizerConfig,
+  normalizeGardenFertilizerId,
+} from "@/src/game/garden-fertilizer-system";
 import SeedSelectionModal, {
   type SeedSelectionOption,
 } from "@/src/components/seed-selection-modal";
@@ -44,6 +50,8 @@ export type GardenPlotData = {
   id: string;
   plotType: "small" | "medium" | "large";
   upgradeLevel: number;
+  /** Rupert's fertilizer upgrade tier: 0 = 5, 1 = 7, 2 = 10 minimum yield. */
+  yieldUpgradeLevel?: number;
   status: GardenPlotStatus;
   cropType: string | null;
   cropAsset: string | null;
@@ -74,8 +82,10 @@ export type GardenPlotProps = {
   onCropTap: () => void;
   onSpendStamina: (baseCost: number) => Promise<boolean>;
   onHarvestStored?: (item: BagItem) => void;
+  onActionSuccess?: () => void;
   onLockedAction?: () => void;
   actionCosts?: { water: number; pullWeeds: number; fertilize: number };
+  selectedFertilizerId?: string;
 };
 
 type GardenInventoryItem = {
@@ -92,20 +102,27 @@ const SELECTED_FERTILIZER_KEY = "@garden:selected_fertilizer";
 
 // ─── Asset map ────────────────────────────────────────────────────────────────
 
-const CROP_ASSETS: Record<string, ReturnType<typeof require>> = {
-  herbbed:       require("../../assets/images/herbbed.png"),
-  herbbed_young: require("../../assets/images/herbbed_young.png"),
-  seed_herb:     require("../../assets/images/herbseed.png"),
+const CROP_ASSETS: Record<string, ImageSourcePropType> = {
+  bed_herb:       require("../../assets/images/bed_herb.png"),
+  bed_herb_young: require("../../assets/images/bed_herb_young.png"),
+  seed_herb:     require("../../assets/images/seed_herb.png"),
   herbs:         require("../../assets/images/herbs.png"),
-  seed_carrot:   require("../../assets/images/carrotseed.png"),
-  carrotyoung:   require("../../assets/images/carrotyoung.png"),
-  carrotbed:     require("../../assets/images/carrotbed.png"),
+  seed_carrot:   require("../../assets/images/seed_carrot.png"),
+  bed_carrot_young: require("../../assets/images/bed_carrot_young.png"),
+  bed_carrot:       require("../../assets/images/bed_carrot.png"),
+  seed_onion:       require("../../assets/images/seed_onion.png"),
+  bed_onion_young:  require("../../assets/images/bed_onion_young.png"),
+  bed_onion:        require("../../assets/images/bed_onion.png"),
+  seed_potato:      require("../../assets/images/seed_potato.png"),
+  bed_potato_young: require("../../assets/images/bed_potato_young.png"),
+  bed_potato:       require("../../assets/images/bed_potato.png"),
 };
 
 const ACTION_IMG = {
   watering:   require("../../assets/images/watering.png"),
   pullweeds:  require("../../assets/images/pullweeds.png"),
-  fertilizer: require("../../assets/images/fertilizer.png"),
+  standard_fertilizer: require("../../assets/images/fertilizer.png"),
+  premium_fertilizer: require("../../assets/premiumfertilizer.png"),
   harvest:    require("../../assets/images/harvest.png"),
 };
 
@@ -120,25 +137,35 @@ type CropStageConfig = {
 const CROP_STAGE_CONFIGS: Record<string, CropStageConfig> = {
   herb: {
     seedStageAsset: "seed_herb",
-    growingStageAsset: "herbbed_young",
-    readyStageAsset: "herbbed",
+    growingStageAsset: "bed_herb_young",
+    readyStageAsset: "bed_herb",
   },
   carrot: {
     seedStageAsset: "seed_carrot",
-    growingStageAsset: "carrotyoung",
-    readyStageAsset: "carrotbed",
+    growingStageAsset: "bed_carrot_young",
+    readyStageAsset: "bed_carrot",
+  },
+  potato: {
+    seedStageAsset: "seed_potato",
+    growingStageAsset: "bed_potato_young",
+    readyStageAsset: "bed_potato",
+  },
+  onion: {
+    seedStageAsset: "seed_onion",
+    growingStageAsset: "bed_onion_young",
+    readyStageAsset: "bed_onion",
   },
 };
 
 /**
- * Carrot visual calendar:
- * Day 1 = seed_carrot, Day 2–3 = carrotyoung, Day 4 = carrotbed.
+ * Visual calendar: seed on the planting day, young crop while growing, and the
+ * mature bed as soon as its crop-specific growth duration is complete.
  */
 export function getCropStageAsset(
   cropType: string | null,
   progressPercent: number,
   status: GardenPlotStatus,
-): ReturnType<typeof require> | null {
+): ImageSourcePropType | null {
   if (!cropType || status === "empty") return null;
   const cfg = CROP_STAGE_CONFIGS[cropType];
   if (!cfg) return null;
@@ -161,13 +188,21 @@ export default function GardenPlot(props: GardenPlotProps) {
     onCropTap,
     onSpendStamina,
     onHarvestStored,
+    onActionSuccess,
     onLockedAction,
     actionCosts = { water: 2, pullWeeds: 8, fertilize: 3 },
+    selectedFertilizerId = "standard_fertilizer",
   } = props;
 
   const { refreshGarden, showPlayerThought } = useGardenRuntime();
-  const isSecondPlot = data.id === "garden_plot_02";
-  const [secondData, setSecondData] = useState<GardenPlotData>(SECOND_GARDEN_PLOT_EMPTY);
+  const parsedPlotNumber = Number.parseInt(data.id.slice(-2), 10);
+  const auxiliaryPlotNumber = Math.max(2, Math.min(4, parsedPlotNumber || 2)) as GardenPlotNumber;
+  const isAuxiliaryPlot = data.id !== "garden_plot_01";
+  const emptyAuxiliaryPlot = useMemo(() => ({
+    ...createEmptyGardenPlot(auxiliaryPlotNumber),
+    yieldUpgradeLevel: data.yieldUpgradeLevel ?? 0,
+  }), [auxiliaryPlotNumber, data.yieldUpgradeLevel]);
+  const [secondData, setSecondData] = useState<GardenPlotData>(emptyAuxiliaryPlot);
   const [protectSeeds, setProtectSeeds] = useState(false);
   const [plantConfirmVisible, setPlantConfirmVisible] = useState(false);
   const [availableSeeds, setAvailableSeeds] = useState<SeedSelectionOption[]>([]);
@@ -179,16 +214,16 @@ export default function GardenPlot(props: GardenPlotProps) {
     (async () => {
       const step = await loadGuestTutorialIntroStep();
       if (active) setProtectSeeds(guestTutorialRupertHasLeftGarden(step));
-      if (isSecondPlot) {
-        const loaded = await loadSecondGardenPlot();
-        if (active) setSecondData(loaded);
+      if (isAuxiliaryPlot) {
+        const raw = await AsyncStorage.getItem(gardenPlotStorageKey(auxiliaryPlotNumber));
+        if (active) setSecondData(raw ? { ...emptyAuxiliaryPlot, ...JSON.parse(raw) } : emptyAuxiliaryPlot);
       }
     })().catch(() => {});
     return () => { active = false; };
-  }, [isSecondPlot]);
+  }, [auxiliaryPlotNumber, emptyAuxiliaryPlot, isAuxiliaryPlot]);
 
-  const effectiveData = isSecondPlot ? secondData : data;
-  const effectiveInteractive = isSecondPlot ? true : interactive;
+  const effectiveData = isAuxiliaryPlot ? secondData : data;
+  const effectiveInteractive = isAuxiliaryPlot ? true : interactive;
 
   const progColor = useSharedValue(effectiveData.wateredToday ? 1 : 0);
   useEffect(() => {
@@ -202,7 +237,7 @@ export default function GardenPlot(props: GardenPlotProps) {
 
   async function persistSecond(next: GardenPlotData) {
     setSecondData(next);
-    await saveSecondGardenPlot(next);
+    await AsyncStorage.setItem(gardenPlotStorageKey(auxiliaryPlotNumber), JSON.stringify(next));
   }
 
   async function handleSecondPlant() {
@@ -218,7 +253,7 @@ export default function GardenPlot(props: GardenPlotProps) {
         showPlayerThought('"That seed is no longer available."');
         return;
       }
-      const nextPlot = createGardenPlotFromSeed(SECOND_GARDEN_PLOT_EMPTY, selectedSeedId);
+      const nextPlot = createGardenPlotFromSeed(secondData, selectedSeedId);
       if (!nextPlot) {
         showPlayerThought('"I can\'t plant this seed yet."');
         return;
@@ -230,11 +265,12 @@ export default function GardenPlot(props: GardenPlotProps) {
       };
       await AsyncStorage.multiSet([
         [GARDEN_INVENTORY_KEY, JSON.stringify(nextInventory)],
-        ["@garden:plot_02_data", JSON.stringify(nextPlot)],
+        [gardenPlotStorageKey(auxiliaryPlotNumber), JSON.stringify(nextPlot)],
       ]);
       setSecondData(nextPlot);
       setPlantConfirmVisible(false);
       setSelectedSeedId(null);
+      onActionSuccess?.();
       refreshGarden();
     } catch {
       showPlayerThought('"I can\'t plant this right now."');
@@ -252,6 +288,7 @@ export default function GardenPlot(props: GardenPlotProps) {
     try {
       if (!(await onSpendStamina(2))) { showPlayerThought('"Not enough stamina."'); return; }
       await persistSecond({ ...secondData, wateredToday: true });
+      onActionSuccess?.();
       refreshGarden();
     } finally {
       setSecondBusy(false);
@@ -266,7 +303,8 @@ export default function GardenPlot(props: GardenPlotProps) {
       setSecondBusy(true);
       try {
         if (!(await onSpendStamina(5))) { showPlayerThought('"Not enough stamina."'); return; }
-        await persistSecond({ ...SECOND_GARDEN_PLOT_EMPTY });
+        await persistSecond({ ...emptyAuxiliaryPlot, yieldUpgradeLevel: secondData.yieldUpgradeLevel ?? 0 });
+        onActionSuccess?.();
         refreshGarden();
       } finally {
         setSecondBusy(false);
@@ -282,6 +320,7 @@ export default function GardenPlot(props: GardenPlotProps) {
         weedsPulledToday: true,
         accumulatedWeedYieldBonus: secondData.accumulatedWeedYieldBonus + 1,
       });
+      onActionSuccess?.();
       refreshGarden();
     } finally {
       setSecondBusy(false);
@@ -297,12 +336,15 @@ export default function GardenPlot(props: GardenPlotProps) {
 
     setSecondBusy(true);
     try {
-      const selected = (await AsyncStorage.getItem(SELECTED_FERTILIZER_KEY)) ?? "standard_fertilizer";
+      const storedSelection = (await AsyncStorage.getItem(SELECTED_FERTILIZER_KEY)) ?? selectedFertilizerId;
+      const selected = normalizeGardenFertilizerId(storedSelection) ?? "standard_fertilizer";
+      const fertilizerConfig = getGardenFertilizerConfig(selected);
+      if (!fertilizerConfig) { showPlayerThought('"No fertilizer available."'); return; }
       const rawInventory = await AsyncStorage.getItem(GARDEN_INVENTORY_KEY);
       const inventory: GardenInventoryItem[] = rawInventory ? JSON.parse(rawInventory) : [];
       const fertIndex = inventory.findIndex((item) => item.id === selected && item.itemType === "fertilizer" && item.quantity > 0);
       if (fertIndex < 0) { showPlayerThought('"No fertilizer available."'); return; }
-      if (!(await onSpendStamina(3))) { showPlayerThought('"Not enough stamina."'); return; }
+      if (!(await onSpendStamina(fertilizerConfig.staminaCost))) { showPlayerThought('"Not enough stamina."'); return; }
 
       const nextInventory = inventory.map((item) => ({ ...item }));
       nextInventory[fertIndex] = {
@@ -313,13 +355,15 @@ export default function GardenPlot(props: GardenPlotProps) {
         ...secondData,
         fertilizedToday: true,
         fertilizerTypeUsedToday: selected,
-        accumulatedFertilizerYieldBonus: secondData.accumulatedFertilizerYieldBonus + 1,
+        accumulatedFertilizerYieldBonus:
+          secondData.accumulatedFertilizerYieldBonus + fertilizerConfig.yieldBonus,
       };
       await AsyncStorage.multiSet([
         [GARDEN_INVENTORY_KEY, JSON.stringify(nextInventory)],
-        ["@garden:plot_02_data", JSON.stringify(nextPlot)],
+        [gardenPlotStorageKey(auxiliaryPlotNumber), JSON.stringify(nextPlot)],
       ]);
       setSecondData(nextPlot);
+      onActionSuccess?.();
       refreshGarden();
     } finally {
       setSecondBusy(false);
@@ -338,7 +382,7 @@ export default function GardenPlot(props: GardenPlotProps) {
         return;
       }
       const result = await commitHarvestBag(harvestBag, [
-        ["@garden:plot_02_data", JSON.stringify(SECOND_GARDEN_PLOT_EMPTY)],
+        [gardenPlotStorageKey(auxiliaryPlotNumber), JSON.stringify({ ...emptyAuxiliaryPlot, yieldUpgradeLevel: secondData.yieldUpgradeLevel ?? 0 })],
       ]);
       if (!result.ok) {
         showPlayerThought(result.reason === "bag_locked"
@@ -348,8 +392,10 @@ export default function GardenPlot(props: GardenPlotProps) {
       }
 
       await addKarmaPoints(1);
+      await recordTitheHarvest();
 
-      setSecondData({ ...SECOND_GARDEN_PLOT_EMPTY });
+      setSecondData({ ...emptyAuxiliaryPlot, yieldUpgradeLevel: secondData.yieldUpgradeLevel ?? 0 });
+      onActionSuccess?.();
       onHarvestStored?.(harvestBag);
       refreshGarden();
     } finally {
@@ -363,7 +409,7 @@ export default function GardenPlot(props: GardenPlotProps) {
       showPlayerThought('"I shouldn\'t waste any seeds."');
       return;
     }
-    if (isSecondPlot) {
+    if (isAuxiliaryPlot) {
       if (isEmpty) {
         const rawInventory = await AsyncStorage.getItem(GARDEN_INVENTORY_KEY);
         const inventory: GardenInventoryItem[] = rawInventory ? JSON.parse(rawInventory) : [];
@@ -415,13 +461,16 @@ export default function GardenPlot(props: GardenPlotProps) {
   const harvestDisabled = !effectiveInteractive;
   const harvestNotReady = !effectiveData.readyToHarvest;
 
-  const effectiveWater = isSecondPlot ? handleSecondWater : onWater;
-  const effectiveWeeds = isSecondPlot ? handleSecondWeeds : onPullWeeds;
-  const effectiveFertilize = isSecondPlot ? handleSecondFertilize : onFertilize;
-  const effectiveHarvest = isSecondPlot ? handleSecondHarvest : onHarvest;
-  const lockedAction = isSecondPlot
+  const effectiveWater = isAuxiliaryPlot ? handleSecondWater : onWater;
+  const effectiveWeeds = isAuxiliaryPlot ? handleSecondWeeds : onPullWeeds;
+  const effectiveFertilize = isAuxiliaryPlot ? handleSecondFertilize : onFertilize;
+  const effectiveHarvest = isAuxiliaryPlot ? handleSecondHarvest : onHarvest;
+  const lockedAction = isAuxiliaryPlot
     ? () => showPlayerThought('"That won\'t achieve anything."')
     : (onLockedAction ?? onWater);
+  const fertilizerImage = normalizeGardenFertilizerId(selectedFertilizerId) === "premium_fertilizer"
+    ? ACTION_IMG.premium_fertilizer
+    : ACTION_IMG.standard_fertilizer;
 
   return (
     <>
@@ -472,7 +521,7 @@ export default function GardenPlot(props: GardenPlotProps) {
         <View style={styles.actionsRow}>
           <ActionBtn img={ACTION_IMG.watering} label="Water" cost={isEmpty ? "" : `-${actionCosts.water}`} done={effectiveData.wateredToday} disabled={waterDisabled} locked={!waterDisabled && waterLocked} onPress={waterLocked ? lockedAction : effectiveWater} />
           <ActionBtn img={ACTION_IMG.pullweeds} label="Weeds" cost={isEmpty ? "" : `-${actionCosts.pullWeeds}`} done={effectiveData.weedsPulledToday && !effectiveData.withered} disabled={weedsDisabled} locked={!weedsDisabled && weedsLocked} onPress={weedsLocked ? lockedAction : effectiveWeeds} />
-          <ActionBtn img={ACTION_IMG.fertilizer} label="Fertilize" cost={isEmpty ? "" : `-${actionCosts.fertilize}`} done={effectiveData.fertilizedToday} disabled={fertilizeDisabled} locked={!fertilizeDisabled && fertilizeLocked} onPress={fertilizeLocked ? lockedAction : effectiveFertilize} />
+          <ActionBtn img={fertilizerImage} label="Fertilize" cost={isEmpty ? "" : `-${actionCosts.fertilize}`} done={effectiveData.fertilizedToday} disabled={fertilizeDisabled} locked={!fertilizeDisabled && fertilizeLocked} onPress={fertilizeLocked ? lockedAction : effectiveFertilize} />
           <ActionBtn img={ACTION_IMG.harvest} label="Harvest" cost="" done={false} disabled={harvestDisabled} locked={harvestNotReady && effectiveInteractive} onPress={effectiveHarvest} isHarvest />
         </View>
       </View>
@@ -494,7 +543,7 @@ export default function GardenPlot(props: GardenPlotProps) {
 }
 
 type ActionBtnProps = {
-  img: ReturnType<typeof require>;
+  img: ImageSourcePropType;
   label: string;
   cost: string;
   done: boolean;

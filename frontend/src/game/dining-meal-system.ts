@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import {
   isEdible,
+  normalizeBagItem,
   removeBagItem,
   type BagItem,
   type PlayerBagData,
@@ -59,7 +60,8 @@ function normalizeMealState(raw: unknown): DiningMealState {
     if (!slot || typeof slot !== "object") return null;
     const item = slot as BagItem;
     if (!item.id || !item.name || !Number.isFinite(Number(item.quantity))) return null;
-    return { ...cloneItem(item), quantity: 1 };
+    const normalized = normalizeBagItem(item);
+    return normalized ? { ...cloneItem(normalized), quantity: 1 } : null;
   });
 
   const hasActiveCandidate = candidate.activeSlotIndex !== null && candidate.activeSlotIndex !== undefined;

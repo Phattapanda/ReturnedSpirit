@@ -24,6 +24,11 @@ function emitCurrency(totalCopper: number) {
   for (const listener of currencyListeners) listener(totalCopper);
 }
 
+/** Notify mounted HUDs after another system persisted a currency change atomically. */
+export function notifyCurrencyChanged(totalCopper: number): void {
+  emitCurrency(normalizeCopper(totalCopper));
+}
+
 /** Subscribe to in-session currency changes made through this module. */
 export function subscribeCurrency(listener: CurrencyListener): () => void {
   currencyListeners.add(listener);

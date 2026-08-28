@@ -8,9 +8,10 @@ import {
   StyleSheet,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import StatusEffectsModal from "@/src/components/status-effects-modal";
+import { useAudioManager } from "@/src/audio/AudioProvider";
+import { useHaptics } from "@/src/feedback/haptics-provider";
 import {
-  UPGRADABLE_FIELDS,
-  STAT_LABELS,
   STAT_DESCRIPTIONS,
   UPGRADE_GP_COST,
   applyStatUpgrade,
@@ -36,7 +37,10 @@ export default function StatusModal({
   onStatsUpdated,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const audioManager = useAudioManager();
+  const { triggerHaptic } = useHaptics();
   const [showInfo, setShowInfo] = useState(false);
+  const [showEffects, setShowEffects] = useState(false);
   const upgradeLocked = React.useRef(false);
 
   function handleUpgrade(field: UpgradableField) {
@@ -45,6 +49,8 @@ export default function StatusModal({
     upgradeLocked.current = true;
     const { stats: updated, newCurrentLife } = applyStatUpgrade(stats, field, currentLife);
     onStatsUpdated(updated, newCurrentLife);
+    triggerHaptic("level-up");
+    audioManager.playSoundEffect("level-up", { maxDurationMs: 6000 });
     setTimeout(() => { upgradeLocked.current = false; }, 300);
   }
 
@@ -94,17 +100,15 @@ export default function StatusModal({
             <Text style={styles.gpValue}>{stats.growthPoints}</Text>
           </View>
 
-          {(stats.activeStaminaBuffs.energyDrinkDays > 0 || stats.activeStaminaBuffs.energyPillDays > 0) && (
-            <View style={styles.effectsBox}>
-              <Text style={styles.effectsTitle}>Active Effects</Text>
-              {stats.activeStaminaBuffs.energyDrinkDays > 0 && (
-                <Text style={styles.effectText}>Energy Drink · {stats.activeStaminaBuffs.energyDrinkDays} days</Text>
-              )}
-              {stats.activeStaminaBuffs.energyPillDays > 0 && (
-                <Text style={styles.effectText}>Energy Pill · {stats.activeStaminaBuffs.energyPillDays} days</Text>
-              )}
+          <TouchableOpacity style={styles.effectsBox} onPress={() => setShowEffects(true)} activeOpacity={0.78}>
+            <View>
+              <Text style={styles.effectsTitle}>Buffs & Debuffs</Text>
+              <Text style={styles.effectText}>Temporary effects and run traits</Text>
             </View>
-          )}
+            <Text style={styles.effectsCount}>
+              {stats.statusEffects.temporary.length + stats.statusEffects.traits.length} ›
+            </Text>
+          </TouchableOpacity>
 
           {/* Stats */}
           <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
@@ -151,6 +155,11 @@ export default function StatusModal({
             </View>
           </Modal>
         )}
+        <StatusEffectsModal
+          visible={showEffects}
+          effects={stats.statusEffects}
+          onClose={() => setShowEffects(false)}
+        />
       </View>
     </Modal>
   );
@@ -207,9 +216,10 @@ const styles = StyleSheet.create({
   levelLabel: { color: "#F0E8D5", fontSize: 14, fontFamily: "Oldenburg", marginBottom: 4 },
   gpLabel: { color: "#C4943A", fontSize: 13, fontFamily: "Oldenburg" },
   gpValue: { color: "#F0E8D5", fontSize: 16, fontFamily: "Oldenburg" },
-  effectsBox: { backgroundColor: "rgba(87,130,68,0.12)", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10, gap: 3 },
+  effectsBox: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: "rgba(87,130,68,0.12)", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 10, gap: 3 },
   effectsTitle: { color: "#9EC781", fontSize: 11, fontFamily: "Oldenburg" },
   effectText: { color: "rgba(240,232,213,0.75)", fontSize: 10, fontFamily: "Oldenburg" },
+  effectsCount: { color: "#C4943A", fontSize: 13, fontFamily: "Oldenburg" },
 
   scroll: { maxHeight: 320 },
   statRow: {
