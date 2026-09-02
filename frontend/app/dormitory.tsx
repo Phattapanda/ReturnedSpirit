@@ -42,7 +42,7 @@ import {
 import SceneBackground from "@/src/components/SceneBackground";
 import CurrencyHud from "@/src/components/CurrencyHud";
 import StatusModal from "@/src/components/StatusModal";
-import PortraitBubble from "@/src/components/portrait-bubble";
+import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
 import TavernLocationTransition from "@/src/components/tavern-location-transition";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
@@ -869,7 +869,7 @@ export default function DormitoryScreen() {
   function renderPlayerBubble() {
     if (!playerBubble) return null;
     const L = playerPortraitLayout.current;
-    const topPos = L ? L.y + L.h - 16 : (headerH > 0 ? headerH + 112 : insets.top + 184);
+    const topPos = portraitBubbleTop(L ? L.y + L.h : (headerH > 0 ? headerH + 108 : insets.top + 180));
     const anchorX = L ? L.x + L.w / 2 : W * 0.32;
     const isEveningIntroState = roomState === "ROOM_EVENING_INTRO";
     return (

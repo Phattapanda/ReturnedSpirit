@@ -42,7 +42,7 @@ import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import { loadLogbook, type LogEntry, LOGBOOK_KEY } from "@/src/game/logbook";
 import ActivityBar from "@/src/components/ActivityBar";
 import StatusModal from "@/src/components/StatusModal";
-import PortraitBubble from "@/src/components/portrait-bubble";
+import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
 import {
   LocationStatusBadge,
   useLocationStatusBadges,
@@ -1996,7 +1996,7 @@ setExploreUnlocked(exploreAvailable);
     if (!bubble) return null;
     const rupertL = portraitLayouts.current.rupert;
     const bubbleTopPos = rupertL
-      ? rupertL.y + rupertL.h + 12
+      ? portraitBubbleTop(rupertL.y + rupertL.h, "speech")
       : (headerH > 0 ? headerH + 140 : insets.top + 202);
     const arrowCenterX = rupertL ? rupertL.x + rupertL.w / 2 : W / 2;
 
@@ -2021,7 +2021,7 @@ setExploreUnlocked(exploreAvailable);
     if (!playerBubble) return null;
     const playerL = portraitLayouts.current.player;
     const topPos = playerL
-      ? playerL.y + playerL.h + 12
+      ? portraitBubbleTop(playerL.y + playerL.h)
       : (headerH > 0 ? headerH + 140 : insets.top + 202);
     const anchorX = playerL ? playerL.x + playerL.w / 2 : W * 0.18;
     return (

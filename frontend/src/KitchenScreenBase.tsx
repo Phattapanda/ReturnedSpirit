@@ -35,8 +35,10 @@ import { useAudioManager } from "@/src/audio/AudioProvider";
 import { useHaptics } from "@/src/feedback/haptics-provider";
 import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import StatusModal from "@/src/components/StatusModal";
-import PortraitBubble from "@/src/components/portrait-bubble";
+import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
 import StoryDialogOverlay, { type StoryDialogChoice, type StoryDialogLine } from "@/src/components/story-dialog-overlay";
+import CharacterDialogFrame from "@/src/components/character-dialog-frame";
+import { DIALOG_CHARACTER_ASSETS, RUPERT_DIALOG_SCALE, getDialogExpressionForStamina, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
 import {
   LocationStatusBadge,
   useLocationStatusBadges,
@@ -647,10 +649,10 @@ export default function KitchenScreen() {
   function coachmanOfferLines(): StoryDialogLine[] {
     const playerName = playerNameRef.current;
     return [
-      { speaker: "Coachman", portrait: IMG.coachman, text: `Good morning, ${playerName}. You’re probably wondering why I’m here.` },
-      { speaker: "Coachman", portrait: IMG.coachman, text: "Well, you might have heard the rumors about monsters nearby." },
-      { speaker: "Coachman", portrait: IMG.coachman, text: "You look strong—would you mind escorting me to town? Just for safety’s sake." },
-      { speaker: "Coachman", portrait: IMG.coachman, text: "I’ll give you an Iron Shortsword and Leather Armor if you agree. A small price for my life." },
+      { speaker: "Coachman", portrait: DIALOG_CHARACTER_ASSETS.coachman, text: `Good morning, ${playerName}. You’re probably wondering why I’m here.` },
+      { speaker: "Coachman", portrait: DIALOG_CHARACTER_ASSETS.coachman, text: "Well, you might have heard the rumors about monsters nearby." },
+      { speaker: "Coachman", portrait: DIALOG_CHARACTER_ASSETS.coachman, text: "You look strong—would you mind escorting me to town? Just for safety’s sake." },
+      { speaker: "Coachman", portrait: DIALOG_CHARACTER_ASSETS.coachman, text: "I’ll give you an Iron Shortsword and Leather Armor if you agree. A small price for my life." },
     ];
   }
 
@@ -674,6 +676,12 @@ export default function KitchenScreen() {
     else void finishEscortKitchenDialog();
   }
 
+  function skipEscortKitchenDialog() {
+    if (escortDialogIndex < escortDialogLines.length - 1) {
+      setEscortDialogIndex(escortDialogLines.length - 1);
+    }
+  }
+
   async function acceptEscortOffer(withCopperBonus: boolean) {
     await acceptCoachmanEscort(withCopperBonus);
     const rawTable = await AsyncStorage.getItem(KITCHEN_TABLE_KEY);
@@ -682,7 +690,7 @@ export default function KitchenScreen() {
       tableItemsRef.current = nextTable;
       setTableItems(nextTable);
     }
-    openEscortDialog("accepted", [{ speaker: "Coachman", portrait: IMG.coachman, text: "Thank you. Talk to me outside the tavern when you’re ready." }]);
+    openEscortDialog("accepted", [{ speaker: "Coachman", portrait: DIALOG_CHARACTER_ASSETS.coachman, text: "Thank you. Talk to me outside the tavern when you’re ready." }]);
   }
 
   function escortDialogChoices(): readonly StoryDialogChoice[] {
@@ -690,11 +698,11 @@ export default function KitchenScreen() {
     if (!lastLine) return [];
     if (escortDialogMode === "offer") return [
       { label: "YES", onPress: () => { void acceptEscortOffer(false); } },
-      { label: "NO", onPress: () => openEscortDialog("counteroffer", [{ speaker: "Coachman", portrait: IMG.coachman, text: "What about 50 Copper Coins on top?" }]) },
+      { label: "NO", onPress: () => openEscortDialog("counteroffer", [{ speaker: "Coachman", portrait: DIALOG_CHARACTER_ASSETS.coachman, text: "What about 50 Copper Coins on top?" }]) },
     ];
     if (escortDialogMode === "counteroffer") return [
       { label: "YES", onPress: () => { void acceptEscortOffer(true); } },
-      { label: "NO", onPress: () => { void declineCoachmanEscort().then(() => openEscortDialog("declined", [{ speaker: "Coachman", portrait: IMG.coachman, text: "Okay, I understand if you don’t want to put yourself in danger, too. I’m sure I’ll run into adventurers along the way; I can ask them." }])); } },
+      { label: "NO", onPress: () => { void declineCoachmanEscort().then(() => openEscortDialog("declined", [{ speaker: "Coachman", portrait: DIALOG_CHARACTER_ASSETS.coachman, text: "Okay, I understand if you don’t want to put yourself in danger, too. I’m sure I’ll run into adventurers along the way; I can ask them." }])); } },
     ];
     return [];
   }
@@ -707,7 +715,8 @@ export default function KitchenScreen() {
         if (dayNumber >= 8 && escort.phase === "locked") {
           openEscortDialog("rupert", [{
             speaker: "Rupert",
-            portrait: IMG.rupertsad,
+            portrait: DIALOG_CHARACTER_ASSETS.rupert.sad,
+            characterScale: RUPERT_DIALOG_SCALE,
             text: `Good morning, ${playerNameRef.current}. I’ve heard that monsters are prowling around nearby—monsters that usually only live in the heart of the forest. Please be careful out there.`,
           }]);
         } else if (dayNumber >= 10 && (escort.phase === "rupert_warned" || escort.phase === "offer_pending")) {
@@ -1741,6 +1750,18 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     } else {
       finalizeDialog();
     }
+  }
+
+  function skipDialogToLastLine() {
+    if (inputLocked.current || dlgIdx >= dlgLines.length - 1) return;
+    const lastIndex = dlgLines.length - 1;
+    for (let index = dlgIdx + 1; index <= lastIndex; index += 1) {
+      const line = dlgLines[index];
+      if (line.id && line.speaker !== "player") logDialogLine(line.id, line.speaker, line.text);
+    }
+    const last = dlgLines[lastIndex];
+    if (last.portrait !== "player" && last.portrait !== rupertPortrait) setRupertPortrait(last.portrait);
+    setDlgIdx(lastIndex);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -4077,6 +4098,11 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   const speakerName = curLine
     ? (rupertNamed && curLine.speaker === "Old Innkeeper" ? "Rupert" : curLine.speaker)
     : null;
+  const kitchenDialogPlayerSpeaking = curLine?.portrait === "player";
+  const kitchenDialogCharacter = kitchenDialogPlayerSpeaking
+    ? getPlayerDialogCharacter(playerAvatarId, getDialogExpressionForStamina(staminaCurrent), avatarSrc(playerAvatarId, staminaCurrent))
+    : DIALOG_CHARACTER_ASSETS.rupert[rupertPortrait];
+  const kitchenDialogSpeaker = ts === "NAME_INPUT" ? "Rupert" : speakerName;
 
   function renderSoupInSlot(slotIdx: number) {
     // Post-craft soup stacks are rendered from tableItems so every bowl can own
@@ -4756,90 +4782,46 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
 
       {/* ── Dialog / Question / Name-Input overlay */}
       {showDlgOverlay && (
-        <View style={[StyleSheet.absoluteFill, styles.dlgBlocker]}>
-          {/* Bottom dialog panel */}
-          <View style={[styles.dialogPanel, { paddingBottom: insets.bottom + 18, marginBottom: ts === "NAME_INPUT" && keyboardH > 0 ? keyboardH : 0 }]}>
-            {/* Portrait */}
-            <View style={styles.dlgPortraitWrap}>
-              <Image
-                source={
-                  curLine?.portrait === "player"
-                    ? avatarSrc(playerAvatarId, staminaCurrent)
-                    : rupertSrc(rupertPortrait)
-                }
-                style={[styles.dlgPortrait, curLine?.portrait === "player" ? styles.playerPortraitImage : styles.npcPortraitImage]}
-                resizeMode="cover" resizeMethod="resize"
-               
+        <CharacterDialogFrame
+          visible
+          characterSource={kitchenDialogCharacter}
+          playerCharacter={kitchenDialogPlayerSpeaking}
+          characterScale={kitchenDialogPlayerSpeaking ? getPlayerDialogScale(playerAvatarId) : RUPERT_DIALOG_SCALE}
+          speakerName={kitchenDialogSpeaker}
+          bottomOffset={ts === "NAME_INPUT" && keyboardH > 0 ? keyboardH : 0}
+          onSkip={dlgActive && dlgIdx < dlgLines.length - 1 ? skipDialogToLastLine : undefined}
+          actions={ts === "NAME_INPUT" && nameInputOpen ? (
+            <View style={styles.nameDialogActions}>
+              <TextInput
+                style={styles.nameInput}
+                value={nameInputVal}
+                onChangeText={setNameInputVal}
+                placeholder="Your name..."
+                placeholderTextColor="#A89880"
+                maxLength={24}
+                autoFocus
+                returnKeyType="done"
+                onSubmitEditing={confirmName}
               />
+              <TouchableOpacity style={[styles.continueBtn, styles.confirmBtn, !nameInputVal.trim() && styles.btnDisabled]} onPress={confirmName} disabled={!nameInputVal.trim()} activeOpacity={0.8}>
+                <Text style={styles.continueTxt}>Confirm</Text>
+                <Ionicons name="checkmark" size={16} color="#F5E6C8" style={styles.confirmIcon} />
+              </TouchableOpacity>
             </View>
-
-            {/* NAME INPUT state */}
-            {ts === "NAME_INPUT" && nameInputOpen && (
-              <View style={{ width: "100%" }}>
-                {speakerName && (
-                  <Text style={styles.dlgSpeaker}>{speakerName}</Text>
-                )}
-                <View style={styles.dlgBox}>
-                  <Text style={styles.dlgText}>{D_WHO_ASK.text}</Text>
-                </View>
-                <TextInput
-                  style={styles.nameInput}
-                  value={nameInputVal}
-                  onChangeText={setNameInputVal}
-                  placeholder="Your name..."
-                  placeholderTextColor="#A89880"
-                  maxLength={24}
-                  autoFocus
-                  returnKeyType="done"
-                  onSubmitEditing={confirmName}
-                />
-                <TouchableOpacity
-                  style={[styles.continueBtn, styles.confirmBtn, !nameInputVal.trim() && styles.btnDisabled]}
-                  onPress={confirmName}
-                  disabled={!nameInputVal.trim()}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.continueTxt}>Confirm</Text>
-                  <Ionicons name="checkmark" size={16} color="#F5E6C8" />
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {/* QUESTION CHOICE state */}
-            {ts === "QUESTION_CHOICE" && !dlgActive && !nameInputOpen && (
-              <>
-                {!askedWhere && (
-                  <TouchableOpacity style={styles.choiceBtn} onPress={selectWhereAmI} activeOpacity={0.8}>
-                    <Text style={styles.choiceTxt}>Where am I?</Text>
-                  </TouchableOpacity>
-                )}
-                {!askedWho && (
-                  <TouchableOpacity style={styles.choiceBtn} onPress={selectWhoAreYou} activeOpacity={0.8}>
-                    <Text style={styles.choiceTxt}>Who are you?</Text>
-                  </TouchableOpacity>
-                )}
-              </>
-            )}
-
-            {/* Normal dialog lines */}
-            {dlgActive && curLine && ts !== "NAME_INPUT" && (
-              <>
-                {speakerName && <Text style={styles.dlgSpeaker}>{speakerName}</Text>}
-                <View style={styles.dlgBox}>
-                  <Text style={styles.dlgText}>{curLine.text}</Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.continueBtn}
-                  onPress={advanceDialog}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.continueTxt}>Continue</Text>
-                  <Ionicons name="chevron-forward" size={16} color="#F5E6C8" />
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
-        </View>
+          ) : ts === "QUESTION_CHOICE" && !dlgActive && !nameInputOpen ? (
+            <View style={styles.kitchenChoiceStack}>
+              {!askedWhere ? <TouchableOpacity style={styles.choiceBtn} onPress={selectWhereAmI} activeOpacity={0.8}><Text style={styles.choiceTxt}>Where am I?</Text></TouchableOpacity> : null}
+              {!askedWho ? <TouchableOpacity style={styles.choiceBtn} onPress={selectWhoAreYou} activeOpacity={0.8}><Text style={styles.choiceTxt}>Who are you?</Text></TouchableOpacity> : null}
+            </View>
+          ) : dlgActive && curLine ? (
+            <TouchableOpacity style={[styles.continueBtn, styles.kitchenDialogContinue]} onPress={advanceDialog} activeOpacity={0.8}>
+              <Text style={styles.continueTxt}>Continue</Text>
+              <Ionicons name="chevron-forward" size={16} color="#F5E6C8" style={styles.kitchenContinueIcon} />
+            </TouchableOpacity>
+          ) : null}
+        >
+          {ts === "NAME_INPUT" && nameInputOpen ? <Text style={styles.dlgText}>{D_WHO_ASK.text}</Text> : curLine ? <Text style={styles.dlgText}>{curLine.text}</Text> : null}
+        </CharacterDialogFrame>
       )}
 
       {/* ── Context Speech Bubble */}
@@ -4847,7 +4829,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
         const rupertL = layouts.current.rupert;
         // Position just below portraits (rupertL.y + rupertL.h gives portrait bottom in window)
         const bubbleTopPos = rupertL
-          ? rupertL.y + rupertL.h + 12
+          ? portraitBubbleTop(rupertL.y + rupertL.h, "speech")
           : (headerH > 0 ? headerH + 140 : insets.top + 202);
         const arrowCenterX = rupertL ? rupertL.x + rupertL.w / 2 : W * 0.5;
         return (
@@ -4880,6 +4862,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
         line={escortDialogLines[escortDialogIndex] ?? null}
         choices={escortDialogChoices()}
         onContinue={advanceEscortKitchenDialog}
+        onSkip={escortDialogIndex < escortDialogLines.length - 1 ? skipEscortKitchenDialog : undefined}
       />
 
       {/* ── Menu Modal */}
@@ -5324,7 +5307,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
       {playerBubble && (() => {
         const playerL = layouts.current.player;
         const topPos = playerL
-          ? playerL.y + playerL.h + 12
+          ? portraitBubbleTop(playerL.y + playerL.h)
           : (headerH > 0 ? headerH + 140 : insets.top + 202);
         const anchorX = playerL ? playerL.x + playerL.w / 2 : W * 0.18;
         return (
@@ -5647,13 +5630,30 @@ const styles = StyleSheet.create({
     paddingVertical: 13, paddingHorizontal: 26,
     borderWidth: 1, borderColor: "rgba(196,148,58,0.35)", marginTop: 4,
   },
+  kitchenDialogContinue: { width: "100%", minHeight: 44, justifyContent: "center", marginTop: 0 },
+  kitchenContinueIcon: { position: "absolute", right: 18 },
+  kitchenChoiceStack: { width: "100%", gap: 8 },
+  nameDialogActions: { width: "100%", gap: 8, alignItems: "center" },
+  dialogActionRow: { width: "100%", flexDirection: "row", gap: 10, marginTop: 4 },
+  dialogContinueBtn: { flex: 1, marginTop: 0 },
+  skipDialogBtn: {
+    minWidth: 96, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6,
+    borderRadius: 12, paddingVertical: 13, paddingHorizontal: 16,
+    borderWidth: 1, borderColor: "rgba(196,148,58,0.35)", backgroundColor: "rgba(255,255,255,0.035)",
+  },
+  skipDialogText: { color: "#C4943A", fontSize: 13, fontFamily: "Oldenburg" },
   confirmBtn: {
+    flexGrow: 0,
+    flexShrink: 0,
     alignSelf: "center",
+    alignItems: "center",
     justifyContent: "center",
+    width: 150,
     minWidth: 150,
     paddingHorizontal: 24,
     marginTop: 12,
   },
+  confirmIcon: { position: "absolute", right: 18 },
   continueTxt: { color: "#F5E6C8", fontSize: 15, fontFamily: "Oldenburg", letterSpacing: 0.6 },
   btnDisabled: { opacity: 0.4 },
   choiceBtn: {

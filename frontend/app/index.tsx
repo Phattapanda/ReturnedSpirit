@@ -11,9 +11,10 @@ import { Image } from "expo-image";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAudioManager } from "@/src/audio/AudioProvider";
-import { audioEngine } from "@/src/audio/audioEngine";
+import { audioEngine, getRandomMainMenuTheme } from "@/src/audio/audioEngine";
 
 const BG = require("../assets/images/mainpage.png");
+const STARTUP_MAIN_MENU_THEME = getRandomMainMenuTheme();
 
 const MENU_ITEMS = [
   { id: "new-game", label: "New Game", icon: "sword-cross" as const },
@@ -26,7 +27,7 @@ export default function MainMenu() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  // Audio: play main menu theme immediately when arriving at main menu (no crossfade)
+  // Audio: play the startup's randomly selected main menu theme immediately (no crossfade)
   // We use audioEngine directly so we can await unlockAudio() before crossfadeTo.
   // On native (Expo Go / device) there are no browser autoplay restrictions, so
   // unlocking on mount is correct and starts the theme right away.
@@ -34,7 +35,7 @@ export default function MainMenu() {
   useEffect(() => {
     (async () => {
       await audioEngine.unlockAudio();
-      audioEngine.crossfadeTo('main-menu', 0);
+      audioEngine.crossfadeTo(STARTUP_MAIN_MENU_THEME, 0);
     })();
   }, []);
 
@@ -51,6 +52,7 @@ export default function MainMenu() {
         source={BG}
         style={StyleSheet.absoluteFillObject}
         contentFit="cover"
+        contentPosition="top center"
       />
       <View style={[styles.buttons, { paddingBottom: insets.bottom + 12 }]}>
         {MENU_ITEMS.map((item) => (

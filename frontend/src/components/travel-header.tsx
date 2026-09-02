@@ -18,11 +18,12 @@ type Props = {
   locationName: string;
   showPortraitRow?: boolean;
   onHeaderHeightChange?: (height: number) => void;
+  onPortraitBottomChange?: (bottom: number) => void;
   refreshKey?: number;
   bagAttention?: boolean;
 };
 
-export default function TravelHeader({ locationName, showPortraitRow = false, onHeaderHeightChange, refreshKey = 0, bagAttention = false }: Props) {
+export default function TravelHeader({ locationName, showPortraitRow = false, onHeaderHeightChange, onPortraitBottomChange, refreshKey = 0, bagAttention = false }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [stamina, setStamina] = useState(0);
@@ -90,7 +91,13 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
       </View>
 
       {showPortraitRow && (
-        <View style={styles.portraitRow}>
+        <View
+          style={styles.portraitRow}
+          onLayout={(event) => {
+            const { y, height } = event.nativeEvent.layout;
+            onPortraitBottomChange?.(y + height - 12);
+          }}
+        >
           <TouchableOpacity style={styles.circleWrap} onPress={() => setStatusOpen(true)} activeOpacity={0.8}>
             <Image source={getPlayerAvatarForStamina(avatarId, stamina)} style={styles.circleImg} resizeMode="cover" />
           </TouchableOpacity>

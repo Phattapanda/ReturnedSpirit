@@ -27,9 +27,10 @@ import DiningGuestArea, {
   type GuestServiceSourcePoint,
 } from "@/src/components/GuestCard";
 import GuestTutorialDialog, { type GuestTutorialDialogLine } from "@/src/components/GuestTutorialDialog";
+import { DIALOG_CHARACTER_ASSETS, OLD_FARMER_DIALOG_SCALE, RUPERT_DIALOG_SCALE, getDialogExpressionForStamina, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
 import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import StatusModal from "@/src/components/StatusModal";
-import PortraitBubble from "@/src/components/portrait-bubble";
+import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
 import TavernLocationTransition from "@/src/components/tavern-location-transition";
 import CivilServantDialog from "@/src/components/CivilServantDialog";
 import RunEndingOverlay from "@/src/components/RunEndingOverlay";
@@ -183,6 +184,16 @@ type TutorialLine = {
   portrait: TutorialPortrait;
   highlightedPhrases?: readonly string[];
 };
+
+function dialogPortraitForGuest(guestId: GuestId): TutorialPortrait {
+  if (guestId === "old_farmer") return "old_farmer";
+  if (guestId === "coachman") return "coachman";
+  if (guestId === "merchant") return "merchant";
+  if (guestId === "traveler") return "traveler";
+  if (guestId === "city_guard") return "city_guard";
+  if (guestId === "local_boozer") return "local_boozer";
+  return "rupert";
+}
 
 type CivilDialogStage = "introduction" | "paid" | "deferred" | "warning";
 
@@ -433,7 +444,7 @@ export default function DiningScreen() {
   const showFavorRewardDialog = useCallback((guest: GuestVisitView, text: string) => {
     setFavorDialogLine({
       speaker: guest.profile.name,
-      portrait: guest.profile.id === "old_farmer" ? "old_farmer" : "rupert",
+      portrait: dialogPortraitForGuest(guest.profile.id),
       text: `"${text}"`,
     });
     AsyncStorage.getItem(PLAYER_BAG_KEY).then((rawBag) => {
@@ -561,26 +572,49 @@ export default function DiningScreen() {
     }
   }
 
+  function skipCurrentTutorialDialog() {
+    if (favorDialogLine || serviceDialogLine) return;
+    if (coachmanIntroLine && coachmanIntroIndex < coachmanIntroLines.length - 1) {
+      setCoachmanIntroIndex(coachmanIntroLines.length - 1);
+      return;
+    }
+    if (!coachmanIntroLine && tutorialLineIndex < tutorialLines.length - 1) {
+      setTutorialLineIndex(tutorialLines.length - 1);
+    }
+  }
+
   function tutorialPortraitSource(portrait: TutorialPortrait): ImageSourcePropType {
-    if (portrait === "player") return getPlayerAvatarForStamina(playerAvatarId, staminaCurrent);
-    if (portrait === "old_farmer") return IMG.old_farmer;
-    if (portrait === "coachman") return IMG.coachman;
-    if (portrait === "merchant") return IMG.merchant;
-    if (portrait === "traveler") return IMG.traveler;
-    if (portrait === "city_guard") return IMG.city_guard;
-    if (portrait === "local_boozer") return IMG.local_boozer;
-    if (portrait === "rupert_sad") return IMG.rupertsad;
-    if (portrait === "rupert_laugh") return IMG.rupertlaugh;
+    if (portrait === "player") return getPlayerDialogCharacter(playerAvatarId, getDialogExpressionForStamina(staminaCurrent), getPlayerAvatarForStamina(playerAvatarId, staminaCurrent));
+    if (portrait === "old_farmer") return DIALOG_CHARACTER_ASSETS.oldFarmer;
+    if (portrait === "coachman") return DIALOG_CHARACTER_ASSETS.coachman;
+    if (portrait === "merchant") return DIALOG_CHARACTER_ASSETS.merchant;
+    if (portrait === "traveler") return DIALOG_CHARACTER_ASSETS.traveller;
+    if (portrait === "city_guard") return DIALOG_CHARACTER_ASSETS.cityGuard;
+    if (portrait === "local_boozer") return DIALOG_CHARACTER_ASSETS.localBoozer;
+    if (portrait === "rupert_sad") return DIALOG_CHARACTER_ASSETS.rupert.sad;
+    if (portrait === "rupert_laugh") return DIALOG_CHARACTER_ASSETS.rupert.laugh;
+    if (portrait === "rupert") return DIALOG_CHARACTER_ASSETS.rupert.normal;
     return IMG.rupert;
   }
 
   const coachmanIntroLine = coachmanIntroLines[coachmanIntroIndex] ?? null;
+  const canSkipCurrentDialog = !favorDialogLine && !serviceDialogLine && (
+    (coachmanIntroLine !== null && coachmanIntroIndex < coachmanIntroLines.length - 1)
+    || (coachmanIntroLine === null && tutorialLineIndex < tutorialLines.length - 1)
+  );
   const currentTutorialLine = favorDialogLine ?? serviceDialogLine ?? coachmanIntroLine ?? tutorialLines[tutorialLineIndex] ?? null;
   const dialogLine: GuestTutorialDialogLine | null = currentTutorialLine ? {
     speaker: currentTutorialLine.speaker,
     text: currentTutorialLine.text,
     portrait: tutorialPortraitSource(currentTutorialLine.portrait),
     playerPortrait: currentTutorialLine.portrait === "player",
+    characterScale: currentTutorialLine.portrait === "old_farmer"
+      ? OLD_FARMER_DIALOG_SCALE
+      : currentTutorialLine.portrait === "player"
+        ? getPlayerDialogScale(playerAvatarId)
+        : currentTutorialLine.portrait === "rupert" || currentTutorialLine.portrait === "rupert_laugh" || currentTutorialLine.portrait === "rupert_sad"
+          ? RUPERT_DIALOG_SCALE
+        : 1,
     highlightedPhrases: currentTutorialLine.highlightedPhrases,
   } : null;
 
@@ -1406,7 +1440,7 @@ export default function DiningScreen() {
               anchorX={playerPortraitFrame.x + playerPortraitFrame.width / 2}
               screenWidth={portraitRowWidth}
               text={playerThought}
-              top={playerPortraitFrame.y + playerPortraitFrame.height + 12}
+              top={portraitBubbleTop(playerPortraitFrame.y + playerPortraitFrame.height)}
             />
           )}
         </View>
@@ -1555,6 +1589,7 @@ const locationAction = guestDormitoryBlocked
             : coachmanIntroLine
               ? () => { void advanceCoachmanIntroduction(); }
               : advanceTutorialDialog}
+        onSkip={canSkipCurrentDialog ? skipCurrentTutorialDialog : undefined}
       />
 
       <CivilServantDialog

@@ -16,6 +16,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createSnapshot } from "@/src/game/save-manager";
+import { EMBER_ROOSTER_ENCOUNTER_SEEN_KEY } from "@/src/game/encounter-cinematics";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
   PLAYER_AVATAR_IDS,
@@ -98,6 +99,7 @@ export default function NewGame() {
       "@game:merchant_shop",
       "@game:mailbox",
       "@tutorial:coachman_escort",
+      EMBER_ROOSTER_ENCOUNTER_SEEN_KEY,
       // Garden state
       "@garden:has_entered",
       "@garden:has_seen_introduction",

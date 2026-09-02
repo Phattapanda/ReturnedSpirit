@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
 import { Animated, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, type ImageSourcePropType } from "react-native";
+import { useEventListener } from "expo";
 import { useFocusEffect, useRouter } from "expo-router";
+import { VideoView, useVideoPlayer } from "expo-video";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -22,6 +24,7 @@ import { loadProgressionState } from "@/src/game/progression";
 import type { NextRunBonuses } from "@/src/game/next-run";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats } from "@/src/game/player-stats";
 import { completeDungeonDayTransition } from "@/src/game/dungeon-day-transition";
+import { EMBER_ROOSTER_ENCOUNTER_SEEN_KEY } from "@/src/game/encounter-cinematics";
 
 const BACKGROUNDS: Record<ReturnType<typeof forestAreaForFloor>, ImageSourcePropType> = {
   "Forest Edge": require("../assets/images/forest_edge.png"),
@@ -30,6 +33,8 @@ const BACKGROUNDS: Record<ReturnType<typeof forestAreaForFloor>, ImageSourceProp
   "Forest Rest Area": require("../assets/images/forest_rest_area.png"),
   "Forest Nest": require("../assets/images/forest_nest.png"),
 };
+const ELDER_EMBER_ROOSTER_BACKGROUND = require("../assets/images/forest_heart_boss.png");
+const EMBER_ROOSTER_ENCOUNTER_VIDEO = require("../assets/video/encounter_ember_rooster.mp4");
 const MONSTER_IMAGES: Record<ForestMonsterId, ImageSourcePropType> = {
   forest_slime: require("../assets/images/forest_slime.png"),
   feral_rabbit: require("../assets/images/feral_rabbit.png"),
@@ -67,40 +72,100 @@ export default function ForestEntranceScreen() {
   const [deathError, setDeathError] = useState<string | null>(null);
   const [entryConfirmed, setEntryConfirmed] = useState(false);
   const [returnNarrationVisible, setReturnNarrationVisible] = useState(false);
+  const [emberRoosterEncounterSeen, setEmberRoosterEncounterSeen] = useState<boolean | null>(null);
+  const [encounterVideoVisible, setEncounterVideoVisible] = useState(false);
   const returnFade = useRef(new Animated.Value(0)).current;
+  const encounterVideoVisibleRef = useRef(false);
+  const encounterCompletionRef = useRef(false);
+  const encounterVideoPlayer = useVideoPlayer(EMBER_ROOSTER_ENCOUNTER_VIDEO, (player) => {
+    player.loop = false;
+  });
+
+  const finishEmberRoosterEncounter = useCallback(async () => {
+    if (!encounterVideoVisibleRef.current || encounterCompletionRef.current) return;
+    encounterCompletionRef.current = true;
+    try {
+      await AsyncStorage.setItem(EMBER_ROOSTER_ENCOUNTER_SEEN_KEY, "true");
+    } finally {
+      encounterVideoVisibleRef.current = false;
+      setEmberRoosterEncounterSeen(true);
+      setEncounterVideoVisible(false);
+    }
+  }, []);
+
+  useEventListener(encounterVideoPlayer, "playToEnd", () => {
+    void finishEmberRoosterEncounter();
+  });
+
+  useEventListener(encounterVideoPlayer, "statusChange", ({ status }) => {
+    // A decoding error must never leave the player trapped behind the video.
+    if (status === "error") void finishEmberRoosterEncounter();
+  });
 
   useFocusEffect(useCallback(() => {
     if (!entryConfirmed) return undefined;
     let active = true;
-    Promise.all([enterForestDungeon(), AsyncStorage.getItem("@game:life"), loadProgressionState(), AsyncStorage.getItem(PLAYER_STATS_KEY)]).then(([loaded, rawLife, progression, rawStats]) => {
+    Promise.all([enterForestDungeon(), AsyncStorage.getItem("@game:life"), loadProgressionState(), AsyncStorage.getItem(PLAYER_STATS_KEY), AsyncStorage.getItem(EMBER_ROOSTER_ENCOUNTER_SEEN_KEY)]).then(([loaded, rawLife, progression, rawStats, rawEncounterSeen]) => {
       if (!active) return;
       setState(loaded);
       setCurrentLife(Math.max(0, Number.parseInt(rawLife ?? "1", 10) || 0));
       setKarmaPoints(progression.karmaPoints);
       setMaximumLife(rawStats ? normalizePlayerStats(JSON.parse(rawStats)).maximumLife : DEFAULT_PLAYER_STATS.maximumLife);
+      setEmberRoosterEncounterSeen(rawEncounterSeen === "true");
     }).catch(() => setMessage("The dungeon state could not be loaded."));
-    return () => { active = false; stopGameplayMusic(600); };
-  }, [entryConfirmed, stopGameplayMusic]));
+    return () => {
+      active = false;
+      encounterVideoVisibleRef.current = false;
+      try { encounterVideoPlayer.pause(); } catch {}
+      stopGameplayMusic(600);
+    };
+  }, [encounterVideoPlayer, entryConfirmed, stopGameplayMusic]));
 
   const floorNumber = state?.currentFloor ?? 1;
   const area = forestAreaForFloor(floorNumber);
   const floor = state?.floors[String(floorNumber)] ?? null;
   const monsterState = floor?.monster ?? null;
   const monster = monsterState ? FOREST_MONSTERS[monsterState.id] : null;
+  const background = monsterState?.id === "elder_ember_rooster"
+    ? ELDER_EMBER_ROOSTER_BACKGROUND
+    : BACKGROUNDS[area];
   const isRestArea = FOREST_REST_FLOORS.has(floorNumber);
   const bossCleared = floorNumber === FOREST_FLOOR_COUNT && monsterState?.id === "elder_ember_rooster" && monsterState.phase === "defeated";
   const locationName = `${area} - ${floorNumber}/${FOREST_FLOOR_COUNT}`;
   const monsterLifePercent = monsterState ? Math.max(0, Math.min(1, monsterState.life / monsterState.maximumLife)) : 0;
+  const isEmberRoosterEncounter = monsterState?.id === "ember_rooster" && monsterState.phase !== "defeated";
+
+  useEffect(() => {
+    if (!isEmberRoosterEncounter || emberRoosterEncounterSeen !== false || encounterVideoVisibleRef.current) return;
+    encounterCompletionRef.current = false;
+    encounterVideoVisibleRef.current = true;
+    setEncounterVideoVisible(true);
+  }, [emberRoosterEncounterSeen, isEmberRoosterEncounter]);
+
+  useEffect(() => {
+    if (!encounterVideoVisible) return;
+    stopGameplayMusic(0);
+    try {
+      encounterVideoPlayer.currentTime = 0;
+      encounterVideoPlayer.play();
+    } catch {
+      void finishEmberRoosterEncounter();
+    }
+    return () => {
+      try { encounterVideoPlayer.pause(); } catch {}
+    };
+  }, [encounterVideoPlayer, encounterVideoVisible, finishEmberRoosterEncounter, stopGameplayMusic]);
 
   useEffect(() => {
     if (currentLife <= 0) { stopGameplayMusic(500); return; }
+    if (encounterVideoVisible || (isEmberRoosterEncounter && emberRoosterEncounterSeen !== true)) { stopGameplayMusic(0); return; }
     if (isRestArea) { crossfadeTo("rest-area", 650); return; }
     if (monsterState?.phase === "combat") {
       crossfadeTo(monster?.boss ? "boss-battle" : currentLife * 2 >= maximumLife ? "battle-over50" : "battle-under50", 600);
       return;
     }
     stopGameplayMusic(600);
-  }, [crossfadeTo, currentLife, isRestArea, maximumLife, monster?.boss, monsterState?.phase, stopGameplayMusic]);
+  }, [crossfadeTo, currentLife, emberRoosterEncounterSeen, encounterVideoVisible, isEmberRoosterEncounter, isRestArea, maximumLife, monster?.boss, monsterState?.phase, stopGameplayMusic]);
 
   useEffect(() => { if (floor?.message) setMessage(floor.message); }, [floor?.message, floorNumber]);
 
@@ -212,7 +277,7 @@ export default function ForestEntranceScreen() {
   }, [bossCleared, busy, currentLife, floor, isRestArea, monsterState?.phase, router, state]);
 
   return <View style={styles.root}>
-    <SceneBackground source={BACKGROUNDS[area]} topOffset={headerHeight} />
+    <SceneBackground source={background} topOffset={headerHeight} />
     <View style={[StyleSheet.absoluteFill, { top: headerHeight }, styles.backgroundShade]} pointerEvents="none" />
     <TravelHeader locationName={locationName} showPortraitRow onHeaderHeightChange={setHeaderHeight} refreshKey={headerRefreshKey} />
     <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: 128, paddingBottom: insets.bottom + 22 }]} contentInsetAdjustmentBehavior="automatic" showsVerticalScrollIndicator={false}>
@@ -247,6 +312,17 @@ export default function ForestEntranceScreen() {
         <Text selectable style={styles.returnNarration}>You fall into bed, dead tired.</Text>
       </Animated.View>
     ) : null}
+    {encounterVideoVisible ? (
+      <View style={[StyleSheet.absoluteFill, styles.encounterVideoOverlay]}>
+        <VideoView
+          style={StyleSheet.absoluteFill}
+          player={encounterVideoPlayer}
+          nativeControls={false}
+          contentFit="cover"
+          playsInline
+        />
+      </View>
+    ) : null}
   </View>;
 }
 
@@ -273,4 +349,5 @@ const styles = StyleSheet.create({
   warningButtonText: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 13, textAlign: "center" },
   returnFade: { zIndex: 5000, alignItems: "center", justifyContent: "center", paddingHorizontal: 28, backgroundColor: "#000" },
   returnNarration: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 18, lineHeight: 27, textAlign: "center" },
+  encounterVideoOverlay: { zIndex: 6000, backgroundColor: "#000" },
 });

@@ -13,6 +13,13 @@ type PortraitBubbleProps = {
 
 const EDGE_GAP = 12;
 const TAIL_HALF_WIDTH = 11;
+const SPEECH_TAIL_HEIGHT = 12;
+const THOUGHT_TAIL_HEIGHT = 23;
+
+/** Positions the bubble so its tail starts immediately below the portrait. */
+export function portraitBubbleTop(portraitBottom: number, variant: "speech" | "thought" = "thought") {
+  return portraitBottom + (variant === "speech" ? SPEECH_TAIL_HEIGHT : THOUGHT_TAIL_HEIGHT);
+}
 
 /**
  * Content-sized bubble whose outlined tail joins the card without leaving a
@@ -76,9 +83,13 @@ export default function PortraitBubble({
         })}</Text>
       </View>
 
-      <View style={[styles.tailBorder, { left: tailLeft, borderBottomColor: borderColor }]} />
-      <View style={[styles.tailFill, { left: tailLeft + 2, borderBottomColor: fillColor }]} />
-      <View style={[styles.tailBridge, { left: tailLeft + 2, backgroundColor: fillColor }]} />
+      {isSpeech ? <>
+        <View style={[styles.tailBorder, { left: tailLeft, borderBottomColor: borderColor }]} />
+        <View style={[styles.tailFill, { left: tailLeft + 2, borderBottomColor: fillColor }]} />
+      </> : <>
+        <View style={[styles.thoughtCircleLarge, { left: tailLeft + 4, backgroundColor: fillColor, borderColor }]} />
+        <View style={[styles.thoughtCircleSmall, { left: tailLeft + 8, backgroundColor: fillColor, borderColor }]} />
+      </>}
     </View>
   );
 }
@@ -142,23 +153,34 @@ const styles = StyleSheet.create({
   },
   tailFill: {
     position: "absolute",
-    top: -8,
+    top: -9,
     width: 0,
     height: 0,
     borderStyle: "solid",
     borderLeftWidth: 9,
     borderRightWidth: 9,
-    borderBottomWidth: 10,
+    borderBottomWidth: 11,
     borderTopWidth: 0,
     borderLeftColor: "transparent",
     borderRightColor: "transparent",
     zIndex: 3,
   },
-  tailBridge: {
+  thoughtCircleLarge: {
     position: "absolute",
-    top: -1,
-    width: 18,
-    height: 4,
-    zIndex: 4,
+    top: -16,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 1.5,
+    zIndex: 3,
+  },
+  thoughtCircleSmall: {
+    position: "absolute",
+    top: -22,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    borderWidth: 1.25,
+    zIndex: 3,
   },
 });

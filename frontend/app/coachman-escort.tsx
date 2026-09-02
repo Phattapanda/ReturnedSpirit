@@ -6,16 +6,17 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import TravelHeader from "@/src/components/travel-header";
 import StoryDialogOverlay, { type StoryDialogLine } from "@/src/components/story-dialog-overlay";
-import PortraitBubble from "@/src/components/portrait-bubble";
+import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { calculateIncomingPhysicalDamage, consumeArmorDurability, consumeWeaponDurability, getEquippedItem } from "@/src/game/equipment-system";
 import { ITEM_ATTRIBUTE, ITEM_CATALOG, PLAYER_BAG_KEY, normalizePlayerBagData, planAddToBag, type BagItem, type PlayerBagData } from "@/src/game/item-system";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
 import { setCoachmanEscortPhase } from "@/src/game/coachman-escort-system";
 import { unlockNextCityAfterEscort } from "@/src/game/travel-system";
-import { PLAYER_AVATAR_KEY } from "@/src/game/player-avatar";
+import { PLAYER_AVATAR_KEY, normalizePlayerAvatarId } from "@/src/game/player-avatar";
+import { DIALOG_CHARACTER_ASSETS, PLAYER_DIALOG_SCALE, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
 
-const COACHMAN = require("../assets/images/coachman.png");
+const COACHMAN = DIALOG_CHARACTER_ASSETS.coachman;
 const WOLF = require("../assets/images/wild_wolf.png");
 const CARCASS = require("../assets/images/monster_carcass.png");
 const BACKGROUND = require("../assets/images/forest_edge.png");
@@ -23,31 +24,31 @@ const WOLF_MAX_LIFE = 18;
 
 type Phase = "journey" | "combat" | "victory" | "post" | "leaving";
 
-function preBattleLines(playerName: string, playerPortrait: ImageSourcePropType): StoryDialogLine[] {
+function preBattleLines(playerName: string, playerPortrait: ImageSourcePropType, playerScale: number): StoryDialogLine[] {
   return [
     { speaker: "Coachman", portrait: COACHMAN, text: "If we keep this pace, we should reach the next town soon." },
-    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, text: "As long as the road stays quiet. You hired me for the possibility that it doesn’t." },
+    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, text: "As long as the road stays quiet. You hired me for the possibility that it doesn’t." },
     { speaker: "Coachman", portrait: COACHMAN, text: "After all those stories about monsters on this road, I’d rather pay for protection than lose my cargo." },
     { text: "Suddenly, the horses rear up and the wagon comes to a sharp stop." },
     { speaker: "Coachman", portrait: COACHMAN, text: "What the—?! Why did they stop?" },
     { text: "A low growl comes from the bushes. A moment later, a monster steps onto the road." },
-    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, text: "Looks like we found the reason." },
+    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, text: "Looks like we found the reason." },
     { speaker: "Coachman", portrait: COACHMAN, text: "By the gods… The rumors are true!" },
-    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, text: "Stay behind me. Keep the horses calm. I’ll handle this." },
+    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, text: "Stay behind me. Keep the horses calm. I’ll handle this." },
   ];
 }
 
-function postBattleLines(playerName: string, playerPortrait: ImageSourcePropType): StoryDialogLine[] {
+function postBattleLines(playerName: string, playerPortrait: ImageSourcePropType, playerScale: number): StoryDialogLine[] {
   return [
     { speaker: "Coachman", portrait: COACHMAN, text: "That was a close one… A wild wolf this close to the road? I’ll have to report this to the Adventurers’ Guild when we reach town." },
-    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, text: "What about the carcass?" },
+    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, text: "What about the carcass?" },
     { speaker: "Coachman", portrait: COACHMAN, text: "Keep it. You earned it." },
-    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, text: "The whole thing?" },
+    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, text: "The whole thing?" },
     { speaker: "Coachman", portrait: COACHMAN, text: "Of course. The Adventurers’ Guild has butchers who can process monster carcasses for you. They’ll extract whatever useful materials they can and send them to you afterward." },
-    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, text: "Sounds convenient." },
+    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, text: "Sounds convenient." },
     { speaker: "Coachman", portrait: COACHMAN, text: "It is. Though you can always take the carcass home and butcher it yourself." },
     { speaker: "Coachman", portrait: COACHMAN, text: "You’ll need a Butchering Knife. A better knife usually means a better chance of getting more usable materials from the carcass." },
-    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, text: "Good to know. I’ll take it with me for now." },
+    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, text: "Good to know. I’ll take it with me for now." },
     { speaker: "Coachman", portrait: COACHMAN, text: "Just don’t put it too close to my cargo." },
   ];
 }
@@ -62,7 +63,8 @@ export default function CoachmanEscortScreen() {
   const [phase, setPhase] = useState<Phase>("journey");
   const [dialogIndex, setDialogIndex] = useState(0);
   const [playerName, setPlayerName] = useState("Adventurer");
-  const [playerPortrait, setPlayerPortrait] = useState(require("../assets/images/avatar1_normal.png"));
+  const [playerPortrait, setPlayerPortrait] = useState(DIALOG_CHARACTER_ASSETS.avatar1.normal);
+  const [playerScale, setPlayerScale] = useState(PLAYER_DIALOG_SCALE);
   const [stats, setStats] = useState<PlayerStats>(DEFAULT_PLAYER_STATS);
   const [life, setLife] = useState(DEFAULT_PLAYER_STATS.maximumLife);
   const [wolfLife, setWolfLife] = useState(WOLF_MAX_LIFE);
@@ -72,6 +74,7 @@ export default function CoachmanEscortScreen() {
   const [bagAttention, setBagAttention] = useState(false);
   const [busy, setBusy] = useState(false);
   const [headerRefreshKey, setHeaderRefreshKey] = useState(0);
+  const [portraitBottom, setPortraitBottom] = useState(0);
   const [carcassPending, setCarcassPending] = useState(false);
   const wolfOpacity = useRef(new Animated.Value(1)).current;
   const redFlash = useRef(new Animated.Value(0)).current;
@@ -79,8 +82,8 @@ export default function CoachmanEscortScreen() {
   const carcassAnim = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
   const carcassOpacity = useRef(new Animated.Value(0)).current;
 
-  const preLines = useMemo(() => preBattleLines(playerName, playerPortrait), [playerName, playerPortrait]);
-  const postLines = useMemo(() => postBattleLines(playerName, playerPortrait), [playerName, playerPortrait]);
+  const preLines = useMemo(() => preBattleLines(playerName, playerPortrait, playerScale), [playerName, playerPortrait, playerScale]);
+  const postLines = useMemo(() => postBattleLines(playerName, playerPortrait, playerScale), [playerName, playerPortrait, playerScale]);
   const activeLines = phase === "journey" ? preLines : postLines;
 
   useEffect(() => {
@@ -90,8 +93,9 @@ export default function CoachmanEscortScreen() {
       const loadedStats = rawStats[1] ? normalizePlayerStats(JSON.parse(rawStats[1])) : DEFAULT_PLAYER_STATS;
       setStats(loadedStats);
       setLife(Math.max(1, Number.parseInt(rawLife[1] ?? String(loadedStats.maximumLife), 10) || loadedStats.maximumLife));
-      const avatarId = Math.max(1, Math.min(3, Number.parseInt(rawAvatar[1] ?? "1", 10) || 1));
-      setPlayerPortrait(avatarId === 2 ? require("../assets/images/avatar2_normal.png") : avatarId === 3 ? require("../assets/images/avatar3_normal.png") : require("../assets/images/avatar1_normal.png"));
+      const avatarId = normalizePlayerAvatarId(rawAvatar[1]);
+      setPlayerPortrait(getPlayerDialogCharacter(avatarId, "normal", require("../assets/images/avatar1_normal.png")));
+      setPlayerScale(getPlayerDialogScale(avatarId));
       Animated.timing(blackFade, { toValue: 0, duration: 550, useNativeDriver: true }).start();
     })();
     return () => stopGameplayMusic(600);
@@ -128,6 +132,10 @@ export default function CoachmanEscortScreen() {
       await Promise.all([setCoachmanEscortPhase("complete"), unlockNextCityAfterEscort()]);
       router.replace("/next-city");
     });
+  }
+
+  function skipDialogToLastLine() {
+    if (dialogIndex < activeLines.length - 1) setDialogIndex(activeLines.length - 1);
   }
 
   async function loadBag(): Promise<PlayerBagData> {
@@ -235,7 +243,7 @@ export default function CoachmanEscortScreen() {
     {phase === "combat" || phase === "victory" ? <>
       <Image source={BACKGROUND} style={StyleSheet.absoluteFill} resizeMode="cover" />
       <View style={styles.shade} />
-      <TravelHeader locationName="Road to the Next City" showPortraitRow refreshKey={headerRefreshKey} bagAttention={bagAttention} />
+      <TravelHeader locationName="Road to the Next City" showPortraitRow onPortraitBottomChange={setPortraitBottom} refreshKey={headerRefreshKey} bagAttention={bagAttention} />
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} contentInsetAdjustmentBehavior="automatic">
         <View style={styles.monsterArea}>
           <Animated.Image source={WOLF} style={[styles.wolf, { opacity: wolfOpacity }]} resizeMode="contain" />
@@ -247,11 +255,11 @@ export default function CoachmanEscortScreen() {
           <View style={styles.actionRow}><Action label="Defense" subtitle="Prepare for the attack" onPress={() => { void playerAction(); }} disabled={busy} /><Action label="Run" subtitle="Unavailable" onPress={runBlocked} disabled={busy} danger /></View>
         </View> : carcassPending ? <TouchableOpacity style={styles.collectButton} onPress={() => { void collectPendingCarcass(); }}><Text style={styles.collectText}>Collect Monster Carcass</Text></TouchableOpacity> : null}
       </ScrollView>
-      {thought ? <PortraitBubble anchorX={screenWidth - 70} screenWidth={screenWidth} text={thought} top={220} variant="thought" highlightedPhrases={thought.includes("equip my weapon") ? ["equip my weapon"] : undefined} /> : null}
+      {thought ? <PortraitBubble anchorX={70} screenWidth={screenWidth} text={thought} top={portraitBubbleTop(portraitBottom || 220)} variant="thought" highlightedPhrases={thought.includes("equip my weapon") ? ["equip my weapon"] : undefined} /> : null}
       <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.redFlash, { opacity: redFlash }]} />
     </> : null}
     <Animated.View pointerEvents={phase === "journey" || phase === "post" || phase === "leaving" ? "auto" : "none"} style={[StyleSheet.absoluteFill, styles.black, { opacity: blackFade }]} />
-    <StoryDialogOverlay visible={!!dialogLine} line={dialogLine} onContinue={() => { void advanceDialog(); }} />
+    <StoryDialogOverlay visible={!!dialogLine} line={dialogLine} onContinue={() => { void advanceDialog(); }} onSkip={dialogIndex < activeLines.length - 1 ? skipDialogToLastLine : undefined} />
   </View>;
 }
 

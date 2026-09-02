@@ -145,7 +145,7 @@ export default function MailScreen() {
       setMailbox(result.state);
       if (result.ok) {
         setBonusCode("");
-        setSelectedMessageId(result.messageId);
+        setSelectedMessageId(null);
         setView("inbox");
         audioManager.playSoundEffect("new-recipe-found", { maxDurationMs: 3500 });
         setFeedback("Code accepted. New mail received.");
@@ -317,7 +317,7 @@ export default function MailScreen() {
       </ScrollView>
 
       <View style={{ paddingBottom: insets.bottom, backgroundColor: "rgba(10,5,1,0.98)" }}>
-        <TavernLocationBar current="mail" />
+        <TavernLocationBar current="mail" mailboxUnread={unreadCount > 0} />
       </View>
     </View>
     </TavernLocationTransition>
