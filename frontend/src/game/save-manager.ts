@@ -48,6 +48,7 @@ import { DEFAULT_MAILBOX_STATE, MAILBOX_STATE_KEY } from "@/src/game/mailbox-sys
 import { KITCHEN_SMALL_CRATE_KEY } from "@/src/game/kitchen-small-crate";
 import { FOREST_DUNGEON_KEY, FOREST_FIGHT_SNAPSHOT_KEY } from "@/src/game/forest-dungeon-system";
 import { COACHMAN_ESCORT_KEY } from "@/src/game/coachman-escort-system";
+import { EMBER_ROOSTER_ENCOUNTER_SEEN_KEY } from "@/src/game/encounter-cinematics";
 import {
   DEFAULT_TITHE_STATE,
   ELAPSED_DAYS_KEY,
@@ -99,6 +100,7 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   FOREST_DUNGEON_KEY,
   FOREST_FIGHT_SNAPSHOT_KEY,
   COACHMAN_ESCORT_KEY,
+  EMBER_ROOSTER_ENCOUNTER_SEEN_KEY,
   DISCOVERED_RECIPES_KEY,
   // Garden state
   "@garden:has_entered",

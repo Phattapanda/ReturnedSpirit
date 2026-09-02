@@ -8,6 +8,7 @@ import {
   areRegularGuestsUnlockedForDay,
   loadPostGuestTutorialState,
 } from "@/src/game/post-guest-tutorial";
+import { loadMailboxState } from "@/src/game/mailbox-system";
 
 const PRIMARY_GARDEN_PLOT_KEY = "@garden:plot_01_data";
 const SECOND_GARDEN_PLOT_KEY = "@garden:plot_02_data";
@@ -17,6 +18,7 @@ const FOURTH_GARDEN_PLOT_KEY = "@garden:plot_04_data";
 type LocationStatus = {
   harvestReady: boolean;
   merchantPresent: boolean;
+  mailboxUnread: boolean;
 };
 
 type StoredGardenPlot = {
@@ -27,6 +29,7 @@ type StoredGardenPlot = {
 const DEFAULT_STATUS: LocationStatus = {
   harvestReady: false,
   merchantPresent: false,
+  mailboxUnread: false,
 };
 
 const listeners = new Set<() => void>();
@@ -50,13 +53,14 @@ function plotIsReady(plot: StoredGardenPlot | null): boolean {
 }
 
 async function loadLocationStatus(): Promise<LocationStatus> {
-  const [primaryRaw, secondRaw, thirdRaw, fourthRaw, guestState, postGuestState] = await Promise.all([
+  const [primaryRaw, secondRaw, thirdRaw, fourthRaw, guestState, postGuestState, mailboxState] = await Promise.all([
     AsyncStorage.getItem(PRIMARY_GARDEN_PLOT_KEY),
     AsyncStorage.getItem(SECOND_GARDEN_PLOT_KEY),
     AsyncStorage.getItem(THIRD_GARDEN_PLOT_KEY),
     AsyncStorage.getItem(FOURTH_GARDEN_PLOT_KEY),
     loadGuestState(),
     loadPostGuestTutorialState(),
+    loadMailboxState(),
   ]);
 
   // Match Outside the Tavern exactly. Serving the Merchant in Dining Hall must
@@ -68,6 +72,7 @@ async function loadLocationStatus(): Promise<LocationStatus> {
     merchantPresent:
       merchantDay &&
       areRegularGuestsUnlockedForDay(postGuestState, guestState.calendarDaySerial),
+    mailboxUnread: mailboxState.messages.some((message) => !message.read),
   };
 }
 
@@ -108,16 +113,16 @@ export function useLocationStatusBadges(): LocationStatus {
 }
 
 type LocationStatusBadgeProps = {
-  kind: "harvest" | "merchant";
+  kind: "harvest" | "merchant" | "mail";
 };
 
 export function LocationStatusBadge({ kind }: LocationStatusBadgeProps) {
   return (
     <View
       pointerEvents="none"
-      style={[styles.badge, kind === "harvest" ? styles.harvestBadge : styles.merchantBadge]}
+      style={[styles.badge, kind === "harvest" ? styles.harvestBadge : styles.orangeBadge]}
     >
-      <Text style={styles.badgeText}>{kind === "harvest" ? "!" : "?"}</Text>
+      <Text style={styles.badgeText}>{kind === "merchant" ? "?" : "!"}</Text>
     </View>
   );
 }
@@ -141,7 +146,7 @@ const styles = StyleSheet.create({
   harvestBadge: {
     backgroundColor: "#2F9E44",
   },
-  merchantBadge: {
+  orangeBadge: {
     backgroundColor: "#D97706",
   },
   badgeText: {

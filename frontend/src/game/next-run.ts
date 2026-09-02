@@ -8,6 +8,7 @@ import { advanceToNextRun } from "@/src/game/run-system";
 import { deliverMailboxMessage, type MailReward } from "@/src/game/mailbox-system";
 import { GUEST_STATE_KEY, loadGuestState, type GuestId } from "@/src/game/guest-system";
 import { ALL_SNAPSHOT_KEYS, createSnapshot } from "@/src/game/save-manager";
+import { EMBER_ROOSTER_ENCOUNTER_SEEN_KEY } from "@/src/game/encounter-cinematics";
 import {
   DEFAULT_TITHE_STATE,
   ELAPSED_DAYS_KEY,
@@ -55,7 +56,7 @@ export async function prepareNextRun(slotNumber: number, bonuses: NextRunBonuses
     statusEffects: advancedStats.statusEffects,
   };
 
-  await AsyncStorage.multiRemove(ALL_SNAPSHOT_KEYS.filter((key) => key !== PROGRESSION_STATE_KEY));
+  await AsyncStorage.multiRemove(ALL_SNAPSHOT_KEYS.filter((key) => key !== PROGRESSION_STATE_KEY && key !== EMBER_ROOSTER_ENCOUNTER_SEEN_KEY));
   await AsyncStorage.multiSet([
     ["@game:player_name", playerName?.trim() || "Adventurer"],
     [PLAYER_AVATAR_KEY, avatarId ?? "1"],

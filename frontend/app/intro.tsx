@@ -19,6 +19,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { NEXT_RUN_INTRO_PENDING_KEY } from "@/src/game/tithe-system";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { useHaptics } from "@/src/feedback/haptics-provider";
+import CharacterDialogFrame from "@/src/components/character-dialog-frame";
+import { DIALOG_CHARACTER_ASSETS, RUPERT_DIALOG_SCALE, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
   PLAYER_AVATAR_KEY,
@@ -73,9 +75,9 @@ const DIALOG_ADVANCE: Partial<Record<DialogPhase, DialogPhase>> = {
 const DIALOG_FLOW: DialogEntry[] = [
   {
     phase: "awake",
-    portrait: "rupertlaugh",
+    portrait: "rupert",
     speakerName: "Old Innkeeper",
-    text: '"Are you awake?"',
+    text: '"Good to see you on your feet."',
   },
   {
     phase: "rupert_1",
@@ -132,6 +134,25 @@ const DIALOG_FLOW: DialogEntry[] = [
   },
 ];
 
+function getDialogSkipDestination(start: DialogPhase): DialogPhase | null {
+  let destination = start;
+  let next = DIALOG_ADVANCE[start];
+
+  while (next) {
+    const entry = DIALOG_FLOW.find((item) => item.phase === next);
+    if (entry?.choices) {
+      // A single choice is effectively the dialog's Continue button, so keep
+      // the last spoken sentence visible instead of activating that action.
+      if (entry.choices.length > 1) destination = next;
+      break;
+    }
+    destination = next;
+    next = DIALOG_ADVANCE[next];
+  }
+
+  return destination === start ? null : destination;
+}
+
 const SOUNDS = {
   knock: require("../assets/audio/knock.mp3"),
   tap: require("../assets/audio/tap.wav"),
@@ -141,8 +162,7 @@ const SOUNDS = {
 const SKIP_HOLD_MS = 900;
 const ROOM_FADE_MS = 650;
 const KNOCK_DELAY_MS = 450;
-const KNOCK_TO_BUBBLE_MS = 2200;
-const BUBBLE_TO_DIALOG_MS = 1300;
+const KNOCK_TO_DIALOG_MS = 2200;
 
 type IntroStage = "video" | "room";
 
@@ -163,10 +183,9 @@ export default function IntroScreen() {
   }, []);
 
   const [stage, setStage] = useState<IntroStage>("video");
-  const [showBubble, setShowBubble] = useState(false);
   const [showDialog, setShowDialog] = useState(false);
   const [dialogPhase, setDialogPhase] = useState<DialogPhase>("awake");
-  const [dialogPortrait, setDialogPortrait] = useState<PortraitVariant>("rupertlaugh");
+  const [dialogPortrait, setDialogPortrait] = useState<PortraitVariant>("rupert");
   const [videoReady, setVideoReady] = useState(false);
   const [holdActive, setHoldActive] = useState(false);
 
@@ -178,8 +197,6 @@ export default function IntroScreen() {
 
   const blackOpacity = useRef(new Animated.Value(1)).current;
   const holdProgress = useRef(new Animated.Value(0)).current;
-  const dialogTranslate = useRef(new Animated.Value(500)).current;
-  const bubbleOpacity = useRef(new Animated.Value(0)).current;
 
   const knockPlayer = useAudioPlayer(SOUNDS.knock);
   const tapPlayer = useAudioPlayer(SOUNDS.tap);
@@ -255,7 +272,6 @@ export default function IntroScreen() {
     }).start(({ finished }) => {
       if (!finished || !mountedRef.current) return;
       setStage("room");
-      setShowBubble(false);
       setShowDialog(false);
       blackOpacity.setValue(1);
       later(startRoomSequence, 40);
@@ -279,28 +295,10 @@ export default function IntroScreen() {
       } catch {}
 
       later(() => {
-        setShowBubble(true);
-        Animated.timing(bubbleOpacity, {
-          toValue: 1,
-          duration: 350,
-          useNativeDriver: true,
-        }).start();
-
-        later(() => {
-          setShowBubble(false);
-          bubbleOpacity.setValue(0);
-          setDialogPortrait("rupertlaugh");
-          setDialogPhase("awake");
-          setShowDialog(true);
-          Animated.spring(dialogTranslate, {
-            toValue: 0,
-            useNativeDriver: true,
-            damping: 18,
-            stiffness: 150,
-            mass: 0.9,
-          }).start();
-        }, BUBBLE_TO_DIALOG_MS);
-      }, KNOCK_TO_BUBBLE_MS);
+        setDialogPortrait("rupert");
+        setDialogPhase("awake");
+        setShowDialog(true);
+      }, KNOCK_TO_DIALOG_MS);
     }, KNOCK_DELAY_MS);
   }
 
@@ -395,6 +393,14 @@ export default function IntroScreen() {
     setDialogPhase(next);
   }
 
+  function skipDialog() {
+    const destination = getDialogSkipDestination(dialogPhase);
+    if (!destination) return;
+    const entry = DIALOG_FLOW.find((item) => item.phase === destination);
+    if (entry) changePortrait(entry.portrait);
+    setDialogPhase(destination);
+  }
+
   function handleChoice(nextPhase: DialogPhase | "kitchen") {
     triggerHaptic("choice");
     playTapSound();
@@ -410,6 +416,13 @@ export default function IntroScreen() {
   }
 
   const currentDialogEntry = DIALOG_FLOW.find((entry) => entry.phase === dialogPhase) ?? null;
+  const skipDialogDestination = getDialogSkipDestination(dialogPhase);
+  const introPlayerSpeaking = dialogPortrait === "player_tired";
+  const introCharacterSource = introPlayerSpeaking
+    ? getPlayerDialogCharacter(playerAvatarId, "tired", getPlayerAvatarSource(playerAvatarId, "tired"))
+    : dialogPortrait === "rupertlaugh"
+      ? DIALOG_CHARACTER_ASSETS.rupert.laugh
+      : DIALOG_CHARACTER_ASSETS.rupert.normal;
   const holdWidth = holdProgress.interpolate({
     inputRange: [0, 1],
     outputRange: ["0%", "100%"],
@@ -464,84 +477,33 @@ export default function IntroScreen() {
         />
       )}
 
-      {stage === "room" && showBubble && !showDialog && (
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.bubbleWrap,
-            { bottom: insets.bottom + 68, opacity: bubbleOpacity },
-          ]}
-        >
-          <View style={styles.bubble}>
-            <Text style={styles.bubbleText}>{'"Are you awake?"'}</Text>
-            <View style={styles.bubbleTailBorder} />
-            <View style={styles.bubbleTailFill} />
-            <View style={styles.bubbleTailBridge} />
-          </View>
-        </Animated.View>
-      )}
-
       {stage === "room" && showDialog && currentDialogEntry && (
-        <Animated.View
-          style={[
-            styles.dialogPanel,
-            {
-              paddingBottom: insets.bottom + 20,
-              transform: [{ translateY: dialogTranslate }],
-            },
-          ]}
-        >
-          <View style={styles.portraitWrap}>
-            <Image
-              key={`${dialogPortrait}-${playerAvatarId}`}
-              source={dialogPortrait === "player_tired" ? getPlayerAvatarSource(playerAvatarId, "tired") : PORTRAITS[dialogPortrait]}
-              style={[styles.portrait, dialogPortrait === "player_tired" ? styles.playerPortraitImage : styles.npcPortraitImage]}
-              resizeMode="cover"
-              resizeMethod="resize"
-            />
-          </View>
-
-          {currentDialogEntry.speakerName ? (
-            <Text style={styles.npcName}>{currentDialogEntry.speakerName}</Text>
-          ) : null}
-
-          {currentDialogEntry.text ? (
-            <View style={styles.dialogBox}>
-              <Text
-                style={[
-                  styles.dialogText,
-                  !currentDialogEntry.speakerName && styles.narratorText,
-                ]}
-              >
-                {currentDialogEntry.text}
-              </Text>
+        <CharacterDialogFrame
+          visible
+          characterSource={introCharacterSource}
+          playerCharacter={introPlayerSpeaking}
+          characterScale={introPlayerSpeaking ? getPlayerDialogScale(playerAvatarId) : RUPERT_DIALOG_SCALE}
+          speakerName={currentDialogEntry.speakerName}
+          onSkip={skipDialogDestination ? skipDialog : undefined}
+          actions={currentDialogEntry.choices ? (
+            <View style={styles.introChoiceRow}>
+              {currentDialogEntry.choices.map((choice, index) => (
+                <TouchableOpacity key={index} testID={`choice-${index}`} style={styles.choiceBtn} onPress={() => handleChoice(choice.nextPhase)} activeOpacity={0.8}>
+                  <Text style={styles.choiceTxt}>{choice.label}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
-          ) : null}
-
-          {!currentDialogEntry.choices ? (
-            <TouchableOpacity
-              testID="dialog-continue"
-              style={styles.continueBtn}
-              onPress={advanceDialog}
-              activeOpacity={0.8}
-            >
+          ) : (
+            <TouchableOpacity testID="dialog-continue" style={styles.continueBtn} onPress={advanceDialog} activeOpacity={0.8}>
               <Text style={styles.continueTxt}>Continue</Text>
-              <Ionicons name="chevron-forward" size={16} color="#F5E6C8" />
+              <Ionicons name="chevron-forward" size={16} color="#F5E6C8" style={styles.introContinueIcon} />
             </TouchableOpacity>
+          )}
+        >
+          {currentDialogEntry.text ? (
+            <Text style={[styles.dialogText, !currentDialogEntry.speakerName && styles.narratorText]}>{currentDialogEntry.text}</Text>
           ) : null}
-
-          {currentDialogEntry.choices?.map((choice, index) => (
-            <TouchableOpacity
-              key={index}
-              testID={`choice-${index}`}
-              style={styles.choiceBtn}
-              onPress={() => handleChoice(choice.nextPhase)}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.choiceTxt}>{choice.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </Animated.View>
+        </CharacterDialogFrame>
       )}
 
       <Animated.View
@@ -587,68 +549,6 @@ const styles = StyleSheet.create({
     height: 3,
     borderRadius: 2,
     backgroundColor: "rgba(245,230,200,0.95)",
-  },
-  bubbleWrap: {
-    position: "absolute",
-    left: 24,
-    right: 24,
-    alignItems: "center",
-  },
-  bubble: {
-    maxWidth: "82%",
-    backgroundColor: "rgba(18, 10, 4, 0.93)",
-    borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 18,
-    borderWidth: 1,
-    borderColor: "rgba(196, 148, 58, 0.42)",
-    alignItems: "center",
-    zIndex: 6,
-  },
-  bubbleTailBorder: {
-    position: "absolute",
-    bottom: -12,
-    alignSelf: "center",
-    width: 0,
-    height: 0,
-    borderLeftWidth: 11,
-    borderRightWidth: 11,
-    borderTopWidth: 12,
-    borderStyle: "solid",
-    borderLeftColor: "transparent",
-    borderRightColor: "transparent",
-    borderTopColor: "rgba(196,148,58,0.58)",
-    zIndex: 2,
-  },
-  bubbleTailFill: {
-    position: "absolute",
-    bottom: -8,
-    alignSelf: "center",
-    width: 0,
-    height: 0,
-    borderLeftWidth: 9,
-    borderRightWidth: 9,
-    borderTopWidth: 10,
-    borderStyle: "solid",
-    borderLeftColor: "transparent",
-    borderRightColor: "transparent",
-    borderTopColor: "rgba(18,10,4,0.93)",
-    zIndex: 3,
-  },
-  bubbleTailBridge: {
-    position: "absolute",
-    bottom: -1,
-    alignSelf: "center",
-    width: 18,
-    height: 4,
-    backgroundColor: "rgba(18,10,4,0.93)",
-    zIndex: 4,
-  },
-  bubbleText: {
-    color: "#F5E6C8",
-    fontSize: 18,
-    fontFamily: "RobotoRegular",
-    textAlign: "center",
   },
   dialogPanel: {
     position: "absolute",
@@ -716,6 +616,8 @@ const styles = StyleSheet.create({
     color: "#E8DEC8",
   },
   continueBtn: {
+    width: "100%",
+    minHeight: 44,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
@@ -726,6 +628,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     minWidth: 150,
   },
+  introContinueIcon: { position: "absolute", right: 18 },
+  introChoiceRow: { width: "100%", gap: 8 },
+  dialogActionRow: { width: "100%", flexDirection: "row", gap: 10 },
+  skipBtn: {
+    minWidth: 96,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(196, 148, 58, 0.35)",
+    backgroundColor: "rgba(255,255,255,0.035)",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  skipTxt: { color: "#C4943A", fontSize: 13, fontFamily: "Oldenburg" },
   continueTxt: {
     color: "#F5E6C8",
     fontSize: 15,

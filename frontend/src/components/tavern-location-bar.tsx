@@ -23,12 +23,14 @@ type LocationId = (typeof LOCATIONS)[number]["id"];
 
 type Props = {
   current: LocationId;
+  mailboxUnread?: boolean;
 };
 
-export default function TavernLocationBar({ current }: Props) {
+export default function TavernLocationBar({ current, mailboxUnread: mailboxUnreadOverride }: Props) {
   const router = useRouter();
   const audioManager = useAudioManager();
-  const { harvestReady, merchantPresent } = useLocationStatusBadges();
+  const { harvestReady, merchantPresent, mailboxUnread } = useLocationStatusBadges();
+  const showMailboxUnread = mailboxUnreadOverride ?? mailboxUnread;
   const [coreUnlocked, setCoreUnlocked] = useState(false);
   const [exploreUnlocked, setExploreUnlocked] = useState(false);
 
@@ -65,6 +67,7 @@ export default function TavernLocationBar({ current }: Props) {
           >
             <Image source={location.image} style={[styles.image, !enabled && styles.imageLocked]} resizeMode="contain" />
             {location.id === "garden" && harvestReady && <LocationStatusBadge kind="harvest" />}
+            {location.id === "mail" && showMailboxUnread && <LocationStatusBadge kind="mail" />}
             {location.id === "explore" && merchantPresent && <LocationStatusBadge kind="merchant" />}
           </TouchableOpacity>
         );

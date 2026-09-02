@@ -17,7 +17,8 @@ import { loadGameSettings } from '@/src/settings/game-settings';
 
 // ─── Theme key types ──────────────────────────────────────────────────────────
 
-export type ThemeKey = 'main-menu' | 'kitchen' | 'garden' | 'dining' | 'dining-dawn' | 'dormitory-morning' | 'dormitory-evening'
+export type ThemeKey = 'main-menu' | 'main-menu-feathered-banner' | 'main-menu-marketgate-riot' | 'main-menu-stonegate-dance'
+  | 'kitchen' | 'garden' | 'dining' | 'dining-dawn' | 'dormitory-morning' | 'dormitory-evening'
   | 'battle-over50' | 'battle-under50' | 'rest-area' | 'boss-battle' | null;
 export type LocationKey = 'main-menu' | 'kitchen' | 'garden' | 'dining' | 'dormitory' | null;
 export type TimeOfDayKey = 'morning' | 'evening';
@@ -26,6 +27,9 @@ export type TimeOfDayKey = 'morning' | 'evening';
 
 const THEME_SOURCES: Record<NonNullable<ThemeKey>, number> = {
   'main-menu':          require('../../assets/audio/Main-Page-Theme.mp3'),
+  'main-menu-feathered-banner': require('../../assets/audio/minstrel_feathered_banner.mp3'),
+  'main-menu-marketgate-riot': require('../../assets/audio/minstrel_marketgate_riot_instrumental.mp3'),
+  'main-menu-stonegate-dance': require('../../assets/audio/minstrel_stonegate_dance_instrumental.mp3'),
   kitchen:              require('../../assets/audio/Kitchen-Theme.mp3'),
   garden:               require('../../assets/audio/Garden-Theme.mp3'),
   dining:               require('../../assets/audio/dininghall_theme.mp3'),
@@ -71,6 +75,19 @@ const SFX_SOURCES: Record<string, number> = {
   'attack-miss':        require('../../assets/audio/attack_miss.mp3'),
   action:               require('../../assets/audio/action.mp3'),
 };
+
+const MAIN_MENU_THEMES = [
+  'main-menu',
+  'main-menu-feathered-banner',
+  'main-menu-marketgate-riot',
+  'main-menu-stonegate-dance',
+] as const satisfies readonly NonNullable<ThemeKey>[];
+
+export type MainMenuThemeKey = (typeof MAIN_MENU_THEMES)[number];
+
+export function getRandomMainMenuTheme(): MainMenuThemeKey {
+  return MAIN_MENU_THEMES[Math.floor(Math.random() * MAIN_MENU_THEMES.length)];
+}
 
 // ─── Theme resolver (pure function) ──────────────────────────────────────────
 

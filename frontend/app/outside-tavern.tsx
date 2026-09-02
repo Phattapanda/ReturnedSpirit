@@ -9,7 +9,7 @@ import SceneBackground from "@/src/components/SceneBackground";
 import TavernLocationBar from "@/src/components/tavern-location-bar";
 import TavernLocationTransition from "@/src/components/tavern-location-transition";
 import TravelHeader from "@/src/components/travel-header";
-import PortraitBubble from "@/src/components/portrait-bubble";
+import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { useHaptics } from "@/src/feedback/haptics-provider";
 import { getCoachmanTravelStatus } from "@/src/game/travel-system";
@@ -55,6 +55,7 @@ export default function OutsideTavernScreen() {
   const { triggerHaptic } = useHaptics();
   const thoughtTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [headerHeight, setHeaderHeight] = useState(0);
+  const [portraitBottom, setPortraitBottom] = useState(0);
   const [view, setView] = useState<OutsideView>("menu");
   const [coachmanAvailable, setCoachmanAvailable] = useState(false);
   const [escortTutorialActive, setEscortTutorialActive] = useState(false);
@@ -170,7 +171,7 @@ export default function OutsideTavernScreen() {
   return <TavernLocationTransition location="outside"><View style={styles.root}>
     <SceneBackground source={BACKGROUND} topOffset={headerHeight} />
     <View style={[StyleSheet.absoluteFill, { top: headerHeight }, styles.overlay]} pointerEvents="none" />
-    <TravelHeader locationName="Outside the Tavern" showPortraitRow onHeaderHeightChange={setHeaderHeight} refreshKey={headerRefreshKey} />
+    <TravelHeader locationName="Outside the Tavern" showPortraitRow onHeaderHeightChange={setHeaderHeight} onPortraitBottomChange={setPortraitBottom} refreshKey={headerRefreshKey} />
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content} contentInsetAdjustmentBehavior="automatic" showsVerticalScrollIndicator={false}>
       {view === "menu" && <View style={styles.panel}>
         <Text style={styles.panelTitle}>What would you like to do?</Text>
@@ -202,7 +203,7 @@ export default function OutsideTavernScreen() {
       </View>}
       {message && <Text style={styles.message}>{message}</Text>}
     </ScrollView>
-    {thought && <PortraitBubble anchorX={70} screenWidth={screenWidth} text={thought} top={headerHeight + 112} variant="thought" />}
+    {thought && <PortraitBubble anchorX={70} screenWidth={screenWidth} text={thought} top={portraitBubbleTop(portraitBottom || headerHeight + 108)} variant="thought" />}
     {crateDeliveryVisible && (
       <View pointerEvents="none" style={StyleSheet.absoluteFill}>
         <Animated.Image
