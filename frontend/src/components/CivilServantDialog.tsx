@@ -9,15 +9,20 @@ type Props = {
   text: string;
   busy?: boolean;
   onContinue: () => void;
+  onCharacterAnchorChange?: (point: { x: number; y: number }) => void;
 };
 
-export default function CivilServantDialog({ visible, image, text, busy = false, onContinue }: Props) {
+export default function CivilServantDialog({ visible, image, text, busy = false, onContinue, onCharacterAnchorChange }: Props) {
   if (!visible) return null;
   return (
     <CharacterDialogFrame
       visible
       characterSource={image}
       speakerName="Civil Servant"
+      onCharacterLayout={(layout) => onCharacterAnchorChange?.({
+        x: layout.x + layout.width * 0.5,
+        y: layout.y + layout.height * 0.42,
+      })}
       actions={(
         <TouchableOpacity style={[styles.continueButton, busy && styles.disabled]} disabled={busy} onPress={onContinue} activeOpacity={0.8} accessibilityRole="button" accessibilityLabel="Continue Civil Servant dialog">
           <Text style={styles.continueText}>{busy ? "..." : "Continue"}</Text>

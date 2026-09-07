@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { audioEngine } from "@/src/audio/audioEngine";
 
 /**
  * Currency is stored canonically as one non-negative Copper value.
@@ -51,6 +52,19 @@ export function copperToDenominations(totalCopper: number): CurrencyBreakdown {
   return { gold, silver, copper };
 }
 
+/** Format a Copper amount using the largest available coin denominations. */
+export function formatCurrencyAmount(totalCopper: number): string {
+  const { gold, silver, copper } = copperToDenominations(totalCopper);
+  const parts = [
+    gold > 0 ? `${gold} Gold Coin${gold === 1 ? "" : "s"}` : null,
+    silver > 0 ? `${silver} Silver Coin${silver === 1 ? "" : "s"}` : null,
+    copper > 0 || (gold === 0 && silver === 0)
+      ? `${copper} Copper Coin${copper === 1 ? "" : "s"}`
+      : null,
+  ];
+  return parts.filter((part): part is string => part !== null).join(" · ");
+}
+
 /** Convert denominations back into canonical Copper. Useful for future prices/tools. */
 export function denominationsToCopper(balance: Partial<CurrencyBreakdown>): number {
   return normalizeCopper(
@@ -72,8 +86,11 @@ export async function loadCurrencyCopper(): Promise<number> {
 
 export async function saveCurrencyCopper(totalCopper: number): Promise<number> {
   const normalized = normalizeCopper(totalCopper);
+  const previousRaw = await AsyncStorage.getItem(CURRENCY_KEY);
+  const previous = previousRaw === null ? DEFAULT_CURRENCY_COPPER : normalizeCopper(Number(previousRaw));
   await AsyncStorage.setItem(CURRENCY_KEY, String(normalized));
   emitCurrency(normalized);
+  if (normalized < previous) audioEngine.playSoundEffect("losecoin", { maxDurationMs: 2200 });
   return normalized;
 }
 

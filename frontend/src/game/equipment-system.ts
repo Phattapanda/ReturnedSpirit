@@ -10,12 +10,13 @@ import {
   type PlayerBagData,
 } from "@/src/game/item-system";
 
-export type EquipmentKind = "weapon" | "armor";
+export type EquipmentKind = "weapon" | "armor" | "tool";
 
 export function getEquipmentKind(item: BagItem): EquipmentKind | null {
   const attributes = getItemAttributes(item);
   if (attributes.includes(ITEM_ATTRIBUTE.WEAPON)) return "weapon";
   if (attributes.includes(ITEM_ATTRIBUTE.ARMOR)) return "armor";
+  if (item.id === "torch") return "tool";
   return null;
 }
 
@@ -24,6 +25,14 @@ export function toggleEquippedItem(bag: PlayerBagData, slotIndex: number): Playe
   if (!target) return bag;
   const kind = getEquipmentKind(target);
   if (!kind) return bag;
+  if (!target.equipped && target.quantity > 1) {
+    const free = bag.slots.findIndex((item) => item === null);
+    if (free < 0) return bag;
+    const slots = bag.slots.map((item) => item && getEquipmentKind(item) === kind && item.equipped ? { ...item, equipped: false } : item);
+    slots[slotIndex] = { ...target, quantity: target.quantity - 1, equipped: false };
+    slots[free] = { ...target, quantity: 1, equipped: true };
+    return { ...bag, slots };
+  }
   const nextSlots = bag.slots.map((item, index) => {
     if (!item) return null;
     if (index === slotIndex) return { ...item, equipped: !target.equipped };

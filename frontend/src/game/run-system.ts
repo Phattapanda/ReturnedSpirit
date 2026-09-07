@@ -21,12 +21,12 @@ export function formatRunOrdinal(runNumber: number): string {
   return `${value}th`;
 }
 
-export function getDeathAngelRunLine(runNumber: number): string {
+export function getDeathRunLine(runNumber: number): string {
   return `I'm seeing you for the ${formatRunOrdinal(runNumber)} time.`;
 }
 
 /**
- * Persistent death/run transition foundation. The future Death Angel flow passes
+ * Persistent death/run transition foundation. The Death flow passes
  * the NPC relationships purchased for preservation; everything else resets.
  */
 export async function advanceToNextRun(

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, Image, StyleSheet, Text, View } from "react-native";
-import { usePathname } from "expo-router";
-import { useIsFocused } from "@react-navigation/native";
+import { useIsFocused, usePathname } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 
@@ -25,6 +24,7 @@ function isGameplayRoute(pathname: string): boolean {
     pathname === "/dining" ||
     pathname === "/dining-hall" ||
     pathname === "/mail" ||
+    pathname === "/next-city" ||
     pathname === "/outside-tavern";
 }
 
@@ -39,9 +39,10 @@ function isGameplayRoute(pathname: string): boolean {
 type CurrencyHudProps = {
   compact?: boolean;
   inline?: boolean;
+  soundOnChange?: boolean;
 };
 
-export default function CurrencyHud({ compact = false, inline = false }: CurrencyHudProps) {
+export default function CurrencyHud({ compact = false, inline = false, soundOnChange = true }: CurrencyHudProps) {
   const pathname = usePathname();
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
@@ -70,7 +71,7 @@ export default function CurrencyHud({ compact = false, inline = false }: Currenc
       const previous = lastCopperRef.current;
       lastCopperRef.current = value;
       setTotalCopper(value);
-      if (previous !== null && previous !== value && isFocusedRef.current) {
+      if (soundOnChange && previous !== null && previous !== value && isFocusedRef.current) {
         playSoundEffect("money", { maxDurationMs: 4000 });
       }
     });
@@ -78,7 +79,7 @@ export default function CurrencyHud({ compact = false, inline = false }: Currenc
       active = false;
       unsubscribe();
     };
-  }, [playSoundEffect]);
+  }, [playSoundEffect, soundOnChange]);
 
   // Follow room navigation visually instead of staying pinned during Stack transitions.
   useEffect(() => {

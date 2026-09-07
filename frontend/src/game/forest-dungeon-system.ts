@@ -4,6 +4,7 @@ import {
   ITEM_CATALOG,
   ITEM_ATTRIBUTE,
   PLAYER_BAG_KEY,
+  normalizeBagItem,
   normalizePlayerBagData,
   planAddToBag,
   type BagItem,
@@ -18,6 +19,19 @@ import {
 } from "@/src/game/equipment-system";
 import { loadCurrencyCopper, saveCurrencyCopper } from "@/src/game/currency-system";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats } from "@/src/game/player-stats";
+import {
+  GARDEN_INVENTORY_KEY,
+  normalizeGardenInventory,
+  normalizeSharedResources,
+  planTavernReturnStorage,
+} from "@/src/game/tavern-return-storage";
+import { SHARED_RESOURCES_KEY } from "@/src/game/shared-resources";
+import { FOREST_DIRECT_LOOT, getButcheringDefinition } from "@/src/game/butchering-system";
+import {
+  activeSupporter, activeTempleBlessing, addToSupporterFirst, beginSupporterDungeonRun,
+  beginTempleBlessingExpedition, completeTempleBlessingExpedition, deliverSupporterBagAfterDungeonRun, hasActiveCampQuest,
+  markCampDocumentsFound, recordMonsterDefeat,
+} from "@/src/game/city-system";
 
 export const FOREST_DUNGEON_KEY = "@dungeon:forest_entrance";
 export const FOREST_FIGHT_SNAPSHOT_KEY = "@dungeon:forest_fight_snapshot";
@@ -80,6 +94,7 @@ export type ForestFloorState = {
   monster: ForestMonsterState | null;
   message: string | null;
   carcassPending: boolean;
+  pendingLoot: BagItem[];
 };
 
 export type ForestDungeonState = {
@@ -141,6 +156,7 @@ function createFloorState(floor: number): ForestFloorState {
       monster: { id: boss.id, life: boss.maximumLife, maximumLife: boss.maximumLife, phase: "combat" },
       message: "The Elder Ember Rooster guards the heart of the nest.",
       carcassPending: false,
+      pendingLoot: [],
     };
   }
   const location = SEARCH_LOCATIONS[randomIndex(SEARCH_LOCATIONS.length)];
@@ -152,6 +168,7 @@ function createFloorState(floor: number): ForestFloorState {
     monster: null,
     message: FOREST_REST_FLOORS.has(floor) ? "This is a safe place to rest." : null,
     carcassPending: false,
+    pendingLoot: [],
   };
 }
 
@@ -173,6 +190,9 @@ function normalizeFloor(raw: Partial<ForestFloorState> | undefined, floor: numbe
     monster,
     message: typeof raw?.message === "string" ? raw.message : fallback.message,
     carcassPending: raw?.carcassPending === true,
+    pendingLoot: Array.isArray(raw?.pendingLoot)
+      ? raw.pendingLoot.map((item) => normalizeBagItem(item)).filter((item): item is BagItem => item !== null)
+      : [],
   };
 }
 
@@ -194,10 +214,17 @@ export async function loadForestDungeonState(): Promise<ForestDungeonState> {
   const raw = await AsyncStorage.getItem(FOREST_DUNGEON_KEY);
   const state = normalizeForestDungeonState(raw ? JSON.parse(raw) : null);
   if (!state.floors[String(state.currentFloor)]) state.floors[String(state.currentFloor)] = createFloorState(state.currentFloor);
+  const current = state.floors[String(state.currentFloor)];
+  if (current.searchAvailable && !current.searched && await hasActiveCampQuest()) {
+    current.searchLocation = "Hunter's Camp";
+    current.searchCost = 5;
+  }
   return state;
 }
 
 export async function enterForestDungeon(): Promise<ForestDungeonState> {
+  await beginSupporterDungeonRun();
+  await beginTempleBlessingExpedition();
   const loaded = await loadForestDungeonState();
   if (loaded.active) return loaded;
   const fresh: ForestDungeonState = { ...DEFAULT_FOREST_DUNGEON_STATE, active: true, floors: { "1": createFloorState(1) } };
@@ -212,8 +239,10 @@ export async function saveForestDungeonState(state: ForestDungeonState): Promise
 
 async function loadRuntime() {
   const [rawStats, rawStamina, rawLife, rawBag] = await AsyncStorage.multiGet([PLAYER_STATS_KEY, STAMINA_KEY, LIFE_KEY, PLAYER_BAG_KEY]);
+  const blessing = await activeTempleBlessing();
+  const baseStats = normalizePlayerStats(rawStats[1] ? JSON.parse(rawStats[1]) : DEFAULT_PLAYER_STATS);
   return {
-    stats: normalizePlayerStats(rawStats[1] ? JSON.parse(rawStats[1]) : DEFAULT_PLAYER_STATS),
+    stats: { ...baseStats, maximumStamina: baseStats.maximumStamina + (blessing === "endurance" ? 50 : 0), luck: baseStats.luck + (blessing === "fortune" ? 5 : 0) },
     stamina: Math.max(0, Number.parseInt(rawStamina[1] ?? "0", 10) || 0),
     life: Math.max(0, Number.parseInt(rawLife[1] ?? "0", 10) || 0),
     bag: normalizePlayerBagData(rawBag[1] ? JSON.parse(rawBag[1]) : {}),
@@ -226,7 +255,17 @@ async function saveRuntime(state: ForestDungeonState, life: number, stamina: num
   ]);
 }
 
-export type DungeonActionResult = { ok: boolean; state: ForestDungeonState; message: string; life: number; stamina: number; bag: PlayerBagData };
+export type DungeonLootFlight = { item: BagItem; destination: "supporter" | "player" };
+export type DungeonActionResult = {
+  ok: boolean;
+  state: ForestDungeonState;
+  message: string;
+  life: number;
+  stamina: number;
+  bag: PlayerBagData;
+  playerAttack?: { kind: "slash" | "critical" | "punch"; damage: number; defeated: boolean };
+  lootFlights?: DungeonLootFlight[];
+};
 
 function currentFloorOf(state: ForestDungeonState): ForestFloorState {
   return state.floors[String(state.currentFloor)] ?? createFloorState(state.currentFloor);
@@ -239,14 +278,89 @@ function spawnMonster(floor: number): ForestMonsterState {
 }
 
 function createCarcass(monster: ForestMonsterDefinition): BagItem {
-  return { id: "monster_carcass", itemType: "monster_carcass", name: `${monster.name} Carcass`, quantity: 1, monsterId: monster.id, attributes: ["material"] };
+  const definition = getButcheringDefinition(monster.id);
+  return { id: "monster_carcass", itemType: "monster_carcass", name: definition?.carcassName ?? `${monster.name} Carcass`, quantity: 1, monsterId: monster.id, attributes: ["material"] };
 }
 
-function addCarcass(bag: PlayerBagData, monster: ForestMonsterDefinition): { bag: PlayerBagData; added: boolean } {
-  const plan = planAddToBag(createCarcass(monster), bag);
+function createMaterial(id: string, quantity = 1): BagItem {
+  const catalog = ITEM_CATALOG[id];
+  return { id, itemType: id, name: catalog?.name ?? id, quantity, attributes: catalog?.attributes ? [...catalog.attributes] : undefined };
+}
+
+async function addRewardItem(bag: PlayerBagData, item: BagItem): Promise<{ bag: PlayerBagData; added: boolean; destination: "supporter" | "player" }> {
+  const support = await addToSupporterFirst(item);
+  if (support.stored) return { bag, added: true, destination: "supporter" };
+  const plan = planAddToBag(item, bag);
   return plan.canTransfer && plan.remainderQty === 0
-    ? { bag: { ...bag, slots: plan.updatedSlots }, added: true }
-    : { bag, added: false };
+    ? { bag: { ...bag, slots: plan.updatedSlots }, added: true, destination: "player" }
+    : { bag, added: false, destination: "player" };
+}
+
+async function grantMonsterDefeatRewards(
+  floor: ForestFloorState,
+  bag: PlayerBagData,
+  monster: ForestMonsterDefinition,
+): Promise<{ bag: PlayerBagData; message: string; lootFlights: DungeonLootFlight[] }> {
+  const definition = getButcheringDefinition(monster.id);
+  const directLoot = FOREST_DIRECT_LOOT[monster.id];
+  const rewards: BagItem[] = definition
+    ? [createCarcass(monster)]
+    : directLoot
+      ? directLoot.map((id) => createMaterial(id))
+        : monster.id === "ember_chick"
+          ? [createMaterial("ember_feather")]
+          : [];
+  let copper = 0;
+  if (monster.id === "goblin_forager") {
+    copper = 3 + Math.floor(Math.random() * 6);
+    await saveCurrencyCopper((await loadCurrencyCopper()) + copper);
+  }
+  const pending: BagItem[] = [];
+  const received: string[] = [];
+  const lootFlights: DungeonLootFlight[] = [];
+  let nextBag = bag;
+  for (const item of rewards) {
+    const result = await addRewardItem(nextBag, item);
+    nextBag = result.bag;
+    if (result.added) {
+      received.push(item.name);
+      lootFlights.push({ item, destination: result.destination });
+    }
+    else pending.push(item);
+  }
+  floor.pendingLoot = pending;
+  floor.carcassPending = pending.length > 0;
+  const parts: string[] = [];
+  if (received.length) parts.push(`${received.join(", ")} ${received.length === 1 ? "was" : "were"} collected.`);
+  if (copper) parts.push(`${copper} Copper was collected.`);
+  if (pending.length) parts.push("My bags are full; the remaining battle loot stays here.");
+  return { bag: nextBag, message: parts.length ? ` ${parts.join(" ")}` : "", lootFlights };
+}
+
+function dungeonActivityCost(bag: PlayerBagData, baseCost: number): number {
+  return getEquippedItem(bag, "tool")?.id === "torch" ? Math.max(0, baseCost - 2) : baseCost;
+}
+
+function payDungeonActivityCost(stamina: number, life: number, cost: number) {
+  const staminaPaid = Math.min(Math.max(0, stamina), cost);
+  const lifePaid = Math.max(0, cost - staminaPaid);
+  return {
+    stamina: stamina - staminaPaid,
+    life: Math.max(0, life - lifePaid),
+    lifePaid,
+    message: lifePaid > 0 ? ` I lack Stamina and lose ${lifePaid} Life instead.` : "",
+  };
+}
+
+function consumeTorchDurability(bag: PlayerBagData): PlayerBagData {
+  const index = bag.slots.findIndex((item) => item?.equipped && item.id === "torch");
+  if (index < 0) return bag;
+  const torch = bag.slots[index]!; const remaining = Math.max(0, (torch.durability ?? 50) - 1);
+  const slots = [...bag.slots];
+  slots[index] = remaining > 0
+    ? { ...torch, durability: remaining }
+    : { id: "coal", itemType: "coal", name: "Coal", quantity: 1, attributes: [ITEM_ATTRIBUTE.MATERIAL] };
+  return { ...bag, slots };
 }
 
 async function saveFightSnapshot(state: ForestDungeonState, life: number, stamina: number, bag: PlayerBagData) {
@@ -258,28 +372,55 @@ export async function searchForestArea(): Promise<DungeonActionResult> {
   const runtime = await loadRuntime();
   const floor = currentFloorOf(state);
   if (!floor.searchAvailable || floor.searched || floor.monster?.phase === "combat") return { ok: false, state, message: "There is nothing more to search here.", ...runtime };
-  if (runtime.stamina < floor.searchCost) return { ok: false, state, message: "I do not have enough Stamina.", ...runtime };
-  const stamina = runtime.stamina - floor.searchCost;
+  const activityCost = dungeonActivityCost(runtime.bag, floor.searchCost);
+  const payment = payDungeonActivityCost(runtime.stamina, runtime.life, activityCost);
+  const stamina = payment.stamina;
+  const paidLife = payment.life;
+  runtime.bag = consumeTorchDurability(runtime.bag);
   const nextFloor = { ...floor, searched: true, searchAvailable: false };
   const nextState = { ...state, floors: { ...state.floors, [String(state.currentFloor)]: nextFloor } };
-  const successChance = clampPercent(FOREST_SEARCH_BASE_SUCCESS + runtime.stats.perception * FOREST_SEARCH_PERCEPTION_BONUS);
+  const hiredSupporter = await activeSupporter();
+  const searchPerception = hiredSupporter?.definition.id === "botanist" ? runtime.stats.perception * 1.15 : runtime.stats.perception;
+  const successChance = clampPercent(FOREST_SEARCH_BASE_SUCCESS + searchPerception * FOREST_SEARCH_PERCEPTION_BONUS);
   if (Math.random() * 100 >= successChance) {
     nextFloor.message = "I could not find anything useful.";
-    await saveRuntime(nextState, runtime.life, stamina, runtime.bag);
-    return { ok: true, state: nextState, message: nextFloor.message, life: runtime.life, stamina, bag: runtime.bag };
+    nextFloor.message += payment.message;
+    await saveRuntime(nextState, paidLife, stamina, runtime.bag);
+    return { ok: true, state: nextState, message: nextFloor.message, life: paidLife, stamina, bag: runtime.bag };
+  }
+
+  if (floor.searchLocation === "Hunter's Camp" && await hasActiveCampQuest()) {
+    const item: BagItem = { id: "quest_hunters_documents", itemType: "quest_hunters_documents", name: "Research Documents", quantity: 1, attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] };
+    const support = await addToSupporterFirst(item);
+    let bag = runtime.bag;
+    if (!support.stored) {
+      const plan = planAddToBag(item, bag);
+      if (!plan.canTransfer || plan.remainderQty) {
+        nextFloor.message = "I found the researchers' document bag, but neither bag has enough room." + payment.message;
+        await saveRuntime(nextState, paidLife, stamina, bag);
+        return { ok: true, state: nextState, message: nextFloor.message, life: paidLife, stamina, bag };
+      }
+      bag = { ...bag, slots: plan.updatedSlots };
+    }
+    await markCampDocumentsFound();
+    nextFloor.message = `I found the researchers' documents at the Hunter's Camp. They went into the ${support.stored ? "Supporter Bag" : "Player Bag"}.` + payment.message;
+    await saveRuntime(nextState, paidLife, stamina, bag);
+    return { ok: true, state: nextState, message: nextFloor.message, life: paidLife, stamina, bag };
   }
 
   const eventRoll = Math.random() * 100;
   if (eventRoll < 50) {
     nextFloor.monster = spawnMonster(state.currentFloor);
     const monster = FOREST_MONSTERS[nextFloor.monster.id];
-    nextFloor.message = `I noticed a ${monster.name} before it noticed me.`;
-    await saveRuntime(nextState, runtime.life, stamina, runtime.bag);
-    return { ok: true, state: nextState, message: nextFloor.message, life: runtime.life, stamina, bag: runtime.bag };
+    nextFloor.message = `I noticed a ${monster.name} before it noticed me.` + payment.message;
+    await saveRuntime(nextState, paidLife, stamina, runtime.bag);
+    return { ok: true, state: nextState, message: nextFloor.message, life: paidLife, stamina, bag: runtime.bag };
   }
 
   const location = SEARCH_LOCATIONS.find((entry) => entry.name === floor.searchLocation) ?? SEARCH_LOCATIONS[0];
-  const findQuantity = 1 + Math.min(2, Math.floor(runtime.stats.luck / FOREST_SEARCH_LUCK_POINTS_PER_BONUS_ITEM));
+  const searchLuck = hiredSupporter?.definition.id === "botanist" ? runtime.stats.luck * 1.15 : runtime.stats.luck;
+  const botanistYield = hiredSupporter?.definition.id === "botanist" && Math.random() < 0.15 ? 1 : 0;
+  const findQuantity = 1 + botanistYield + Math.min(2, Math.floor(searchLuck / FOREST_SEARCH_LUCK_POINTS_PER_BONUS_ITEM));
   let bag = runtime.bag;
   let message = `I searched the ${location.name}.`;
   if (eventRoll < 85 && location.copper) {
@@ -289,16 +430,21 @@ export async function searchForestArea(): Promise<DungeonActionResult> {
   } else if (eventRoll < 85 && location.itemId) {
     const catalog = ITEM_CATALOG[location.itemId];
     const item: BagItem = { id: location.itemId, itemType: location.itemId, name: catalog?.name ?? location.itemId, quantity: findQuantity, attributes: catalog?.attributes ? [...catalog.attributes] : undefined };
-    const plan = planAddToBag(item, bag);
-    if (plan.canTransfer && plan.remainderQty === 0) {
+    const support = await addToSupporterFirst(item);
+    const plan = support.stored ? null : planAddToBag(item, bag);
+    if (support.stored) {
+      message = `I found ${findQuantity}× ${catalog?.name ?? location.itemId} in the ${location.name}. It went into the Supporter Bag.`;
+    } else if (plan && plan.canTransfer && plan.remainderQty === 0) {
       bag = { ...bag, slots: plan.updatedSlots };
       message = `I found ${findQuantity}× ${catalog?.name ?? location.itemId} in the ${location.name}.`;
     } else message = "My bag is full. I have to leave the find behind.";
   } else if (eventRoll < 95) message = "I found unusual tracks, but nothing I can take with me yet.";
   else message = "The forest is quiet. For a moment, I only hear the leaves moving.";
   nextFloor.message = message;
-  await saveRuntime(nextState, runtime.life, stamina, bag);
-  return { ok: true, state: nextState, message, life: runtime.life, stamina, bag };
+  message += payment.message;
+  nextFloor.message = message;
+  await saveRuntime(nextState, paidLife, stamina, bag);
+  return { ok: true, state: nextState, message, life: paidLife, stamina, bag };
 }
 
 function incomingDamage(monster: ForestMonsterDefinition, endurance: number, armor: BagItem | null, defending: boolean): number {
@@ -321,13 +467,43 @@ async function monsterAttack(
   if (dodged) message = `I evade the ${monster.name}'s attack.`;
   else {
     const armor = getEquippedItem(bag, "armor");
-    const damage = incomingDamage(monster, runtime.stats.endurance, armor, defending);
+    const blessing = await activeTempleBlessing();
+    const rawDamage = incomingDamage(monster, runtime.stats.endurance, armor, defending);
+    const damage = blessing === "protection" ? Math.ceil(rawDamage * 0.85) : rawDamage;
     life = Math.max(0, life - damage);
     if (damage > 0 && armor) bag = consumeArmorDurability(bag);
     message = damage > 0 ? `${monster.name} hits me for ${damage} damage.` : `${monster.name} cannot get through my defense.`;
   }
   await saveRuntime(state, life, runtime.stamina, bag);
   return { ok: true, state, message, life, stamina: runtime.stamina, bag };
+}
+
+async function clericSupportTurn(
+  state: ForestDungeonState,
+  runtime: Awaited<ReturnType<typeof loadRuntime>>,
+): Promise<{ message: string; life: number; bag: PlayerBagData; defeated: boolean; lootFlights?: DungeonLootFlight[] }> {
+  const hired = await activeSupporter();
+  const floor = currentFloorOf(state);
+  if (hired?.definition.id !== "cleric" || !floor.monster || floor.monster.phase !== "combat") return { message: "", life: runtime.life, bag: runtime.bag, defeated: false };
+  const monster = FOREST_MONSTERS[floor.monster.id];
+  const damage = Math.max(1, runtime.stats.strength + 5 - monster.physicalDefense);
+  floor.monster.life = Math.max(0, floor.monster.life - damage);
+  const roundKey = `@dungeon:cleric_round:${state.currentFloor}`;
+  const round = Math.max(0, Number(await AsyncStorage.getItem(roundKey)) || 0) + 1;
+  await AsyncStorage.setItem(roundKey, String(round));
+  const life = round % 3 === 0 ? Math.min(runtime.stats.maximumLife, runtime.life + Math.ceil(runtime.stats.maximumLife * 0.1)) : runtime.life;
+  let bag = runtime.bag;
+  let message = ` ${hired.definition.name} strikes for ${damage} damage.`;
+  if (life > runtime.life) message += ` They restore ${life - runtime.life} Life.`;
+  if (floor.monster.life <= 0) {
+    floor.monster.phase = "defeated";
+    const loot = await grantMonsterDefeatRewards(floor, bag, monster); bag = loot.bag;
+    message += loot.message;
+    await recordMonsterDefeat(monster.id);
+    await saveRuntime(state, life, runtime.stamina, bag);
+    return { message, life, bag, defeated: true, lootFlights: loot.lootFlights };
+  }
+  return { message, life, bag, defeated: false };
 }
 
 export async function hideFromForestMonster(): Promise<DungeonActionResult> {
@@ -346,15 +522,26 @@ export async function hideFromForestMonster(): Promise<DungeonActionResult> {
     nextMonster.life = Math.max(0, nextMonster.life - damage);
     let bag = weapon ? consumeWeaponDurability(runtime.bag) : runtime.bag;
     let message = `I remain unseen and strike critically for ${damage} damage.`;
+    let lootFlights: DungeonLootFlight[] | undefined;
     if (nextMonster.life <= 0) {
       nextMonster.phase = "defeated";
-      const carcass = addCarcass(bag, monster);
-      bag = carcass.bag;
-      nextFloor.carcassPending = !carcass.added;
-      message += carcass.added ? ` ${monster.name} Carcass was added to my bag.` : " My bag is full; the carcass remains here.";
+      const loot = await grantMonsterDefeatRewards(nextFloor, bag, monster);
+      bag = loot.bag;
+      message += loot.message;
+      lootFlights = loot.lootFlights;
+      await recordMonsterDefeat(monster.id);
     }
     await saveRuntime(nextState, runtime.life, runtime.stamina, bag);
-    return { ok: true, state: nextState, message, life: runtime.life, stamina: runtime.stamina, bag };
+    return {
+      ok: true,
+      state: nextState,
+      message,
+      life: runtime.life,
+      stamina: runtime.stamina,
+      bag,
+      playerAttack: { kind: weapon ? "critical" : "punch", damage, defeated: nextMonster.life <= 0 },
+      lootFlights,
+    };
   }
   await saveForestDungeonState(nextState);
   const result = await monsterAttack(nextState, runtime, false);
@@ -372,24 +559,37 @@ export async function attackForestMonster(target: "head" | "body"): Promise<Dung
   const hitChance = clampPercent(baseAccuracy + runtime.stats.accuracy - (target === "head" ? 30 : 0));
   let bag = runtime.bag;
   let message: string;
+  let playerAttack: DungeonActionResult["playerAttack"];
   if (Math.random() * 100 < hitChance) {
     const baseDamage = rollPlayerPhysicalDamage(runtime.stats.strength, monster.physicalDefense, weapon);
     const damage = target === "head" ? Math.ceil(baseDamage * 1.5) : baseDamage;
     floor.monster.life = Math.max(0, floor.monster.life - damage);
     if (weapon) bag = consumeWeaponDurability(bag);
     message = `I hit the ${monster.name}'s ${target} for ${damage} damage.`;
+    playerAttack = { kind: weapon ? "slash" : "punch", damage, defeated: floor.monster.life <= 0 };
     if (floor.monster.life <= 0) {
       floor.monster.phase = "defeated";
-      const carcass = addCarcass(bag, monster);
-      bag = carcass.bag;
-      floor.carcassPending = !carcass.added;
-      message += carcass.added ? ` ${monster.name} Carcass was added to my bag.` : " My bag is full; the carcass remains here.";
+      const loot = await grantMonsterDefeatRewards(floor, bag, monster);
+      bag = loot.bag;
+      message += loot.message;
+      await recordMonsterDefeat(monster.id);
       await saveRuntime(state, runtime.life, runtime.stamina, bag);
-      return { ok: true, state, message, life: runtime.life, stamina: runtime.stamina, bag };
+      return {
+        ok: true,
+        state,
+        message,
+        life: runtime.life,
+        stamina: runtime.stamina,
+        bag,
+        playerAttack,
+        lootFlights: loot.lootFlights,
+      };
     }
   } else message = `My attack against the ${monster.name}'s ${target} misses.`;
-  const counter = await monsterAttack(state, { ...runtime, bag }, false);
-  return { ...counter, message: `${message} ${counter.message}` };
+  const cleric = await clericSupportTurn(state, { ...runtime, bag });
+  if (cleric.defeated) return { ok: true, state, message: message + cleric.message, life: cleric.life, stamina: runtime.stamina, bag: cleric.bag, playerAttack, lootFlights: cleric.lootFlights };
+  const counter = await monsterAttack(state, { ...runtime, life: cleric.life, bag: cleric.bag }, false);
+  return { ...counter, message: `${message}${cleric.message} ${counter.message}`, playerAttack };
 }
 
 export async function defendAgainstForestMonster(): Promise<DungeonActionResult> {
@@ -397,7 +597,18 @@ export async function defendAgainstForestMonster(): Promise<DungeonActionResult>
   const runtime = await loadRuntime();
   const floor = currentFloorOf(state);
   if (!floor.monster || floor.monster.phase !== "combat") return { ok: false, state, message: "There is no attack to defend against.", ...runtime };
-  return monsterAttack(state, runtime, true);
+  const cleric = await clericSupportTurn(state, runtime);
+  if (cleric.defeated) return {
+    ok: true,
+    state,
+    message: cleric.message.trim(),
+    life: cleric.life,
+    stamina: runtime.stamina,
+    bag: cleric.bag,
+    lootFlights: cleric.lootFlights,
+  };
+  const result = await monsterAttack(state, { ...runtime, life: cleric.life, bag: cleric.bag }, true);
+  return { ...result, message: cleric.message + " " + result.message };
 }
 
 export async function escapeForestCombat(): Promise<DungeonActionResult> {
@@ -421,36 +632,60 @@ export async function goForwardInForest(): Promise<DungeonActionResult> {
   const runtime = await loadRuntime();
   const floor = currentFloorOf(state);
   if (floor.monster && floor.monster.phase !== "defeated") return { ok: false, state, message: "The monster blocks the way forward.", ...runtime };
-  if (floor.carcassPending) return { ok: false, state, message: "I need room in my bag for the carcass first.", ...runtime };
-  if (runtime.stamina < FOREST_FORWARD_STAMINA_COST) return { ok: false, state, message: "I do not have enough Stamina.", ...runtime };
+  if (floor.carcassPending) return { ok: false, state, message: "I need room in my bags for the remaining battle loot first.", ...runtime };
+  const activityCost = dungeonActivityCost(runtime.bag, FOREST_FORWARD_STAMINA_COST);
+  const payment = payDungeonActivityCost(runtime.stamina, runtime.life, activityCost);
   if (state.currentFloor >= FOREST_FLOOR_COUNT) return { ok: false, state, message: "The Forest Entrance has been cleared.", ...runtime };
   state.currentFloor += 1;
   if (!state.floors[String(state.currentFloor)]) state.floors[String(state.currentFloor)] = createFloorState(state.currentFloor);
   const entered = currentFloorOf(state);
-  if (entered.monster?.phase === "combat") await saveFightSnapshot(state, runtime.life, runtime.stamina - FOREST_FORWARD_STAMINA_COST, runtime.bag);
-  await saveRuntime(state, runtime.life, runtime.stamina - FOREST_FORWARD_STAMINA_COST, runtime.bag);
-  return { ok: true, state, message: entered.message ?? `I advance to floor ${state.currentFloor}.`, life: runtime.life, stamina: runtime.stamina - FOREST_FORWARD_STAMINA_COST, bag: runtime.bag };
+  runtime.bag = consumeTorchDurability(runtime.bag);
+  const supporter = await activeSupporter();
+  const life = supporter?.definition.id === "healer" ? Math.min(runtime.stats.maximumLife, payment.life + Math.ceil(runtime.stats.maximumLife * 0.1)) : payment.life;
+  if (entered.monster?.phase === "combat") await saveFightSnapshot(state, life, payment.stamina, runtime.bag);
+  await saveRuntime(state, life, payment.stamina, runtime.bag);
+  const healerMessage = life > payment.life ? ` ${supporter!.definition.name} restores ${life - payment.life} Life.` : "";
+  return { ok: true, state, message: (entered.message ?? `I advance to floor ${state.currentFloor}.`) + payment.message + healerMessage, life, stamina: payment.stamina, bag: runtime.bag };
 }
 
 export async function collectPendingForestCarcass(): Promise<DungeonActionResult> {
   const state = await loadForestDungeonState();
   const runtime = await loadRuntime();
   const floor = currentFloorOf(state);
-  if (!floor.carcassPending || !floor.monster) return { ok: false, state, message: "There is no carcass to collect.", ...runtime };
+  if (!floor.carcassPending || !floor.monster) return { ok: false, state, message: "There is no battle loot to collect.", ...runtime };
   const monster = FOREST_MONSTERS[floor.monster.id];
-  const result = addCarcass(runtime.bag, monster);
-  if (!result.added) return { ok: false, state, message: "My bag is still full.", ...runtime };
-  floor.carcassPending = false;
-  const message = `${monster.name} Carcass was added to my bag.`;
-  await saveRuntime(state, runtime.life, runtime.stamina, result.bag);
-  return { ok: true, state, message, life: runtime.life, stamina: runtime.stamina, bag: result.bag };
+  const legacyPending = floor.pendingLoot.length === 0 && getButcheringDefinition(monster.id)
+    ? [createCarcass(monster)]
+    : floor.pendingLoot;
+  if (legacyPending.length === 0) {
+    floor.carcassPending = false;
+    await saveRuntime(state, runtime.life, runtime.stamina, runtime.bag);
+    return { ok: true, state, message: "There is no butcherable carcass here.", ...runtime };
+  }
+  let bag = runtime.bag;
+  const remaining: BagItem[] = [];
+  const collected: string[] = [];
+  for (const item of legacyPending) {
+    const result = await addRewardItem(bag, item);
+    bag = result.bag;
+    if (result.added) collected.push(item.name);
+    else remaining.push(item);
+  }
+  floor.pendingLoot = remaining;
+  floor.carcassPending = remaining.length > 0;
+  const message = remaining.length
+    ? `Collected ${collected.join(", ") || "nothing"}. My bags are still too full for the remaining loot.`
+    : `${collected.join(", ")} ${collected.length === 1 ? "was" : "were"} collected.`;
+  await saveRuntime(state, runtime.life, runtime.stamina, bag);
+  return { ok: remaining.length === 0, state, message, life: runtime.life, stamina: runtime.stamina, bag };
 }
 
 export async function bandageAtForestRestArea(useHerb: boolean): Promise<DungeonActionResult> {
   const state = await loadForestDungeonState();
   const runtime = await loadRuntime();
   if (!FOREST_REST_FLOORS.has(state.currentFloor)) return { ok: false, state, message: "I can only bandage wounds at a Rest Area.", ...runtime };
-  if (runtime.stamina < 10) return { ok: false, state, message: "I do not have enough Stamina.", ...runtime };
+  const activityCost = dungeonActivityCost(runtime.bag, 10);
+  const payment = payDungeonActivityCost(runtime.stamina, runtime.life, activityCost);
   let bag = runtime.bag;
   if (useHerb) {
     const index = bag.slots.findIndex((item) => item?.id === "herbs");
@@ -461,9 +696,10 @@ export async function bandageAtForestRestArea(useHerb: boolean): Promise<Dungeon
     bag = { ...bag, slots };
   }
   const percent = useHerb ? 0.30 : 0.20;
-  const life = Math.min(runtime.stats.maximumLife, runtime.life + Math.ceil(runtime.stats.maximumLife * percent));
-  await saveRuntime(state, life, runtime.stamina - 10, bag);
-  return { ok: true, state, message: `I restore ${life - runtime.life} Life.`, life, stamina: runtime.stamina - 10, bag };
+  const life = Math.min(runtime.stats.maximumLife, payment.life + Math.ceil(runtime.stats.maximumLife * percent));
+  bag = consumeTorchDurability(bag);
+  await saveRuntime(state, life, payment.stamina, bag);
+  return { ok: true, state, message: `I restore ${life - payment.life} Life.${payment.message}`, life, stamina: payment.stamina, bag };
 }
 
 export async function leaveForestDungeon(): Promise<{ message: string; bag: PlayerBagData }> {
@@ -475,22 +711,22 @@ export async function leaveForestDungeon(): Promise<{ message: string; bag: Play
     && !floor.carcassPending;
   if (!FOREST_REST_FLOORS.has(state.currentFloor) && !bossDefeated) throw new Error("not_safe_exit");
   const runtime = await loadRuntime();
-  const rawGarden = await AsyncStorage.getItem("@garden:inventory");
-  const garden: { id: string; itemType: string; name: string; quantity: number }[] = rawGarden ? JSON.parse(rawGarden) : [];
-  const nextSlots = runtime.bag.slots.map((item) => {
-    if (!item || item.id === "monster_carcass") return item;
-    const attributes = ITEM_CATALOG[item.id]?.attributes ?? item.attributes ?? [];
-    if (!attributes.includes(ITEM_ATTRIBUTE.MATERIAL)) return item;
-    const existing = garden.find((entry) => entry.id === item.id);
-    if (existing) existing.quantity += item.quantity;
-    else garden.push({ id: item.id, itemType: item.itemType, name: ITEM_CATALOG[item.id]?.name ?? item.name, quantity: item.quantity });
-    return null;
-  });
-  const bag = { ...runtime.bag, slots: nextSlots };
+  const stored = await AsyncStorage.multiGet([GARDEN_INVENTORY_KEY, SHARED_RESOURCES_KEY]);
+  const storagePlan = planTavernReturnStorage(
+    runtime.bag,
+    normalizeSharedResources(stored[1][1]),
+    normalizeGardenInventory(stored[0][1]),
+  );
+  const bag = storagePlan.bag;
   const ended: ForestDungeonState = { ...state, active: false };
+  await deliverSupporterBagAfterDungeonRun();
   await AsyncStorage.multiSet([
-    [FOREST_DUNGEON_KEY, JSON.stringify(ended)], [PLAYER_BAG_KEY, JSON.stringify(bag)], ["@garden:inventory", JSON.stringify(garden)],
+    [FOREST_DUNGEON_KEY, JSON.stringify(ended)],
+    [PLAYER_BAG_KEY, JSON.stringify(bag)],
+    [GARDEN_INVENTORY_KEY, JSON.stringify(storagePlan.gardenInventory)],
+    [SHARED_RESOURCES_KEY, JSON.stringify(storagePlan.sharedResources)],
   ]);
+  await completeTempleBlessingExpedition();
   return { message: bossDefeated ? "The Forest Entrance is cleared. You return to the tavern." : "You store the materials in the garden storage.", bag };
 }
 

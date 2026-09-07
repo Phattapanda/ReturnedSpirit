@@ -9,35 +9,50 @@ import SceneBackground from "@/src/components/SceneBackground";
 import TavernLocationBar from "@/src/components/tavern-location-bar";
 import TavernLocationTransition from "@/src/components/tavern-location-transition";
 import TravelHeader from "@/src/components/travel-header";
+import CurrencyPrice from "@/src/components/currency-price";
 import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { useHaptics } from "@/src/feedback/haptics-provider";
-import { getCoachmanTravelStatus } from "@/src/game/travel-system";
+import { getCoachmanTravelStatus, loadTravelState, payForCarriage, spendWalkingStamina } from "@/src/game/travel-system";
 import { ITEM_CATALOG } from "@/src/game/item-system";
 import { loadGuestState } from "@/src/game/guest-system";
 import { areRegularGuestsUnlockedForDay, loadPostGuestTutorialState } from "@/src/game/post-guest-tutorial";
 import { MERCHANT_STOCK, prepareMerchantShop, purchaseMerchantItem, type MerchantShopState, type MerchantStockId } from "@/src/game/merchant-shop";
 import { loadCoachmanEscortState, prepareCoachmanEscortDeparture } from "@/src/game/coachman-escort-system";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
+import { QUESTS, loadCityState, turnInQuest, type CityState, type QuestId } from "@/src/game/city-system";
 
 const BACKGROUND = require("../assets/images/outsidetavern1.png");
 const COACHMAN = require("../assets/images/coachman.png");
 const MERCHANT = require("../assets/images/merchant.png");
-const COIN = require("../assets/images/coin_copper.png");
 const BUCKET = require("../assets/images/bucket.png");
 const BACKPACK = require("../assets/images/bag2.png");
 const SMALL_CRATE = require("../assets/images/crate1.png");
+const RECEPTIONIST = require("../assets/images/receptionist.png");
+const DIALOGUE_RECEPTIONIST = require("../assets/images/dialog/dialogue_receptionist.png");
 const STOCK_IMAGES: Partial<Record<MerchantStockId, ReturnType<typeof require>>> = {
   bucket: BUCKET,
+  egg: require("../assets/images/egg.png"),
+  chicken: require("../assets/images/meat_white.png"),
+  fish: require("../assets/images/meat_fish.png"),
+  beef: require("../assets/images/meat_red.png"),
   bag2: BACKPACK,
   crate1: SMALL_CRATE,
+  seed_herb: require("../assets/images/seed_herb.png"),
+  seed_carrot: require("../assets/images/seed_carrot.png"),
+  seed_potato: require("../assets/images/seed_potato.png"),
+  seed_onion: require("../assets/images/seed_onion.png"),
+  standard_fertilizer: require("../assets/images/fertilizer.png"),
+  nails: require("../assets/images/nails.png"),
+  cloth: require("../assets/images/cloth.png"),
+  paint: require("../assets/images/paint.png"),
   tool_rusty_butchering_knife: require("../assets/images/tool_rusty_butchering_knife.png"),
   armor_leather_bracers: require("../assets/images/armor_leather_bracers.png"),
   weapon_iron_dagger: require("../assets/images/weapon_iron_dagger.png"),
   weapon_iron_shortsword: require("../assets/images/weapon_iron_shortsword.png"),
 };
 
-type OutsideView = "menu" | "coachman" | "merchant" | "walk";
+type OutsideView = "menu" | "coachman" | "merchant" | "walk" | "receptionist";
 const COACHMAN_DESTINATIONS = [
   { name: "Next City", price: 15 }, { name: "Forest Entrance", price: 25 }, { name: "Coal Mine", price: 45 },
 ] as const;
@@ -54,6 +69,7 @@ export default function OutsideTavernScreen() {
   const audioManager = useAudioManager();
   const { triggerHaptic } = useHaptics();
   const thoughtTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const floatingMessageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [headerHeight, setHeaderHeight] = useState(0);
   const [portraitBottom, setPortraitBottom] = useState(0);
   const [view, setView] = useState<OutsideView>("menu");
@@ -62,23 +78,28 @@ export default function OutsideTavernScreen() {
   const [merchantAvailable, setMerchantAvailable] = useState(false);
   const [merchantShop, setMerchantShop] = useState<MerchantShopState | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [floatingMessage, setFloatingMessage] = useState<string | null>(null);
   const [thought, setThought] = useState<string | null>(null);
-  const [busyItem, setBusyItem] = useState<MerchantStockId | null>(null);
   const [headerRefreshKey, setHeaderRefreshKey] = useState(0);
   const [crateDeliveryVisible, setCrateDeliveryVisible] = useState(false);
   const crateDelivery = useRef(new Animated.ValueXY()).current;
   const crateDeliveryOpacity = useRef(new Animated.Value(0)).current;
   const departureFade = useRef(new Animated.Value(0)).current;
   const [departing, setDeparting] = useState(false);
+  const [receptionistPresent, setReceptionistPresent] = useState(false);
+  const [cityState, setCityState] = useState<CityState | null>(null);
+  const [cityUnlocked, setCityUnlocked] = useState(false);
+  const [forestEntranceUnlocked, setForestEntranceUnlocked] = useState(false);
 
   useFocusEffect(useCallback(() => {
     let active = true;
     (async () => {
-      const [rawDay, guestState, postGuestState, escortState] = await Promise.all([
+      const [rawDay, guestState, postGuestState, escortState, travelState] = await Promise.all([
         AsyncStorage.getItem("@game:day_index"),
         loadGuestState(),
         loadPostGuestTutorialState(),
         loadCoachmanEscortState(),
+        loadTravelState(),
       ]);
       const day = Math.max(0, Number.parseInt(rawDay ?? "0", 10) || 0) % 7;
       const coachman = await getCoachmanTravelStatus(day);
@@ -90,11 +111,23 @@ export default function OutsideTavernScreen() {
         areRegularGuestsUnlockedForDay(postGuestState, guestState.calendarDaySerial) &&
         (guestState.calendarDaySerial + 1) % 4 === 0,
       );
+      setReceptionistPresent(escortState.phase === "complete" && day === 6);
+      setCityUnlocked(escortState.phase === "complete");
+      setForestEntranceUnlocked(
+        escortState.phase === "complete" && travelState.unlockedDestinations.includes("forest_entrance"),
+      );
+      setCityState(await loadCityState());
       setView("menu");
       setMessage(null);
     })().catch(() => setMessage("Visitor information is unavailable."));
-    return () => { active = false; if (thoughtTimer.current) clearTimeout(thoughtTimer.current); };
+    return () => { active = false; if (thoughtTimer.current) clearTimeout(thoughtTimer.current); if (floatingMessageTimer.current) clearTimeout(floatingMessageTimer.current); };
   }, [clearTimeout]));
+
+  function showFloatingMessage(text: string) {
+    setFloatingMessage(text);
+    if (floatingMessageTimer.current) clearTimeout(floatingMessageTimer.current);
+    floatingMessageTimer.current = setTimeout(() => setFloatingMessage(null), 1000);
+  }
 
   function chooseView(next: OutsideView) { triggerHaptic("choice"); setMessage(null); setView(next); }
   function showTravelLocked() {
@@ -127,15 +160,14 @@ export default function OutsideTavernScreen() {
     catch { setMessage("The Merchant cannot show his stock right now."); }
   }
   async function buyItem(stockId: MerchantStockId) {
-    if (busyItem) return;
-    triggerHaptic("choice"); setBusyItem(stockId); setMessage(null);
+    triggerHaptic("choice"); setMessage(null);
     const result = await purchaseMerchantItem(stockId);
-    setBusyItem(null);
     if (result.ok) {
-      setMerchantShop(result.shop); audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
+      setMerchantShop(result.shop);
+      audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
       setHeaderRefreshKey((value) => value + 1);
       if (result.delivery === "kitchen") {
-        setMessage("Small Crate delivered to the Kitchen.");
+        showFloatingMessage("Small Crate delivered to the Kitchen.");
         crateDelivery.setValue({ x: screenWidth * 0.64, y: screenHeight * 0.48 });
         crateDeliveryOpacity.setValue(1);
         setCrateDeliveryVisible(true);
@@ -147,13 +179,42 @@ export default function OutsideTavernScreen() {
           ]),
         ]).start(() => setCrateDeliveryVisible(false));
       } else if (result.delivery === "backpack_upgrade") {
-        setMessage("Shoulder Bag upgraded to Backpack. You now have 3 × 3 slots.");
+        showFloatingMessage("Shoulder Bag upgraded to Backpack. General Goods are now open in the city.");
+      } else if (result.delivery === "garden") {
+        showFloatingMessage(`${ITEM_CATALOG[stockId]?.name ?? "Item"} added to Garden Storage.`);
+      } else if (result.delivery === "materials") {
+        showFloatingMessage(`${ITEM_CATALOG[stockId]?.name ?? "Material"} added to Materials.`);
       } else {
-        setMessage(`${ITEM_CATALOG[stockId]?.name ?? "Item"} added to your bag.`);
+        showFloatingMessage(`${ITEM_CATALOG[stockId]?.name ?? "Item"} added to your bag.`);
       }
       return;
     }
-    setMessage(result.reason === "insufficient_copper" ? "I don't have enough Copper." : result.reason === "bag_locked" ? "I need my bag first." : result.reason === "bag_full" ? "My bag is full." : result.reason === "kitchen_full" ? "There is no free Kitchen slot for the crate." : result.reason === "already_owned" ? "I already own this upgrade." : result.reason === "sold_out" ? "That item is sold out." : "The purchase could not be completed.");
+    showFloatingMessage(result.reason === "insufficient_copper" ? "I don't have enough Copper." : result.reason === "bag_locked" ? "I need my bag first." : result.reason === "bag_full" ? "My bag is full." : result.reason === "kitchen_full" ? "There is no free Kitchen slot for the crate." : result.reason === "already_owned" ? "I already own this upgrade." : result.reason === "sold_out" ? "That item is sold out." : "The purchase could not be completed.");
+  }
+  async function receptionistTurnIn(id: QuestId) {
+    const result = await turnInQuest(id);
+    setMessage(result.ok ? `Thank you. ${result.message}` : result.message);
+    setCityState(await loadCityState());
+    setHeaderRefreshKey((value) => value + 1);
+  }
+  async function travelToCity(mode: "coachman" | "walk") {
+    if (!cityUnlocked) { showTravelLocked(); return; }
+    const paid = mode === "coachman" ? await payForCarriage(15) : (await spendWalkingStamina(30)).ok;
+    if (!paid) { setMessage(mode === "coachman" ? "I need 15 Copper for the trip." : "I need 30 Stamina to walk to the city."); return; }
+    audioManager.playSoundEffect("footstep", { maxDurationMs: 2200 });
+    router.push({ pathname: "/next-city", params: { returnTo: "outside" } });
+  }
+  async function travelToForestEntrance(mode: "coachman" | "walk") {
+    if (!forestEntranceUnlocked) { showTravelLocked(); return; }
+    const paid = mode === "coachman" ? await payForCarriage(25) : (await spendWalkingStamina(50)).ok;
+    if (!paid) {
+      setMessage(mode === "coachman"
+        ? "I need 25 Copper for the trip."
+        : "I need 50 Stamina to walk to the Forest Entrance.");
+      return;
+    }
+    audioManager.playSoundEffect("footstep", { maxDurationMs: 2200 });
+    router.push("/forest-entrance");
   }
   function optionButton(label: string, portrait: typeof COACHMAN | null, action: () => void) {
     return <TouchableOpacity key={label} style={styles.optionButton} onPress={action} activeOpacity={0.82}>
@@ -175,35 +236,56 @@ export default function OutsideTavernScreen() {
     <ScrollView style={styles.scroll} contentContainerStyle={styles.content} contentInsetAdjustmentBehavior="automatic" showsVerticalScrollIndicator={false}>
       {view === "menu" && <View style={styles.panel}>
         <Text style={styles.panelTitle}>What would you like to do?</Text>
+        {receptionistPresent && optionButton("Talk to Guild Receptionist", RECEPTIONIST, () => chooseView("receptionist"))}
         {coachmanAvailable && optionButton("Talk to Coachman", COACHMAN, () => chooseView("coachman"))}
         {merchantAvailable && optionButton("Talk to Merchant", MERCHANT, () => { void openMerchant(); })}
         {optionButton("Travel on foot", null, () => chooseView("walk"))}
+      </View>}
+      {view === "receptionist" && <View style={styles.panel}>
+        <View style={styles.personRow}><Image source={DIALOGUE_RECEPTIONIST} style={styles.receptionistPortrait} resizeMode="contain" /><View style={styles.personText}><Text style={styles.panelTitle}>Adventurers’ Guild Quests</Text><Text style={styles.panelSubtitle}>Guild Receptionist</Text></View></View>
+        <Text style={styles.receptionistText}>I can review your accepted quests and receive completed work here on Sundays.</Text>
+        {(Object.keys(QUESTS) as QuestId[]).filter((id) => cityState?.quests[id].status === "accepted" || cityState?.quests[id].status === "ready").map((id) => <View key={id} style={styles.receptionistQuest}><View style={styles.stockText}><Text style={styles.stockName}>{QUESTS[id].title}</Text><Text style={styles.stockDetails}>{QUESTS[id].detail}</Text></View><TouchableOpacity style={styles.buyButton} onPress={() => { void receptionistTurnIn(id); }}><Text style={styles.buyPrice}>Turn In</Text></TouchableOpacity></View>)}
+        {!cityState || !(Object.keys(QUESTS) as QuestId[]).some((id) => cityState.quests[id].status === "accepted" || cityState.quests[id].status === "ready") ? <Text style={styles.receptionistText}>You have no active Guild quests.</Text> : null}
+        <TouchableOpacity style={styles.backButton} onPress={() => chooseView("menu")}><Text style={styles.backText}>Go Back</Text></TouchableOpacity>
       </View>}
       {view === "coachman" && <View style={styles.panel}>
         <View style={styles.personRow}><Image source={COACHMAN} style={styles.personPortrait} /><View style={styles.personText}><Text style={styles.panelTitle}>Where would you like to go?</Text><Text style={styles.panelSubtitle}>Coachman</Text></View></View>
         {COACHMAN_DESTINATIONS.map((destination) => {
           const tutorialDestination = escortTutorialActive && destination.name === "Next City";
           const disabledForTutorial = escortTutorialActive && !tutorialDestination;
-          return <TouchableOpacity key={destination.name} style={[styles.destinationButton, disabledForTutorial && styles.disabled]} disabled={departing} onPress={tutorialDestination ? () => { void beginEscortTutorial(); } : showTravelLocked} activeOpacity={0.8}><Text style={styles.destinationName}>{destination.name}</Text><View style={styles.costRow}><Text style={styles.costText}>{tutorialDestination ? 0 : destination.price}</Text><Image source={COIN} style={styles.coin} /></View></TouchableOpacity>;
+          const forestLocked = destination.name === "Forest Entrance" && !forestEntranceUnlocked;
+          const permanentlyLocked = destination.name === "Coal Mine";
+          const onPress = tutorialDestination
+            ? () => { void beginEscortTutorial(); }
+            : destination.name === "Next City"
+              ? () => { void travelToCity("coachman"); }
+              : destination.name === "Forest Entrance"
+                ? () => { void travelToForestEntrance("coachman"); }
+                : showTravelLocked;
+          return <TouchableOpacity key={destination.name} style={[styles.destinationButton, (disabledForTutorial || forestLocked || permanentlyLocked) && styles.disabled]} disabled={departing || disabledForTutorial} onPress={onPress} activeOpacity={0.8}><Text style={styles.destinationName}>{destination.name}</Text><View style={styles.costRow}>{tutorialDestination ? <Text style={styles.costText}>Free</Text> : <CurrencyPrice totalCopper={destination.price} textStyle={styles.costText} />}</View></TouchableOpacity>;
         })}
         <TouchableOpacity style={styles.backButton} onPress={() => chooseView("menu")}><Text style={styles.backText}>Go Back</Text></TouchableOpacity>
       </View>}
       {view === "walk" && <View style={styles.panel}>
         <Text style={styles.panelTitle}>Travel on foot</Text>
-        {WALK_DESTINATIONS.map((name) => <TouchableOpacity key={name} style={styles.destinationButton} onPress={showTravelLocked}><Text style={styles.destinationName}>{name}</Text><Ionicons name="footsteps" size={20} color="#D6A33B" /></TouchableOpacity>)}
+        {WALK_DESTINATIONS.map((name) => {
+          const forestLocked = name === "Forest Entrance" && !forestEntranceUnlocked;
+          return <TouchableOpacity key={name} style={[styles.destinationButton, forestLocked && styles.disabled]} onPress={name === "Next City" ? () => { void travelToCity("walk"); } : () => { void travelToForestEntrance("walk"); }}><Text style={styles.destinationName}>{name}</Text><View style={styles.costRow}><Text style={styles.costText}>{name === "Next City" ? "30 Stamina" : "50 Stamina"}</Text><Ionicons name="footsteps" size={20} color="#D6A33B" /></View></TouchableOpacity>;
+        })}
         <TouchableOpacity style={styles.backButton} onPress={() => chooseView("menu")}><Text style={styles.backText}>Go Back</Text></TouchableOpacity>
       </View>}
       {view === "merchant" && <View style={styles.panel}>
         <View style={styles.personRow}><Image source={MERCHANT} style={styles.personPortrait} /><View style={styles.personText}><Text style={styles.panelTitle}>My selection for today.</Text><Text style={styles.panelSubtitle}>Merchant</Text></View></View>
         {merchantShop?.stockIds.map((id) => {
           const definition = MERCHANT_STOCK[id]; const bought = merchantShop.purchased[id] ?? 0; const remaining = definition.maxPurchases - bought; const catalog = ITEM_CATALOG[id];
-          return <View key={id} style={styles.stockRow}><View style={styles.stockIcon}>{stockIcon(id)}</View><View style={styles.stockText}><Text style={styles.stockName}>{catalog?.name ?? id}</Text><Text style={styles.stockDetails} numberOfLines={2}>{catalog?.description}</Text><Text style={styles.stockRemaining}>{remaining}/{definition.maxPurchases} available</Text></View><TouchableOpacity style={[styles.buyButton, remaining <= 0 && styles.disabled]} disabled={remaining <= 0 || busyItem !== null} onPress={() => { void buyItem(id); }}><Text style={styles.buyPrice}>{definition.priceCopper}</Text><Image source={COIN} style={styles.coin} /></TouchableOpacity></View>;
+          return <View key={id} style={styles.stockRow}><View style={styles.stockIcon}>{stockIcon(id)}</View><View style={styles.stockText}><Text style={styles.stockName}>{catalog?.name ?? id}</Text><Text style={styles.stockDetails} numberOfLines={2}>{catalog?.description}</Text><Text style={styles.stockRemaining}>{remaining}/{definition.maxPurchases} available</Text></View><TouchableOpacity style={[styles.buyButton, remaining <= 0 && styles.disabled]} disabled={remaining <= 0} onPress={() => { void buyItem(id); }}><CurrencyPrice totalCopper={definition.priceCopper} textStyle={styles.buyPrice} /></TouchableOpacity></View>;
         })}
         <TouchableOpacity style={styles.backButton} onPress={() => chooseView("menu")}><Text style={styles.backText}>Go Back</Text></TouchableOpacity>
       </View>}
       {message && <Text style={styles.message}>{message}</Text>}
     </ScrollView>
     {thought && <PortraitBubble anchorX={70} screenWidth={screenWidth} text={thought} top={portraitBubbleTop(portraitBottom || headerHeight + 108)} variant="thought" />}
+    {floatingMessage && <View pointerEvents="none" style={styles.floatingMessageWrap}><Text style={styles.floatingMessage}>{floatingMessage}</Text></View>}
     {crateDeliveryVisible && (
       <View pointerEvents="none" style={StyleSheet.absoluteFill}>
         <Animated.Image
@@ -219,12 +301,15 @@ export default function OutsideTavernScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0A0500" }, overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.30)" }, scroll: { flex: 1, zIndex: 2 }, content: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 18, gap: 12 },
+  root: { flex: 1, backgroundColor: "#0A0500" }, overlay: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(0,0,0,0.30)" }, scroll: { flex: 1, zIndex: 2 }, content: { paddingHorizontal: 14, paddingTop: 12, paddingBottom: 18, gap: 12 },
   panel: { borderRadius: 18, borderCurve: "continuous", borderWidth: 1.5, borderColor: "rgba(196,148,58,0.58)", backgroundColor: "rgba(18,9,2,0.94)", padding: 14, gap: 10 }, panelTitle: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 17, lineHeight: 24 }, panelSubtitle: { color: "#C4943A", fontFamily: "Oldenburg", fontSize: 13 },
   optionButton: { minHeight: 72, flexDirection: "row", alignItems: "center", gap: 12, padding: 10, borderRadius: 13, borderWidth: 1, borderColor: "rgba(196,148,58,0.34)", backgroundColor: "rgba(48,27,7,0.78)" }, optionPortrait: { width: 52, height: 52, borderRadius: 10, borderWidth: 1.5, borderColor: "#C4943A" }, optionIcon: { width: 52, height: 52, alignItems: "center", justifyContent: "center" }, optionText: { flex: 1, color: "#F0E8D5", fontFamily: "Oldenburg", fontSize: 15 },
   personRow: { flexDirection: "row", alignItems: "center", gap: 13 }, personPortrait: { width: 76, height: 88, borderRadius: 11, borderWidth: 2, borderColor: "#C4943A" }, personText: { flex: 1, gap: 4 }, destinationButton: { minHeight: 58, borderRadius: 12, borderWidth: 1, borderColor: "rgba(196,148,58,0.30)", backgroundColor: "rgba(48,27,7,0.74)", paddingHorizontal: 14, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, destinationName: { color: "#F0E8D5", fontFamily: "Oldenburg", fontSize: 14 }, costRow: { flexDirection: "row", alignItems: "center", gap: 5 }, costText: { color: "#E7C77A", fontFamily: "Oldenburg", fontSize: 14, fontVariant: ["tabular-nums"] }, coin: { width: 18, height: 18 },
+  receptionistPortrait: { width: 96, height: 130, borderRadius: 12 }, receptionistText: { color: "rgba(240,232,213,0.72)", fontSize: 12, lineHeight: 18 }, receptionistQuest: { flexDirection: "row", alignItems: "center", gap: 9, padding: 10, borderRadius: 12, backgroundColor: "rgba(48,27,7,0.74)", borderWidth: 1, borderColor: "rgba(196,148,58,0.3)" },
   stockRow: { flexDirection: "row", alignItems: "center", gap: 9, padding: 9, borderRadius: 12, borderWidth: 1, borderColor: "rgba(196,148,58,0.28)", backgroundColor: "rgba(48,27,7,0.72)" }, stockIcon: { width: 48, height: 48, alignItems: "center", justifyContent: "center" }, stockImage: { width: 46, height: 46 }, stockText: { flex: 1, gap: 2 }, stockName: { color: "#F0E8D5", fontFamily: "Oldenburg", fontSize: 12 }, stockDetails: { color: "rgba(240,232,213,0.65)", fontSize: 10, lineHeight: 14 }, stockRemaining: { color: "#C4943A", fontSize: 10, fontVariant: ["tabular-nums"] }, buyButton: { minWidth: 58, minHeight: 44, paddingHorizontal: 8, borderRadius: 10, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, borderWidth: 1.5, borderColor: "#C4943A", backgroundColor: "rgba(112,73,18,0.86)" }, buyPrice: { color: "#FFF", fontFamily: "Oldenburg", fontSize: 12 }, disabled: { opacity: 0.35 },
   backButton: { alignSelf: "center", marginTop: 4, paddingHorizontal: 26, paddingVertical: 10 }, backText: { color: "#C4943A", fontFamily: "Oldenburg", fontSize: 13 }, message: { color: "#F5E6C8", backgroundColor: "rgba(54,28,6,0.94)", borderRadius: 10, padding: 11, textAlign: "center", fontSize: 13 },
   crateDelivery: { position: "absolute", left: 0, top: 0, width: 68, height: 68, zIndex: 1000 },
   departureFade: { zIndex: 2000, backgroundColor: "#000" },
+  floatingMessageWrap: { ...StyleSheet.absoluteFill, zIndex: 1800, alignItems: "center", justifyContent: "center", paddingHorizontal: 28 },
+  floatingMessage: { color: "#FFF4DC", fontFamily: "Oldenburg", fontSize: 14, textAlign: "center", backgroundColor: "rgba(18,9,2,0.94)", borderWidth: 1, borderColor: "#C4943A", borderRadius: 12, paddingHorizontal: 18, paddingVertical: 12 },
 });

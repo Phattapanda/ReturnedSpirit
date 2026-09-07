@@ -1,6 +1,7 @@
 import React from "react";
-import { View, Image, StyleSheet, useWindowDimensions } from "react-native";
+import { View, StyleSheet } from "react-native";
 import type { ImageSourcePropType, StyleProp, ViewStyle } from "react-native";
+import { Image } from "expo-image";
 
 interface Props {
   source: ImageSourcePropType;
@@ -10,8 +11,6 @@ interface Props {
 }
 
 export default function SceneBackground({ source, topOffset = 0, style }: Props) {
-  const { width: W, height: H } = useWindowDimensions();
-
   return (
     <View
       style={[
@@ -23,8 +22,10 @@ export default function SceneBackground({ source, topOffset = 0, style }: Props)
     >
       <Image
         source={source}
-        style={{ width: W, height: H }}
-        resizeMode="stretch" resizeMethod="resize"
+        style={StyleSheet.absoluteFill}
+        contentFit="cover"
+        contentPosition="top center"
+        transition={0}
       />
     </View>
   );

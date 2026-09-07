@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { Image, Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Image, Modal, StyleSheet, Text, TouchableOpacity, View, type ImageSourcePropType } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -11,6 +11,7 @@ import StatusModal from "@/src/components/StatusModal";
 import { DEFAULT_BAG, PLAYER_BAG_KEY, normalizePlayerBagData, type PlayerBagData } from "@/src/game/item-system";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
 import { PLAYER_AVATAR_KEY, getPlayerAvatarForStamina, normalizePlayerAvatarId, type PlayerAvatarId } from "@/src/game/player-avatar";
+import { activeTempleBlessing } from "@/src/game/city-system";
 
 const DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
 
@@ -21,9 +22,11 @@ type Props = {
   onPortraitBottomChange?: (bottom: number) => void;
   refreshKey?: number;
   bagAttention?: boolean;
+  supporterImage?: ImageSourcePropType;
+  onSupporterPress?: () => void;
 };
 
-export default function TravelHeader({ locationName, showPortraitRow = false, onHeaderHeightChange, onPortraitBottomChange, refreshKey = 0, bagAttention = false }: Props) {
+export default function TravelHeader({ locationName, showPortraitRow = false, onHeaderHeightChange, onPortraitBottomChange, refreshKey = 0, bagAttention = false, supporterImage, onSupporterPress }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [stamina, setStamina] = useState(0);
@@ -35,17 +38,20 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
   const [bagOpen, setBagOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [templeBlessing, setTempleBlessing] = useState<Awaited<ReturnType<typeof activeTempleBlessing>>>(null);
 
   useFocusEffect(useCallback(() => {
     void refreshKey;
     let active = true;
     (async () => {
-      const [rawStamina, rawLife, rawDay, rawStats, rawAvatar, rawBag] = await AsyncStorage.multiGet([
-        "@game:stamina", "@game:life", "@game:day_index", PLAYER_STATS_KEY, PLAYER_AVATAR_KEY, PLAYER_BAG_KEY,
+      const [[rawStamina, rawLife, rawDay, rawStats, rawAvatar, rawBag], blessing] = await Promise.all([
+        AsyncStorage.multiGet(["@game:stamina", "@game:life", "@game:day_index", PLAYER_STATS_KEY, PLAYER_AVATAR_KEY, PLAYER_BAG_KEY]),
+        activeTempleBlessing(),
       ]);
       if (!active) return;
       const loadedStats = rawStats[1] ? normalizePlayerStats(JSON.parse(rawStats[1])) : DEFAULT_PLAYER_STATS;
       setStats(loadedStats);
+      setTempleBlessing(blessing);
       setStamina(Math.max(0, Number.parseInt(rawStamina[1] ?? "0", 10) || 0));
       setLife(Math.max(0, Number.parseInt(rawLife[1] ?? "0", 10) || 0));
       setDayIdx(Math.max(0, Number.parseInt(rawDay[1] ?? "0", 10) || 0) % 7);
@@ -55,7 +61,8 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
     return () => { active = false; };
   }, [refreshKey]));
 
-  const staminaPct = Math.max(0, Math.min(1, stamina / Math.max(1, stats.maximumStamina)));
+  const effectiveMaximumStamina = stats.maximumStamina + (templeBlessing === "endurance" ? 50 : 0);
+  const staminaPct = Math.max(0, Math.min(1, stamina / Math.max(1, effectiveMaximumStamina)));
   const lifePct = Math.max(0, Math.min(1, life / Math.max(1, stats.maximumLife)));
 
   return (
@@ -69,7 +76,7 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
             <View style={styles.statBarOuter}>
               <Ionicons name="flash" size={15} color="#C4943A" />
               <View style={styles.statBarTrack}><View style={[styles.staminaFill, { width: `${staminaPct * 100}%` }]} /></View>
-              <Text style={styles.statBarText}>{stamina}/{stats.maximumStamina}</Text>
+              <Text style={styles.statBarText}>{stamina}/{effectiveMaximumStamina}</Text>
             </View>
             <View style={styles.statBarOuter}>
               <Ionicons name="heart" size={13} color="#CC2200" />
@@ -101,6 +108,7 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
           <TouchableOpacity style={styles.circleWrap} onPress={() => setStatusOpen(true)} activeOpacity={0.8}>
             <Image source={getPlayerAvatarForStamina(avatarId, stamina)} style={styles.circleImg} resizeMode="cover" />
           </TouchableOpacity>
+          {supporterImage ? <TouchableOpacity style={styles.supporterWrap} onPress={onSupporterPress} activeOpacity={0.82}><Image source={supporterImage} style={styles.supporterImg} /></TouchableOpacity> : null}
           <BagIconButton unlocked={bag.unlocked} bagId={bag.bagId} pulsing={bagAttention} onPress={() => setBagOpen(true)} />
         </View>
       )}
@@ -193,6 +201,8 @@ const styles = StyleSheet.create({
     borderColor: "#C4943A", backgroundColor: "rgba(44,24,16,0.50)",
   },
   circleImg: { width: "100%", height: "100%", transform: [{ scale: 1.06 }] },
+  supporterWrap: { width: 78, height: 78, borderRadius: 39, overflow: "hidden", borderWidth: 2.5, borderColor: "#7D62C8", backgroundColor: "rgba(25,18,43,0.82)" },
+  supporterImg: { width: "100%", height: "100%" },
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.76)", alignItems: "center", justifyContent: "center" },
   menuPanel: {
     width: 264, backgroundColor: "#160B03", borderRadius: 20, padding: 22,

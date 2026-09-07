@@ -44,7 +44,7 @@ import { flushPlaytime } from "@/src/game/playtime-tracker";
 import { DEFAULT_TRAVEL_STATE, TRAVEL_STATE_KEY } from "@/src/game/travel-system";
 import { DISCOVERED_RECIPES_KEY } from "@/src/game/cooking-system";
 import { MERCHANT_SHOP_KEY } from "@/src/game/merchant-shop";
-import { DEFAULT_MAILBOX_STATE, MAILBOX_STATE_KEY } from "@/src/game/mailbox-system";
+import { DEFAULT_MAILBOX_STATE, MAILBOX_STATE_KEY, deliverDailyBonusLetters } from "@/src/game/mailbox-system";
 import { KITCHEN_SMALL_CRATE_KEY } from "@/src/game/kitchen-small-crate";
 import { FOREST_DUNGEON_KEY, FOREST_FIGHT_SNAPSHOT_KEY } from "@/src/game/forest-dungeon-system";
 import { COACHMAN_ESCORT_KEY } from "@/src/game/coachman-escort-system";
@@ -177,7 +177,8 @@ export async function createSnapshot(
     if (trigger === "day_transition") {
       const rawDay = await AsyncStorage.getItem("@game:day_index");
       const newDay = rawDay !== null ? parseInt(rawDay, 10) : 0;
-      await advanceGuestCalendar(newDay);
+      const guestState = await advanceGuestCalendar(newDay);
+      await deliverDailyBonusLetters(guestState.calendarDaySerial);
       await advanceSecondGardenPlotDay();
       const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
       const stats = normalizePlayerStats(rawStats ? JSON.parse(rawStats) : null);

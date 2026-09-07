@@ -17,7 +17,7 @@ import { useAudioManager } from "@/src/audio/AudioProvider";
 import { useHaptics } from "@/src/feedback/haptics-provider";
 import { updateGameSettings, type HapticsMode } from "@/src/settings/game-settings";
 
-const BG = require("../assets/images/bg-tavern.jpg");
+const BG = require("../assets/images/mainpage.png");
 
 const HAPTICS_MODES: HapticsMode[] = ["off", "light", "medium", "strong"];
 const HAPTICS_LABELS: Record<HapticsMode, string> = {
@@ -40,13 +40,13 @@ export default function Settings() {
     const rounded = Math.round(value);
     unlockAudio();  // ensure audio unlocked before playing
     setSfxVolume(rounded);
-    setTimeout(() => playSoundEffect('getwater', { maxDurationMs: 3000 }), 120);
+    setTimeout(() => playSoundEffect('level-up', { maxDurationMs: 3000 }), 120);
     updateGameSettings({ sfxVolume: rounded }).catch(() => {});
   };
 
   return (
     <View style={styles.root}>
-      <Image source={BG} style={styles.bgImage} contentFit="cover" />
+      <Image source={BG} style={styles.bgImage} contentFit="cover" contentPosition="top center" />
 
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
@@ -147,7 +147,7 @@ export default function Settings() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#F0EDE4" },
-  bgImage: { ...StyleSheet.absoluteFillObject, opacity: 0.10 },
+  bgImage: { ...StyleSheet.absoluteFill, opacity: 0.10 },
   header: {
     flexDirection: "row", alignItems: "center",
     paddingHorizontal: 16, paddingBottom: 12,

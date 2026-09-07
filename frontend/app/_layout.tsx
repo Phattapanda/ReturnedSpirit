@@ -10,6 +10,7 @@ import { useAppFonts } from "@/src/hooks/use-app-fonts";
 import { AudioProvider } from "@/src/audio/AudioProvider";
 import { HapticsProvider } from "@/src/feedback/haptics-provider";
 import { PlaytimeTracker } from "@/src/game/playtime-tracker";
+import GameplayBackGuard from "@/src/components/gameplay-back-guard";
 
 LogBox.ignoreAllLogs(true);
 SplashScreen.preventAutoHideAsync();
@@ -40,7 +41,16 @@ export default function RootLayout() {
                 animation: "fade",
                 contentStyle: { backgroundColor: GAME_BACKGROUND },
               }}
-            />
+            >
+              {(["kitchen", "garden", "dining", "dormitory", "mail", "outside-tavern"] as const).map((name) => (
+                <Stack.Screen
+                  key={name}
+                  name={name}
+                  options={{ animation: "slide_from_right", animationDuration: 300, animationTypeForReplace: "push" }}
+                />
+              ))}
+            </Stack>
+            <GameplayBackGuard />
           </HapticsProvider>
         </AudioProvider>
       </SafeAreaProvider>

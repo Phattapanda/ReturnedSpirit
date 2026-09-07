@@ -74,6 +74,8 @@ const SFX_SOURCES: Record<string, number> = {
   'combat-impact':      require('../../assets/audio/combat_impact.mp3'),
   'attack-miss':        require('../../assets/audio/attack_miss.mp3'),
   action:               require('../../assets/audio/action.mp3'),
+  victory:              require('../../assets/audio/victory.wav'),
+  losecoin:             require('../../assets/audio/losecoin.wav'),
 };
 
 const MAIN_MENU_THEMES = [
@@ -507,8 +509,10 @@ class AudioEngine {
       return;
     }
 
-    // Clean up existing player for this key
-    this.stopSoundEffect(key);
+    // Loops stay unique and addressable. Short effects receive their own handle
+    // so rapid taps can overlap instead of cutting off the previous sound.
+    if (options?.loop) this.stopSoundEffect(key);
+    const handleKey = options?.loop ? key : `${key}:${Date.now()}:${Math.random()}`;
 
     try {
       const player = createAudioPlayer(source);
@@ -516,7 +520,7 @@ class AudioEngine {
       player.loop   = options?.loop ?? false;
 
       const handle: SFXHandle = { player };
-      this.sfxPlayers.set(key, handle);
+      this.sfxPlayers.set(handleKey, handle);
 
       handle.startTimer = setTimeout(() => {
         handle.startTimer = undefined;
@@ -529,7 +533,7 @@ class AudioEngine {
           handle.cleanupTimer = undefined;
           try { player.pause(); } catch {}
           try { player.remove(); } catch {}
-          this.sfxPlayers.delete(key);
+          this.sfxPlayers.delete(handleKey);
         }, maxMs + 600);
       }
     } catch (e) {
@@ -538,13 +542,14 @@ class AudioEngine {
   }
 
   stopSoundEffect(key: string): void {
-    const h = this.sfxPlayers.get(key);
-    if (!h) return;
-    if (h.startTimer)   clearTimeout(h.startTimer);
-    if (h.cleanupTimer) clearTimeout(h.cleanupTimer);
-    try { h.player.pause(); } catch {}
-    try { h.player.remove(); } catch {}
-    this.sfxPlayers.delete(key);
+    const matching = [...this.sfxPlayers.entries()].filter(([handleKey]) => handleKey === key || handleKey.startsWith(`${key}:`));
+    for (const [handleKey, h] of matching) {
+      if (h.startTimer) clearTimeout(h.startTimer);
+      if (h.cleanupTimer) clearTimeout(h.cleanupTimer);
+      try { h.player.pause(); } catch {}
+      try { h.player.remove(); } catch {}
+      this.sfxPlayers.delete(handleKey);
+    }
   }
 
   /** Release short-lived native players when the app leaves the foreground. */
@@ -562,14 +567,14 @@ class AudioEngine {
   }
 
   isSfxPlaying(key: string): boolean {
-    return this.sfxPlayers.has(key);
+    return [...this.sfxPlayers.keys()].some((handleKey) => handleKey === key || handleKey.startsWith(`${key}:`));
   }
 }
 
 // ─── Singleton (hot-reload safe) ──────────────────────────────────────────────
 
 const _GLOBAL_KEY = '__audioEngineV1__';
-const _globalRef = (typeof globalThis !== 'undefined' ? globalThis : global) as Record<string, unknown>;
+const _globalRef = globalThis as unknown as Record<string, unknown>;
 if (!_globalRef[_GLOBAL_KEY]) {
   _globalRef[_GLOBAL_KEY] = new AudioEngine();
 }

@@ -104,7 +104,25 @@ const LEGACY_ITEM_IDS: Readonly<Record<string, string>> = {
   carrotsoup: "soup_carrot",
   carrotpotatosoup: "soup_carrot_potato",
   beefstew: "stew_beef",
+  chicken: "white_meat",
+  beef: "red_meat",
 };
+
+export type ItemDurability = {
+  current: number;
+  maximum: number;
+};
+
+export const BIG_BACKPACK_BAG: Omit<PlayerBagData, "unlocked" | "slots"> = {
+  bagId: "bag3",
+  level: 3,
+  rows: 4,
+  columns: 4,
+  slotCount: 16,
+  maxStackSize: 9,
+};
+
+export const RUSTY_BUTCHERING_KNIFE_MAX_DURABILITY = 20;
 
 export function normalizeItemId(id: string): string {
   return LEGACY_ITEM_IDS[id] ?? id;
@@ -114,25 +132,51 @@ export function normalizeBagItem(item: BagItem | null): BagItem | null {
   if (!item) return null;
   const id = normalizeItemId(item.id);
   const itemType = normalizeItemId(item.itemType);
-  return id === item.id && itemType === item.itemType ? item : { ...item, id, itemType };
+  const canonicalName = id === "white_meat" ? "White Meat" : id === "red_meat" ? "Red Meat" : item.name;
+  const normalized = { ...item, id, itemType, name: canonicalName };
+  const durability = getItemDurability(normalized);
+  if (durability) {
+    return {
+      ...normalized,
+      durability: durability.current,
+      maxDurability: durability.maximum,
+    };
+  }
+  return id === item.id && itemType === item.itemType && canonicalName === item.name
+    ? item
+    : normalized;
 }
 
 export function normalizePlayerBagData(bag: Partial<PlayerBagData>): PlayerBagData {
   const parsedSlots = Array.isArray(bag.slots) ? bag.slots : [];
-  const backpack = bag.bagId === BACKPACK_BAG.bagId;
-  const columns = backpack ? BACKPACK_BAG.columns : Math.max(1, Number(bag.columns) || DEFAULT_BAG.columns);
-  const minimumSlots = backpack ? BACKPACK_BAG.slotCount : DEFAULT_BAG.slotCount;
+  const definition = bag.bagId === BIG_BACKPACK_BAG.bagId
+    ? BIG_BACKPACK_BAG
+    : bag.bagId === BACKPACK_BAG.bagId ? BACKPACK_BAG : DEFAULT_BAG;
+  const columns = definition.columns;
+  const minimumSlots = definition.slotCount;
   const slotCount = Math.max(minimumSlots, Number(bag.slotCount) || 0, parsedSlots.length);
-  const rows = Math.max(backpack ? BACKPACK_BAG.rows : DEFAULT_BAG.rows, Math.ceil(slotCount / columns));
+  const rows = Math.max(definition.rows, Math.ceil(slotCount / columns));
   return {
     ...DEFAULT_BAG,
     ...bag,
-    ...(backpack ? BACKPACK_BAG : {}),
+    ...(bag.bagId === BIG_BACKPACK_BAG.bagId ? BIG_BACKPACK_BAG : bag.bagId === BACKPACK_BAG.bagId ? BACKPACK_BAG : {}),
     rows,
     columns,
     slotCount,
     slots: Array.from({ length: slotCount }, (_, index) => normalizeBagItem(parsedSlots[index] ?? null)),
   };
+}
+
+/** Upgrade an owned Backpack to the city's 4 x 4 Big Backpack. */
+export function upgradeToBigBackpack(bag: PlayerBagData): PlayerBagData {
+  const normalized = normalizePlayerBagData(bag);
+  if (normalized.bagId === BIG_BACKPACK_BAG.bagId) return normalized;
+  return normalizePlayerBagData({
+    ...normalized,
+    ...BIG_BACKPACK_BAG,
+    unlocked: normalized.unlocked,
+    slots: [...normalized.slots, ...Array(Math.max(0, BIG_BACKPACK_BAG.slotCount - normalized.slots.length)).fill(null)],
+  });
 }
 
 /** Upgrade Shoulder Bag to Backpack while preserving every existing slot verbatim. */
@@ -173,7 +217,8 @@ export function canStack(a: BagItem, b: BagItem): boolean {
     sameOptionalTagSet(a.mealTags, b.mealTags) &&
     (a.consumableCategory ?? null) === (b.consumableCategory ?? null) &&
     (a.monsterId ?? null) === (b.monsterId ?? null) &&
-    a.durability === undefined && b.durability === undefined &&
+    ((a.durability === undefined && b.durability === undefined) ||
+      (a.id === "torch" && b.id === "torch" && !a.equipped && !b.equipped && a.durability === b.durability && a.maxDurability === b.maxDurability)) &&
     !getItemAttributes(a).includes(ITEM_ATTRIBUTE.STORAGE) &&
     !getItemAttributes(b).includes(ITEM_ATTRIBUTE.STORAGE) &&
     !getItemAttributes(a).some((attribute) => attribute === ITEM_ATTRIBUTE.WEAPON || attribute === ITEM_ATTRIBUTE.ARMOR) &&
@@ -368,27 +413,45 @@ export type ItemCatalogEntry = {
  */
 export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
   bag2: { name: "Backpack", description: "A roomy 3 × 3 upgrade for the Shoulder Bag.", attributes: [ITEM_ATTRIBUTE.STORAGE] },
-  bag3: { name: "Big Backpack", description: "A larger backpack that will be unlocked in the city later.", attributes: [ITEM_ATTRIBUTE.STORAGE] },
+  bag3: { name: "Big Backpack", description: "A spacious 4 × 4 backpack upgrade sold in the city.", attributes: [ITEM_ATTRIBUTE.STORAGE] },
   crate1: { name: "Small Crate", description: "A finished 2 × 3 Kitchen storage crate.", attributes: [ITEM_ATTRIBUTE.STORAGE] },
   monster_carcass: { name: "Monster Carcass", description: "A defeated monster. Process it in the Kitchen with a Butchering Knife.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
-  malted_barley: { name: "Malted Barley", description: "A brewing ingredient obtained in the city. Required to unlock Standard Ale.", attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] },
-  brewers_yeast: { name: "Brewer's Yeast", description: "A brewing culture obtained in the city. Required to unlock Standard Ale.", attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] },
-  dried_hop_cones: { name: "Dried Hop Cones", description: "Dried hops obtained in the city. Required to unlock Standard Ale.", attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] },
-  raw_wildflower_honey: { name: "Raw Wildflower Honey", description: "Fragrant wildflower honey required to unlock Honey Mead.", attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] },
-  mead_yeast: { name: "Mead Yeast", description: "A special yeast culture required to unlock Honey Mead.", attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] },
-  grown_cinnamon_stalks_cloves: { name: "Grown Cinnamon Stalks & Cloves", description: "Aromatic quest ingredients gathered for Honey Mead.", attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] },
-  yeast_nutrients: { name: "Yeast Nutrients", description: "Brewing nutrients required to unlock Honey Mead.", attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] },
+  malted_barley: { name: "Malted Barley", description: "Quest item.", attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] },
+  brewers_yeast: { name: "Brewer's Yeast", description: "Quest item.", attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] },
+  dried_hop_cones: { name: "Dried Hop Cones", description: "Quest item.", attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] },
+  raw_wildflower_honey: { name: "Raw Wildflower Honey", description: "Quest item.", attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] },
+  mead_yeast: { name: "Mead Yeast", description: "Quest item.", attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] },
+  grown_cinnamon_stalks_cloves: { name: "Grown Cinnamon Stalks & Cloves", description: "Quest item.", attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] },
+  yeast_nutrients: { name: "Yeast Nutrients", description: "Quest item.", attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] },
   wild_berries: { name: "Wild Berries", description: "Forest berries. Restores 5 Stamina and can be used as an ingredient.", attributes: [ITEM_ATTRIBUTE.EDIBLE, ITEM_ATTRIBUTE.INGREDIENT], staminaRecovery: 5 },
   white_meat: { name: "White Meat", description: "Light meat obtained from small game.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   red_meat: { name: "Red Meat", description: "Meat obtained from forest animals.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   fur: { name: "Fur", description: "Animal fur used in crafting.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
-  hide: { name: "Hide", description: "A tough animal hide used in crafting.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
-  tusk: { name: "Tusk", description: "A sturdy boar tusk.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  hide: { name: "Boar Hide", description: "A tough hide recovered from a Wild Boar.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  tusk: { name: "Boar Tusk", description: "A sturdy tusk recovered intact from a Wild Boar.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   wolf_pelt: { name: "Wolf Pelt", description: "A thick pelt from a forest wolf.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
-  fang: { name: "Fang", description: "A sharp monster fang.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  fang: { name: "Large Fang", description: "A large fang preserved while processing a Forest Wolf.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   slime_gel: { name: "Slime Gel", description: "Gel gathered from a defeated slime.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   weak_monster_core: { name: "Weak Monster Core", description: "A faintly glowing monster core.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   ember_feather: { name: "Ember Feather", description: "A warm feather from an Ember creature.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  rooster_comb: { name: "Rooster Comb", description: "A rare comb recovered from an Ember Rooster.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  elder_ember_comb: { name: "Elder Ember Rooster Comb", description: "A rare, flame-touched boss material from an Elder Ember Rooster.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  beetle_shell: { name: "Beetle Shell", description: "A sturdy shell left behind by a Thorn Beetle.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  mushroom: { name: "Mushroom", description: "A common forest mushroom used as a cooking ingredient.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  mushroom_rare: { name: "Rare Mushroom", description: "An unusual purple mushroom prized as a rare cooking ingredient.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  nuts: { name: "Nuts", description: "A handful of forest nuts used as a cooking ingredient.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  bark: { name: "Bark", description: "Strips of sturdy tree bark used in crafting.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  charred_wood: { name: "Charred Wood", description: "Fire-blackened wood that still holds traces of heat.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  leather: { name: "Leather", description: "Processed animal hide used to craft durable equipment.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  sap: { name: "Sap", description: "Sticky tree sap used in crafting and alchemy.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  spices: { name: "Spices", description: "A fragrant imported blend used in uncommon recipes.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  wine: { name: "Wine", description: "Imported regional wine for drinks and refined recipes.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  alchemical_ingredients: { name: "Alchemical Ingredients", description: "An assortment of imported reagents for alchemy.", attributes: [ITEM_ATTRIBUTE.INGREDIENT, ITEM_ATTRIBUTE.MATERIAL] },
+  holy_herb: { name: "Holy Herb", description: "A carefully cultivated temple herb used in sacred remedies.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  medicinal_herb: { name: "Medicinal Herb", description: "A potent healing herb selected by the temple sisters.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  blessed_water: { name: "Blessed Water", description: "Purified water blessed at the Temple of the Returning Light.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  incense: { name: "Incense", description: "Aromatic temple incense used in purification recipes.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  purified_salt: { name: "Purified Salt", description: "Ritually purified salt used for protection and alchemy.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   bag_herb:    { name: "Herb Bag",         description: "A small bag filled with harvested herbs.", attributes: [] },
   bag_carrot:  { name: "Carrot Bag",       description: "A small bag filled with harvested carrots.", attributes: [] },
   bag_onion:   { name: "Onion Bag",        description: "A small bag filled with harvested onions.", attributes: [] },
@@ -445,13 +508,13 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
     baseSellPriceCopper: 24,
   },
   stew_chicken: {
-    name: "Chicken Stew", description: "Restores 45 Stamina and 25 Life.", attributes: [ITEM_ATTRIBUTE.EDIBLE],
+    name: "White Stew", description: "A hearty stew made with white meat. Restores 45 Stamina and 25 Life.", attributes: [ITEM_ATTRIBUTE.EDIBLE],
     mealTags: [MEAL_TAG.MEAT, MEAL_TAG.HEALTHY, MEAL_TAG.HEARTY, MEAL_TAG.WARM, MEAL_TAG.HERBS],
     staminaRecovery: 45, lifeRecovery: 25, baseSellPriceCopper: 44,
   },
   stew_beef: {
-    name: "Beef Stew",
-    description: "A hearty, warming beef stew. Restores 40 Stamina and 40 Life.",
+    name: "Red Stew",
+    description: "A hearty, warming red-meat stew. Restores 40 Stamina and 40 Life.",
     attributes: [ITEM_ATTRIBUTE.EDIBLE],
     mealTags: [MEAL_TAG.MEAT, MEAL_TAG.HEARTY, MEAL_TAG.WARM, MEAL_TAG.HERBS],
     staminaRecovery: 40, lifeRecovery: 40, baseSellPriceCopper: 49,
@@ -490,10 +553,11 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
   potato:      { name: "Potato",           description: "A sturdy potato used in many warm meals.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   onion:       { name: "Onion",            description: "A pungent onion used as a cooking ingredient.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   egg:         { name: "Egg",              description: "A fresh egg used for cooking.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
-  chicken:     { name: "Chicken",          description: "Chicken meat used for cooking.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
-  beef:        { name: "Beef",             description: "Beef used for cooking.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
-  fish:        { name: "Fish",             description: "Fresh fish used for cooking.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  chicken:     { name: "White Meat",       description: "Legacy white meat used for cooking.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  beef:        { name: "Red Meat",         description: "Legacy red meat used for cooking.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  fish:        { name: "Fish Meat",        description: "Fresh fish meat used for cooking.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   tomato:      { name: "Tomato",           description: "A ripe tomato used for cooking.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  snowberry:   { name: "Snowberry",        description: "A pale winter berry reserved for future recipes.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   ember_chicken_meat: { name: "Ember Chicken Meat", description: "Rare monster meat radiating heat.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   ember_chicken_egg:  { name: "Ember Chicken Egg",  description: "A rare monster egg radiating heat.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   bucket:      { name: "Empty Bucket",     description: "A sturdy wooden bucket. It needs to be filled.", attributes: [ITEM_ATTRIBUTE.VESSEL] },
@@ -539,7 +603,7 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
     lifeRecovery: 30,
   },
   potion_stamina_low_grade: {
-    name: "Low Quality Stamina Potion",
+    name: "Low Grade Stamina Potion",
     description: "A basic stamina potion. Restores 60 Stamina, up to the normal maximum.",
     attributes: [ITEM_ATTRIBUTE.CONSUMABLE],
     consumableCategory: CONSUMABLE_CATEGORY.POTION,
@@ -555,17 +619,56 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
   wood:        { name: "Wood",             description: "Cut timber. Useful for repairs and construction.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   stone:       { name: "Stone",            description: "A piece of solid rock. Used for building and crafting.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   cloth:       { name: "Cloth",            description: "Woven fabric. Useful for making items and decorations.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  rope:        { name: "Rope",             description: "Strong utility rope for travel and crafting.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  empty_bottle:{ name: "Empty Bottle",     description: "An empty glass bottle for potions and other liquids.", attributes: [ITEM_ATTRIBUTE.VESSEL] },
+  coal:        { name: "Coal",             description: "Fuel left behind by a spent torch.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   nails:       { name: "Nails",            description: "Iron nails for woodworking and construction.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   paint:       { name: "Paint",            description: "A bucket of paint for renovating the tavern.", attributes: [] },
+  ore_iron:    { name: "Iron Ore",         description: "Raw iron ore that can be refined by a blacksmith.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  ore_copper:  { name: "Copper Ore",       description: "Raw copper ore that can be refined by a blacksmith.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  ore_silver:  { name: "Silver Ore",       description: "Raw silver ore that can be refined by a blacksmith.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  ore_gold:    { name: "Gold Ore",         description: "Raw gold ore that can be refined by a blacksmith.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   ingot_iron:  { name: "Iron Ingot",       description: "A refined iron ingot used for crafting.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   ingot_copper:{ name: "Copper Ingot",     description: "A refined copper ingot used for crafting.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  ingot_silver:{ name: "Silver Ingot",     description: "A refined silver ingot used for advanced crafting.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  ingot_gold:  { name: "Gold Ingot",       description: "A refined gold ingot used for valuable crafting projects.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  ingot_steel: { name: "Steel Ingot",      description: "A durable steel ingot used for high-quality equipment.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   shard_mana:  { name: "Mana Shard",       description: "A small crystalline fragment filled with mana.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   stone_mana:  { name: "Mana Stone",       description: "A concentrated mana stone used in rare crafting.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   tool_rusty_butchering_knife: {
     name: "Rusty Butchering Knife",
-    description: "A worn but usable butchering tool. Durability 25/25.",
+    description: "A worn but usable butchering tool. Durability 20/20.",
     attributes: [ITEM_ATTRIBUTE.TOOL],
-    maxDurability: 25,
+    maxDurability: RUSTY_BUTCHERING_KNIFE_MAX_DURABILITY,
+  },
+  tool_iron_butchering_knife: {
+    name: "Iron Butchering Knife",
+    description: "A reliable iron knife for processing monster carcasses. Durability 40/40.",
+    attributes: [ITEM_ATTRIBUTE.TOOL],
+    maxDurability: 40,
+  },
+  tool_steel_butchering_knife: {
+    name: "Steel Butchering Knife",
+    description: "A high-quality knife with the best yield and rare-material recovery. Durability 60/60.",
+    attributes: [ITEM_ATTRIBUTE.TOOL],
+    maxDurability: 60,
+  },
+  tool_kitchen_knife: {
+    name: "Kitchen Knife",
+    description: "A balanced cooking knife for precise preparation. Durability 50/50.",
+    attributes: [ITEM_ATTRIBUTE.TOOL],
+    maxDurability: 50,
+  },
+  torch: {
+    name: "Torch",
+    description: "Reduces Dungeon activity Stamina costs by 2 while equipped. Leaves Coal when its 50 Durability is spent.",
+    attributes: [ITEM_ATTRIBUTE.TOOL],
+    maxDurability: 50,
+  },
+  quest_hunters_documents: {
+    name: "Research Documents",
+    description: "A field bag containing the researchers' abandoned documents. Quest item.",
+    attributes: [ITEM_ATTRIBUTE.QUEST_ITEM],
   },
   armor_leather_bracers: {
     name: "Leather Bracers",
@@ -602,10 +705,26 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
   oldpot:      { name: "Old Pot",          description: "An old iron pot. Perfect for brewing herbal concoctions.", attributes: [ITEM_ATTRIBUTE.TOOL] },
   cooking_pot: { name: "Cooking Pot",      description: "A permanent Stage 2 kitchen upgrade.", attributes: [ITEM_ATTRIBUTE.TOOL] },
   frying_pan:  { name: "Frying Pan",       description: "A planned specialist tool for eggs and pan-fried dishes.", attributes: [ITEM_ATTRIBUTE.TOOL] },
+  fine_cooking_pot: { name: "Fine Cooking Pot", description: "A finely crafted cooking pot for advanced recipes.", attributes: [ITEM_ATTRIBUTE.TOOL] },
 };
 
 function itemId(itemOrId: BagItem | string): string {
   return normalizeItemId(typeof itemOrId === "string" ? itemOrId : itemOrId.id);
+}
+
+/** Resolve per-instance durability, falling back to the catalog only for untouched items. */
+export function getItemDurability(item: BagItem): ItemDurability | null {
+  const catalogMaximum = ITEM_CATALOG[itemId(item)]?.maxDurability;
+  const rawMaximum = item.maxDurability ?? catalogMaximum;
+  if (rawMaximum === undefined || !Number.isFinite(Number(rawMaximum))) return null;
+  const maximum = Math.max(0, Math.floor(Number(rawMaximum)));
+  if (maximum <= 0) return null;
+  const rawCurrent = item.durability ?? maximum;
+  const numericCurrent = Number(rawCurrent);
+  const current = Number.isFinite(numericCurrent)
+    ? Math.max(0, Math.min(maximum, Math.floor(numericCurrent)))
+    : maximum;
+  return { current, maximum };
 }
 
 /** Resolve canonical attributes plus any instance-specific additions. */

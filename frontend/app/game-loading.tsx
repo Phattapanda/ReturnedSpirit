@@ -29,7 +29,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated as RNAnimated,
-  Image,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -37,6 +36,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -49,20 +49,29 @@ import { audioEngine } from "@/src/audio/audioEngine";
 import { NEXT_RUN_INTRO_PENDING_KEY } from "@/src/game/tithe-system";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const BG = require("../assets/images/bg-tavern.jpg");
+const BG = require("../assets/images/mainpage.png");
 const MIN_DISPLAY_MS = 650; // prevent sub-second flash when cache is warm
+const TIP_DISPLAY_MS = 2900;
 
 const LOADING_TIPS = [
-  "Preparing the tavern...",
-  "Packing your shoulder bag...",
-  "Lighting the fireplace...",
-  "Tending the garden...",
-  "Brewing herb soup...",
-  "Waking the spirit...",
-  "Setting the table...",
-  "Checking the herb beds...",
-  "Fetching water from the well...",
+  "Tip: Get more buckets from customers or from the visiting merchant.",
+  "Tip: Most guests have different visiting days and prefer different dishes.",
+  "Tip: Well-served guests bring more benefits over time.",
+  "Tip: A good garden yields more than just a bountiful harvest.",
+  "Tip: Perhaps hiring some support through the Adventurers' Guild would be a good start.",
+  "Tip: The merchant offers the first bag expansion.",
+  "Tip: The Coachman will give you free equipment once.",
+  "Tip: You can only equip one weapon and one armor.",
+  "Tip: Spending Growth Points on health instantly fully restores your health points.",
+  "Tip: Rupert can improve the drink available to the guests.",
+  "Tip: Take note – every 14 days you must pay a tithe on every harvest you have gathered.",
 ];
+
+function randomTipIndex(previous = -1): number {
+  if (LOADING_TIPS.length <= 1) return 0;
+  const candidate = Math.floor(Math.random() * LOADING_TIPS.length);
+  return candidate === previous ? (candidate + 1) % LOADING_TIPS.length : candidate;
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -79,7 +88,7 @@ export default function GameLoading() {
 
   // ── State
   const [progress, setProgress] = useState(0);
-  const [tipIndex, setTipIndex] = useState(0);
+  const [tipIndex, setTipIndex] = useState(() => randomTipIndex());
   const [hasFailed, setHasFailed] = useState(false);
   const [failedKeys, setFailedKeys] = useState<string[]>([]);
   const [retryCount, setRetryCount] = useState(0);
@@ -99,8 +108,8 @@ export default function GameLoading() {
   // ── Rotate tip text
   useEffect(() => {
     const t = setInterval(() => {
-      setTipIndex(i => (i + 1) % LOADING_TIPS.length);
-    }, 1900);
+      setTipIndex(previous => randomTipIndex(previous));
+    }, TIP_DISPLAY_MS);
     return () => clearInterval(t);
   }, []);
 
@@ -230,7 +239,7 @@ export default function GameLoading() {
   if (hasFailed) {
     return (
       <View style={styles.root}>
-        <Image source={BG} style={styles.bgImg} resizeMode="cover" resizeMethod="resize" />
+        <Image source={BG} style={styles.bgImg} contentFit="cover" contentPosition="top center" />
         <View style={styles.overlay} />
         <View style={[styles.center, { paddingBottom: insets.bottom + 32 }]}>
           <Text style={styles.title}>A Returned Spirit</Text>
@@ -270,7 +279,7 @@ export default function GameLoading() {
   // ── Loading screen
   return (
     <View style={styles.root}>
-      <Image source={BG} style={styles.bgImg} resizeMode="cover" resizeMethod="resize" />
+      <Image source={BG} style={styles.bgImg} contentFit="cover" contentPosition="top center" />
       <View style={styles.overlay} />
 
       <View style={[styles.center, { paddingBottom: insets.bottom + 32 }]}>
@@ -310,11 +319,11 @@ const styles = StyleSheet.create({
     backgroundColor: "#0D0806",
   },
   bgImg: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     opacity: 0.14,
   },
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0,0,0,0.60)",
   },
   center: {

@@ -1,6 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { ITEM_CATALOG, normalizeItemId, type BagItem, type MealTag } from "@/src/game/item-system";
+import {
+  getButcheringDefinition,
+  getButcheringKnifeTier,
+  rollButcheringOutputs,
+} from "@/src/game/butchering-system";
 
 export const DISCOVERED_RECIPES_KEY = "@kitchen:discovered_recipes";
 
@@ -57,15 +62,15 @@ export const COOKING_RECIPES: readonly CookingRecipe[] = [
     tags: ["warm", "vegetarian", "healthy", "hearty"],
   },
   {
-    id: "stew_chicken", name: "Chicken Stew", stage: 2, rarity: "uncommon", unlock: "Mid",
-    ingredients: [{ id: "soup_carrot_potato", quantity: 1 }, { id: "chicken", quantity: 1 }, { id: "herbs", quantity: 1 }],
+    id: "stew_chicken", name: "White Stew", stage: 2, rarity: "uncommon", unlock: "Mid",
+    ingredients: [{ id: "soup_carrot_potato", quantity: 1 }, { id: "white_meat", quantity: 1 }, { id: "herbs", quantity: 1 }],
     toolId: "cooking_pot", outputId: "stew_chicken", outputQuantity: 2,
     sellPriceCopper: 44, staminaRecovery: 45, lifeRecovery: 25,
     tags: ["warm", "meat", "healthy", "hearty", "herbs"],
   },
   {
-    id: "stew_beef", name: "Beef Stew", stage: 2, rarity: "uncommon", unlock: "Mid",
-    ingredients: [{ id: "soup_carrot_potato", quantity: 1 }, { id: "beef", quantity: 1 }, { id: "herbs", quantity: 1 }],
+    id: "stew_beef", name: "Red Stew", stage: 2, rarity: "uncommon", unlock: "Mid",
+    ingredients: [{ id: "soup_carrot_potato", quantity: 1 }, { id: "red_meat", quantity: 1 }, { id: "herbs", quantity: 1 }],
     toolId: "cooking_pot", outputId: "stew_beef", outputQuantity: 2,
     sellPriceCopper: 49, staminaRecovery: 40, lifeRecovery: 40,
     tags: ["warm", "meat", "hearty", "herbs"],
@@ -108,33 +113,35 @@ function ingredientTotals(slots: readonly (BagItem | null)[]): Map<string, numbe
   return totals;
 }
 
-const BUTCHERING_KNIFE_ID = "tool_rusty_butchering_knife";
-
-const BUTCHERING_OUTPUTS: Readonly<Record<string, { name: string; primary: string; secondary: readonly string[] }>> = {
-  forest_slime: { name: "Butcher Forest Slime", primary: "slime_gel", secondary: ["weak_monster_core"] },
-  feral_rabbit: { name: "Butcher Feral Rabbit", primary: "white_meat", secondary: ["fur"] },
-  wild_boar: { name: "Butcher Wild Boar", primary: "red_meat", secondary: ["hide", "tusk"] },
-  wild_wolf: { name: "Butcher Wild Wolf", primary: "red_meat", secondary: ["wolf_pelt", "fang"] },
-  ember_chick: { name: "Butcher Ember Chick", primary: "ember_chicken_meat", secondary: ["ember_feather"] },
-  ember_chicken: { name: "Butcher Ember Chicken", primary: "ember_chicken_meat", secondary: ["ember_feather"] },
-  ember_rooster: { name: "Butcher Ember Rooster", primary: "ember_chicken_meat", secondary: ["ember_feather", "shard_mana"] },
-  goblin_forager: { name: "Search Goblin Forager", primary: "herbs", secondary: ["cloth"] },
-  elder_ember_rooster: { name: "Butcher Elder Ember Rooster", primary: "ember_chicken_meat", secondary: ["ember_feather", "shard_mana", "stone_mana"] },
+const COOKING_POT_LEVELS: Readonly<Record<string, number>> = {
+  oldpot: 1,
+  cooking_pot: 2,
+  fine_cooking_pot: 3,
 };
 
+/** Higher-level cooking pots can satisfy recipes written for a lower-level pot. */
+export function isCookingToolCompatible(actualToolId: string | null, requiredToolId: string | null): boolean {
+  if (actualToolId === requiredToolId) return true;
+  if (!actualToolId || !requiredToolId) return false;
+  const actualLevel = COOKING_POT_LEVELS[actualToolId];
+  const requiredLevel = COOKING_POT_LEVELS[requiredToolId];
+  return actualLevel !== undefined && requiredLevel !== undefined && actualLevel >= requiredLevel;
+}
+
 function findButcheringRecipe(ingredientSlots: readonly (BagItem | null)[], tool: BagItem | null): CookingRecipe | null {
-  if (tool?.id !== BUTCHERING_KNIFE_ID) return null;
+  const knifeTier = getButcheringKnifeTier(tool?.id);
+  if (!tool || !knifeTier) return null;
   const occupied = ingredientSlots.filter((item): item is BagItem => item !== null);
   if (!occupied.length || occupied.some((item) => item.id !== "monster_carcass")) return null;
   const monsterIds = [...new Set(occupied.map((item) => item.monsterId).filter((id): id is string => typeof id === "string"))];
   if (monsterIds.length !== 1) return null;
-  const output = BUTCHERING_OUTPUTS[monsterIds[0]];
-  if (!output) return null;
+  const definition = getButcheringDefinition(monsterIds[0]);
+  if (!definition) return null;
   return {
-    id: `butcher_${monsterIds[0]}`, name: output.name, stage: 2, rarity: "common", unlock: "Butchering Knife",
-    ingredients: [{ id: "monster_carcass", quantity: 1 }], toolId: BUTCHERING_KNIFE_ID,
-    outputId: output.primary, outputQuantity: 1,
-    byproducts: output.secondary.map((id) => ({ id, quantity: 1 })),
+    id: `butcher_${monsterIds[0]}`, name: definition.recipeName, stage: 2, rarity: "common", unlock: ITEM_CATALOG[tool.id]?.name ?? "Butchering Knife",
+    ingredients: [{ id: "monster_carcass", quantity: 1 }], toolId: tool.id,
+    outputId: definition.primary.id, outputQuantity: definition.primary.ranges[knifeTier - 1][0],
+    byproducts: definition.secondary.map((material) => ({ id: material.id, quantity: material.ranges[knifeTier - 1][0] })),
     sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 0, tags: [],
   };
 }
@@ -152,7 +159,7 @@ export function getCraftableRecipeCount(
   recipe: CookingRecipe,
   tool: BagItem | null,
 ): number {
-  if ((tool?.id ?? null) !== recipe.toolId || (tool && tool.quantity !== 1)) return 0;
+  if (!isCookingToolCompatible(tool?.id ?? null, recipe.toolId) || (tool && tool.quantity !== 1)) return 0;
 
   const totals = ingredientTotals(ingredientSlots);
   let craftCount = recipe.ingredients.reduce(
@@ -161,10 +168,11 @@ export function getCraftableRecipeCount(
   );
   if (!Number.isFinite(craftCount)) craftCount = 0;
 
-  if (recipe.toolId === BUTCHERING_KNIFE_ID) {
+  const recipeToolId = recipe.toolId;
+  if (recipeToolId && getButcheringKnifeTier(recipeToolId)) {
     const durabilityPerCraft = carcassesPerCraft(recipe);
     if (durabilityPerCraft > 0) {
-      const catalogMaximum = ITEM_CATALOG[BUTCHERING_KNIFE_ID]?.maxDurability ?? 0;
+      const catalogMaximum = ITEM_CATALOG[recipeToolId]?.maxDurability ?? 0;
       const availableDurability = Math.max(0, tool?.durability ?? tool?.maxDurability ?? catalogMaximum);
       craftCount = Math.min(craftCount, Math.floor(availableDurability / durabilityPerCraft));
     }
@@ -178,7 +186,7 @@ export function findCookingRecipe(ingredientSlots: readonly (BagItem | null)[], 
   if (butchering) return butchering;
   const totals = ingredientTotals(ingredientSlots);
   return COOKING_RECIPES.find((recipe) => {
-    if ((tool?.id ?? null) !== recipe.toolId || (tool && tool.quantity !== 1)) return false;
+    if (!isCookingToolCompatible(tool?.id ?? null, recipe.toolId) || (tool && tool.quantity !== 1)) return false;
     if (totals.size !== recipe.ingredients.length) return false;
     return recipe.ingredients.every((ingredient) => (totals.get(ingredient.id) ?? 0) >= ingredient.quantity) &&
       getCraftableRecipeCount(ingredientSlots, recipe, tool) > 0;
@@ -218,10 +226,21 @@ export function createRecipeOutputs(
   tool: BagItem | null = null,
 ): BagItem[] {
   const isButchering = recipe.id.startsWith("butcher_");
-  const knifeLevel = isButchering && tool?.id === BUTCHERING_KNIFE_ID ? 1 : 0;
-  const luckBonus = isButchering && Math.random() * 100 < Math.min(50, Math.max(0, luck) * 2) ? 1 : 0;
+  if (isButchering && tool && getButcheringKnifeTier(tool.id)) {
+    const monsterId = recipe.id.slice("butcher_".length);
+    return rollButcheringOutputs(monsterId, tool.id, luck, craftCount).flatMap((output) => {
+      const stacks: BagItem[] = [];
+      let remaining = output.quantity;
+      while (remaining > 0) {
+        const quantity = Math.min(remaining, maxStackQuantity);
+        stacks.push(createCraftedItem(output.id, quantity));
+        remaining -= quantity;
+      }
+      return stacks;
+    });
+  }
   const outputs = [
-    { id: recipe.outputId, quantity: (recipe.outputQuantity + Math.max(0, knifeLevel - 1)) * craftCount + luckBonus },
+    { id: recipe.outputId, quantity: recipe.outputQuantity * craftCount },
     ...(recipe.byproducts ?? []).map((item) => ({ id: item.id, quantity: item.quantity * craftCount })),
   ];
 
@@ -243,12 +262,12 @@ export function applyRecipeToolUse(
   recipe: CookingRecipe,
   craftCount = 1,
 ): BagItem | null {
-  if (!tool || recipe.toolId !== BUTCHERING_KNIFE_ID) return tool ? { ...tool } : null;
+  if (!tool || !getButcheringKnifeTier(recipe.toolId) || tool.id !== recipe.toolId) return tool ? { ...tool } : null;
 
   const durabilityCost = carcassesPerCraft(recipe) * craftCount;
   if (durabilityCost <= 0) return { ...tool };
 
-  const catalogMaximum = ITEM_CATALOG[BUTCHERING_KNIFE_ID]?.maxDurability ?? 0;
+  const catalogMaximum = ITEM_CATALOG[tool.id]?.maxDurability ?? 0;
   const maximum = tool.maxDurability ?? catalogMaximum;
   const remaining = Math.max(0, (tool.durability ?? maximum) - durabilityCost);
   return remaining > 0 ? { ...tool, durability: remaining, maxDurability: maximum } : null;

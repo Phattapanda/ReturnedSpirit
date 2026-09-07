@@ -5,15 +5,15 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  Image,
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
+import { Image } from "expo-image";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { clearSlotSnapshot } from "@/src/game/save-manager";
 
-const BG = require("../assets/images/bg-tavern.jpg");
+const BG = require("../assets/images/mainpage.png");
 
 type SaveSlot = {
   slot: number;
@@ -95,7 +95,7 @@ export default function LoadGame() {
 
   return (
     <View style={styles.root}>
-      <Image source={BG} style={styles.bgImage} resizeMode="cover" resizeMethod="resize" />
+      <Image source={BG} style={styles.bgImage} contentFit="cover" contentPosition="top center" />
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <TouchableOpacity testID="back-button" style={styles.backBtn} onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={22} color="#2C1810" />
@@ -164,7 +164,7 @@ export default function LoadGame() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#F0EDE4" },
-  bgImage: { ...StyleSheet.absoluteFillObject, opacity: 0.10 },
+  bgImage: { ...StyleSheet.absoluteFill, opacity: 0.10 },
   header: {
     flexDirection: "row",
     alignItems: "center",

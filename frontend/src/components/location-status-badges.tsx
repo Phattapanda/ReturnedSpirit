@@ -9,6 +9,10 @@ import {
   loadPostGuestTutorialState,
 } from "@/src/game/post-guest-tutorial";
 import { loadMailboxState } from "@/src/game/mailbox-system";
+import { loadCoachmanEscortState } from "@/src/game/coachman-escort-system";
+import { SLEEP_STAMINA_SPEND_REQUIRED } from "@/src/game/room-config";
+
+const STAMINA_SPENT_TODAY_KEY = "@game:stamina_spent_today";
 
 const PRIMARY_GARDEN_PLOT_KEY = "@garden:plot_01_data";
 const SECOND_GARDEN_PLOT_KEY = "@garden:plot_02_data";
@@ -19,6 +23,8 @@ type LocationStatus = {
   harvestReady: boolean;
   merchantPresent: boolean;
   mailboxUnread: boolean;
+  receptionistPresent: boolean;
+  sleepReady: boolean;
 };
 
 type StoredGardenPlot = {
@@ -30,6 +36,8 @@ const DEFAULT_STATUS: LocationStatus = {
   harvestReady: false,
   merchantPresent: false,
   mailboxUnread: false,
+  receptionistPresent: false,
+  sleepReady: false,
 };
 
 const listeners = new Set<() => void>();
@@ -53,7 +61,7 @@ function plotIsReady(plot: StoredGardenPlot | null): boolean {
 }
 
 async function loadLocationStatus(): Promise<LocationStatus> {
-  const [primaryRaw, secondRaw, thirdRaw, fourthRaw, guestState, postGuestState, mailboxState] = await Promise.all([
+  const [primaryRaw, secondRaw, thirdRaw, fourthRaw, guestState, postGuestState, mailboxState, escortState, spentRaw] = await Promise.all([
     AsyncStorage.getItem(PRIMARY_GARDEN_PLOT_KEY),
     AsyncStorage.getItem(SECOND_GARDEN_PLOT_KEY),
     AsyncStorage.getItem(THIRD_GARDEN_PLOT_KEY),
@@ -61,6 +69,8 @@ async function loadLocationStatus(): Promise<LocationStatus> {
     loadGuestState(),
     loadPostGuestTutorialState(),
     loadMailboxState(),
+    loadCoachmanEscortState(),
+    AsyncStorage.getItem(STAMINA_SPENT_TODAY_KEY),
   ]);
 
   // Match Outside the Tavern exactly. Serving the Merchant in Dining Hall must
@@ -73,6 +83,8 @@ async function loadLocationStatus(): Promise<LocationStatus> {
       merchantDay &&
       areRegularGuestsUnlockedForDay(postGuestState, guestState.calendarDaySerial),
     mailboxUnread: mailboxState.messages.some((message) => !message.read),
+    receptionistPresent: escortState.phase === "complete" && (guestState.calendarDaySerial + 1) % 7 === 0,
+    sleepReady: Math.max(0, Number.parseInt(spentRaw ?? "0", 10) || 0) >= SLEEP_STAMINA_SPEND_REQUIRED,
   };
 }
 
@@ -113,16 +125,16 @@ export function useLocationStatusBadges(): LocationStatus {
 }
 
 type LocationStatusBadgeProps = {
-  kind: "harvest" | "merchant" | "mail";
+  kind: "harvest" | "merchant" | "mail" | "receptionist" | "sleep";
 };
 
 export function LocationStatusBadge({ kind }: LocationStatusBadgeProps) {
   return (
     <View
       pointerEvents="none"
-      style={[styles.badge, kind === "harvest" ? styles.harvestBadge : styles.orangeBadge]}
+      style={[styles.badge, kind === "harvest" || kind === "sleep" ? styles.harvestBadge : styles.orangeBadge]}
     >
-      <Text style={styles.badgeText}>{kind === "merchant" ? "?" : "!"}</Text>
+      <Text style={styles.badgeText}>{kind === "merchant" ? "?" : kind === "sleep" ? "✓" : "!"}</Text>
     </View>
   );
 }

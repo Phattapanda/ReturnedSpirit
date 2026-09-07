@@ -20,12 +20,14 @@ import Animated, {
   withTiming,
   runOnJS,
 } from "react-native-reanimated";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { getMusicTheme } from "@/src/audio/audioEngine";
 
 import type { GardenPlotData } from "@/src/components/GardenPlot";
 import {
   ROOM_UPGRADES_DEFAULT,
+  SLEEP_STAMINA_SPEND_REQUIRED,
   calcSleepRecovery,
   canAfford,
   deductUpgradeCost,
@@ -41,14 +43,29 @@ import {
 
 import SceneBackground from "@/src/components/SceneBackground";
 import CurrencyHud from "@/src/components/CurrencyHud";
+import ItemDurabilityBadge from "@/src/components/item-durability-badge";
 import StatusModal from "@/src/components/StatusModal";
+import PlayerBag, { BagIconButton, getItemImageSource } from "@/src/components/PlayerBag";
 import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
 import TavernLocationTransition from "@/src/components/tavern-location-transition";
+import { notifyLocationStatusChanged } from "@/src/components/location-status-badges";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
 import { setPlaytimePaused } from "@/src/game/playtime-tracker";
 import { loadGuestTutorialIntroStep } from "@/src/game/guest-tutorial";
 import { ELAPSED_DAYS_KEY, prepareTitheForDay } from "@/src/game/tithe-system";
+import {
+  DEFAULT_BAG,
+  PLAYER_BAG_KEY,
+  canStack,
+  getContainerStackLimit,
+  normalizeBagItem,
+  normalizePlayerBagData,
+  planContainerItemToBag,
+  removeBagItem,
+  type BagItem,
+  type PlayerBagData,
+} from "@/src/game/item-system";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
   PLAYER_AVATAR_KEY,
@@ -91,7 +108,6 @@ type RoomState =
   | "DAY_TRANSITION_IN_PROGRESS"
   | "ROOM_MORNING"
   | "UPGRADE_MODAL"
-  | "STORAGE_MODAL"
   | "LEAVING_ROOM";
 
 // ─── Assets ───────────────────────────────────────────────────────────────────
@@ -107,6 +123,8 @@ const IMG = {
 };
 
 const DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
+const ROOM_STORAGE_COLUMNS = 5;
+const ROOM_STORAGE_SLOT_COUNT = 10;
 
 function avatarSrc(avatarId: PlayerAvatarId, st: number) {
   return getPlayerAvatarForStamina(avatarId, st);
@@ -189,7 +207,9 @@ export default function DormitoryScreen() {
   const [roomUpgrades, setRoomUpgrades]         = useState<RoomUpgrade[]>(ROOM_UPGRADES_DEFAULT);
   const [sharedResources, setSharedResources]   = useState<SharedResources>(SHARED_RESOURCE_DEFAULTS);
   const [roomStorageUnlocked, setRoomStorageUnlocked] = useState(false);
-  const [roomStorage] = useState<null[]>(Array(12).fill(null));
+  const [roomStorage, setRoomStorage] = useState<(BagItem | null)[]>(Array(ROOM_STORAGE_SLOT_COUNT).fill(null));
+  const roomStorageRef = useRef<(BagItem | null)[]>(Array(ROOM_STORAGE_SLOT_COUNT).fill(null));
+  const storageTransferBusyRef = useRef(false);
 
   // ── Player thought bubble
   const [playerBubble, setPlayerBubble]   = useState<string | null>(null);
@@ -200,9 +220,10 @@ export default function DormitoryScreen() {
   // ── Modal states
   const [sleepConfirmOpen, setSleepConfirmOpen] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal]   = useState(false);
-  const [showStorageModal, setShowStorageModal]   = useState(false);
   const [statusOpen, setStatusOpen]                 = useState(false);
   const [showMenu, setShowMenu]                   = useState(false);
+  const [playerBag, setPlayerBag]                 = useState<PlayerBagData>(DEFAULT_BAG);
+  const [bagOpen, setBagOpen]                     = useState(false);
 
   useEffect(() => {
     void setPlaytimePaused(showMenu);
@@ -216,6 +237,7 @@ export default function DormitoryScreen() {
   const [sleepTransitioning, setSleepTransitioning] = useState(false);
   const isDayTransitionRef = useRef(false);
   const downstairsLocked   = useRef(false);
+  const bagDropTargetRef = useRef<View>(null);
 
   // ── Animations
   const staminaSV    = useSharedValue(40);
@@ -266,6 +288,21 @@ export default function DormitoryScreen() {
   // Sync roomStateRef
   // ─────────────────────────────────────────────────────────────────────────
   function setRS(s: RoomState) { roomStateRef.current = s; setRoomState(s); }
+
+  async function syncPlayerBag(unlockForDayTwo: boolean) {
+    const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
+    let loadedBag = DEFAULT_BAG;
+    if (rawBag) {
+      try { loadedBag = normalizePlayerBagData(JSON.parse(rawBag)); } catch { /* use default */ }
+    }
+    const nextBag = unlockForDayTwo && !loadedBag.unlocked
+      ? { ...loadedBag, unlocked: true }
+      : loadedBag;
+    if (nextBag !== loadedBag) {
+      await AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(nextBag));
+    }
+    setPlayerBag(nextBag);
+  }
 
   useEffect(() => {
     staminaMaxSV.value = playerStats.maximumStamina;
@@ -329,7 +366,7 @@ export default function DormitoryScreen() {
       return { timeOfDay: "evening", showEveningIntro: false };
     }
     // Day 3+: fully dynamic
-    return { timeOfDay: spent >= 10 ? "evening" : "morning", showEveningIntro: false };
+    return { timeOfDay: spent >= SLEEP_STAMINA_SPEND_REQUIRED ? "evening" : "morning", showEveningIntro: false };
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -366,6 +403,7 @@ export default function DormitoryScreen() {
         const rawElapsedDays = await AsyncStorage.getItem(ELAPSED_DAYS_KEY);
         const elapsedDays = Math.max(0, Number.parseInt(rawElapsedDays ?? "0", 10) || 0);
         setElapsedDayCount(elapsedDays);
+        await syncPlayerBag(elapsedDays >= 1);
         const guestTutorialStep = await loadGuestTutorialIntroStep();
 
         // Daily stamina spend (cross-screen, written by garden.tsx deductStamina)
@@ -393,6 +431,19 @@ export default function DormitoryScreen() {
         setRoomUpgrades(loadedUpgrades);
         const storageUpg = loadedUpgrades.find(u => u.id === "room_storage_01");
         if (storageUpg?.completed) setRoomStorageUnlocked(true);
+
+        const rawStorage = await AsyncStorage.getItem(DSK.STORAGE);
+        if (rawStorage) {
+          try {
+            const savedStorage = JSON.parse(rawStorage) as (BagItem | null)[];
+            const normalizedStorage = Array.from(
+              { length: ROOM_STORAGE_SLOT_COUNT },
+              (_, index) => normalizeBagItem(Array.isArray(savedStorage) ? savedStorage[index] ?? null : null),
+            );
+            roomStorageRef.current = normalizedStorage;
+            setRoomStorage(normalizedStorage);
+          } catch { /* use empty storage */ }
+        }
 
         // Shared resources
         const rawRes = await AsyncStorage.getItem(SHARED_RESOURCES_KEY);
@@ -554,6 +605,7 @@ export default function DormitoryScreen() {
       await prepareTitheForDay(elapsedDays);
       setDayIdx(newDay);
       setElapsedDayCount(elapsedDays);
+      await syncPlayerBag(elapsedDays >= 1);
 
       // ── 2. Process garden plot growth
       const rawPlot = await AsyncStorage.getItem(DSK.PLOT_DATA);
@@ -598,6 +650,7 @@ export default function DormitoryScreen() {
       // ── 6b. Reset daily stamina spend for the new day (before snapshot!)
       await AsyncStorage.setItem(DSK.STAMINA_SPENT_TODAY, "0");
       setStaminaSpentToday(0);
+      notifyLocationStatusChanged();
 
       // ── 7. Save slot (with final new values) + create checkpoint snapshot
       // A day-transition checkpoint represents waking up in the Dormitory.
@@ -759,7 +812,7 @@ export default function DormitoryScreen() {
   // ─────────────────────────────────────────────────────────────────────────
   function afterDownstairsFade() {
     audioManager.stopSoundEffect('walking-on-wood');
-    router.replace("/kitchen");
+    router.replace({ pathname: "/kitchen", params: { stamina: String(staminaCurrent) } });
   }
 
   async function handleGoDownstairs() {
@@ -785,7 +838,7 @@ export default function DormitoryScreen() {
   // Upgrades
   // ─────────────────────────────────────────────────────────────────────────
   function handleUpgradeModal() {
-    if (showStorageModal || isDayTransitionRef.current) return;
+    if (isDayTransitionRef.current) return;
     setShowUpgradeModal(true);
     setRS("UPGRADE_MODAL");
   }
@@ -832,17 +885,85 @@ export default function DormitoryScreen() {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Storage
+  // Room Storage
   // ─────────────────────────────────────────────────────────────────────────
-  function handleStorageModal() {
-    if (showUpgradeModal || isDayTransitionRef.current || !roomStorageUnlocked) return;
-    setShowStorageModal(true);
-    setRS("STORAGE_MODAL");
+  async function handleBagToRoomStorage(bagSlotIdx: number, tappedItem: BagItem) {
+    setBagOpen(false);
+    if (!roomStorageUnlocked || storageTransferBusyRef.current) return;
+
+    const sourceItem = playerBag.slots[bagSlotIdx];
+    if (!sourceItem || sourceItem.id !== tappedItem.id) return;
+
+    const nextStorage = roomStorageRef.current.map((item) => item ? { ...item } : null);
+    const stackLimit = getContainerStackLimit("roomStorage");
+    let remaining = sourceItem.quantity;
+
+    for (let index = 0; index < nextStorage.length && remaining > 0; index += 1) {
+      const stored = nextStorage[index];
+      if (!stored || !canStack(stored, sourceItem) || stored.quantity >= stackLimit) continue;
+      const moved = Math.min(remaining, stackLimit - stored.quantity);
+      nextStorage[index] = { ...stored, quantity: stored.quantity + moved };
+      remaining -= moved;
+    }
+    for (let index = 0; index < nextStorage.length && remaining > 0; index += 1) {
+      if (nextStorage[index]) continue;
+      const moved = Math.min(remaining, stackLimit);
+      nextStorage[index] = { ...sourceItem, quantity: moved, equipped: false };
+      remaining -= moved;
+    }
+
+    const transferred = sourceItem.quantity - remaining;
+    if (transferred <= 0) {
+      showPlayerBubble('"There is no free space in Room Storage."', 2500);
+      return;
+    }
+
+    const nextBag = removeBagItem(playerBag, bagSlotIdx, transferred);
+    storageTransferBusyRef.current = true;
+    try {
+      await AsyncStorage.multiSet([
+        [DSK.STORAGE, JSON.stringify(nextStorage)],
+        [PLAYER_BAG_KEY, JSON.stringify(nextBag)],
+      ]);
+      roomStorageRef.current = nextStorage;
+      setRoomStorage(nextStorage);
+      setPlayerBag(nextBag);
+      audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
+    } finally {
+      storageTransferBusyRef.current = false;
+    }
   }
 
-  function closeStorageModal() {
-    setShowStorageModal(false);
-    setRS(timeOfDay === "morning" ? "ROOM_MORNING" : "ROOM_EVENING_INTERACTIVE");
+  async function moveRoomStorageItemToBag(storageSlotIdx: number) {
+    if (!roomStorageUnlocked || storageTransferBusyRef.current) return;
+    const plan = planContainerItemToBag(roomStorageRef.current, storageSlotIdx, playerBag);
+    if (!plan.canTransfer) {
+      showPlayerBubble('"There is no free space in my bag."', 2500);
+      return;
+    }
+
+    storageTransferBusyRef.current = true;
+    try {
+      await AsyncStorage.multiSet([
+        [DSK.STORAGE, JSON.stringify(plan.updatedSourceSlots)],
+        [PLAYER_BAG_KEY, JSON.stringify(plan.updatedBag)],
+      ]);
+      roomStorageRef.current = plan.updatedSourceSlots;
+      setRoomStorage(plan.updatedSourceSlots);
+      setPlayerBag(plan.updatedBag);
+      audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
+    } finally {
+      storageTransferBusyRef.current = false;
+    }
+  }
+
+  function handleStorageDropOnBag(storageSlotIdx: number, absoluteX: number, absoluteY: number) {
+    bagDropTargetRef.current?.measureInWindow((x, y, width, height) => {
+      const padding = 14;
+      const droppedOnBag = absoluteX >= x - padding && absoluteX <= x + width + padding
+        && absoluteY >= y - padding && absoluteY <= y + height + padding;
+      if (droppedOnBag) void moveRoomStorageItemToBag(storageSlotIdx);
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -855,7 +976,6 @@ export default function DormitoryScreen() {
   // staminaSpentToday is kept in state so it can be displayed/used in future features
   const canGoDownstairs      = elapsedDayCount >= 2 ? (staminaSpentToday >= 0) : (isMorning || (!mustSleep && firstSleepDone));
   const optionsInteractive   = roomState === "ROOM_EVENING_INTERACTIVE" || roomState === "ROOM_MORNING";
-  const incompleteUpgrades   = roomUpgrades.filter(u => !u.completed);
 
   const roomDisplayName = playerName && playerName.trim().length > 0
     ? `${playerName}'s Room`
@@ -889,7 +1009,7 @@ export default function DormitoryScreen() {
   return (
     <TavernLocationTransition location="dormitory">
     <View style={styles.root}>
-      {/* ── Background (responsive, top-aligned, no cover zoom) ── */}
+      {/* ── Background (responsive, aspect-ratio preserving cover) ── */}
       <SceneBackground source={isEvening ? IMG.room_evening : IMG.room_morning} topOffset={headerH} />
       <View style={[StyleSheet.absoluteFill, { top: headerH }, styles.bgOverlay]} pointerEvents="none" />
 
@@ -963,7 +1083,7 @@ export default function DormitoryScreen() {
         bounces={false}
         scrollEnabled={!sleepTransitioning}
       >
-        {/* Portrait row: player + locked bag (NO Rupert) */}
+        {/* Portrait row: player + inventory bag (unlocked from Day 2) */}
         <View style={styles.portraitRow}>
           <TouchableOpacity
             ref={playerPortraitRef}
@@ -973,10 +1093,24 @@ export default function DormitoryScreen() {
           >
             <Image source={avatarSrc(playerAvatarId, staminaCurrent)} style={[styles.circleImg, styles.playerPortraitImage]} resizeMode="cover" resizeMethod="resize" />
           </TouchableOpacity>
-          <View style={[styles.circleWrap, styles.bagCircle]}>
-            <Ionicons name="lock-closed" size={28} color="rgba(150,130,100,0.55)" />
+          <View ref={bagDropTargetRef} collapsable={false}>
+            <BagIconButton
+              unlocked={playerBag.unlocked}
+              bagId={playerBag.bagId}
+              onPress={() => setBagOpen(true)}
+            />
           </View>
         </View>
+
+        {(roomState !== "LOADING" && roomState !== "ENTERING_ROOM_FIRST_TIME") && (
+          <View style={styles.recoveryCard}>
+            <Text style={styles.recoveryTitle}>Sleep Recovery</Text>
+            <View style={styles.recoveryValues}>
+              <Text style={styles.recoveryStamina}>⚡ +{calcSleepRecovery(roomUpgrades).stamina} Stamina</Text>
+              <Text style={styles.recoveryLife}>♥ +{calcSleepRecovery(roomUpgrades).life} Life</Text>
+            </View>
+          </View>
+        )}
 
         {/* Room options */}
         {(roomState !== "LOADING" && roomState !== "ENTERING_ROOM_FIRST_TIME") && (
@@ -998,16 +1132,6 @@ export default function DormitoryScreen() {
               disabled={!optionsInteractive || isDayTransitionRef.current}
             />
 
-            {/* Check Storage (only when unlocked) */}
-            {roomStorageUnlocked && (
-              <RoomOption
-                icon="grid-outline"
-                label="Check Storage"
-                onPress={optionsInteractive ? handleStorageModal : undefined}
-                disabled={!optionsInteractive}
-              />
-            )}
-
             {/* Go downstairs — always last */}
             <RoomOption
               icon="arrow-down-outline"
@@ -1019,14 +1143,41 @@ export default function DormitoryScreen() {
             />
           </View>
         )}
+
+        {roomStorageUnlocked && roomState !== "LOADING" && roomState !== "ENTERING_ROOM_FIRST_TIME" && (
+          <View style={styles.inlineStoragePanel}>
+            <View style={styles.inlineStorageTitleRow}>
+              <Ionicons name="grid-outline" size={18} color="#C4943A" />
+              <Text style={styles.inlineStorageTitle}>Room Storage</Text>
+            </View>
+            <View style={styles.storageGrid}>
+              {Array.from({ length: ROOM_STORAGE_SLOT_COUNT / ROOM_STORAGE_COLUMNS }, (_, row) => (
+                <View key={row} style={styles.storageGridRow}>
+                  {Array.from({ length: ROOM_STORAGE_COLUMNS }, (_, column) => {
+                    const index = row * ROOM_STORAGE_COLUMNS + column;
+                    return (
+                      <RoomStorageSlot
+                        key={index}
+                        slotIndex={index}
+                        item={roomStorage[index] ?? null}
+                        onDropOnBag={handleStorageDropOnBag}
+                      />
+                    );
+                  })}
+                </View>
+              ))}
+            </View>
+            <Text style={styles.storageSub2}>Tap an item in your bag to store it · Drag stored items onto the bag to take them back</Text>
+          </View>
+        )}
       </ScrollView>
 
       {/* ── Menu Modal ── */}
       <Modal visible={showMenu} transparent animationType="fade">
         <View style={styles.modalOverlay}>
-          <View style={styles.confirmPanel}>
-            <Text style={styles.confirmTitle}>Menu</Text>
-            <View style={{ height: 1, backgroundColor: "rgba(196,148,58,0.22)", marginVertical: 8 }} />
+          <View style={styles.menuPanel}>
+            <Text style={styles.menuTitle}>Menu</Text>
+            <View style={styles.divider} />
             {[
               { icon: "play" as const,          label: "Resume",    action: () => setShowMenu(false) },
               { icon: "book-outline" as const,   label: "Logbook",   action: () => { setShowMenu(false); router.push("/logbook"); } },
@@ -1036,12 +1187,12 @@ export default function DormitoryScreen() {
             ].map((item) => (
               <TouchableOpacity
                 key={item.label}
-                style={{ flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 13, paddingHorizontal: 6, borderRadius: 10 }}
+                style={styles.menuRow}
                 onPress={item.action}
                 activeOpacity={0.7}
               >
                 <Ionicons name={item.icon} size={20} color="#C4943A" />
-                <Text style={{ color: "#F0E8D5", fontSize: 15, fontFamily: "Oldenburg", letterSpacing: 0.4 }}>{item.label}</Text>
+                <Text style={styles.menuRowText}>{item.label}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -1080,10 +1231,10 @@ export default function DormitoryScreen() {
             <View style={styles.divider} />
 
             <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
-              {incompleteUpgrades.length === 0 ? (
+              {roomUpgrades.length === 0 ? (
                 <Text style={styles.noUpgradesText}>No upgrades available.</Text>
               ) : (
-                incompleteUpgrades.map((upg) => (
+                roomUpgrades.map((upg) => (
                   <UpgradeRow
                     key={upg.id}
                     upgrade={upg}
@@ -1096,31 +1247,6 @@ export default function DormitoryScreen() {
                 <Text style={styles.upgradeMsg}>{upgradeMsg}</Text>
               ) : null}
             </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      {/* ── Room Storage modal ── */}
-      <Modal visible={showStorageModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={[styles.storagePanel, { paddingBottom: insets.bottom + 16 }]}>
-            <View style={styles.upgradeTitleRow}>
-              <Text style={styles.panelTitle}>Room Storage</Text>
-              <TouchableOpacity style={styles.closeBtnCircle} onPress={closeStorageModal} activeOpacity={0.8} hitSlop={8}>
-                <Ionicons name="close" size={18} color="#F5E6C8" />
-              </TouchableOpacity>
-            </View>
-            <View style={styles.divider} />
-            <Text style={styles.storageSub}>2 rows × 6 columns · 12 slots</Text>
-            {/* 12-slot grid */}
-            <View style={styles.storageGrid}>
-              {roomStorage.map((_, idx) => (
-                <View key={idx} style={styles.storageSlot}>
-                  <Ionicons name="square-outline" size={22} color="rgba(196,148,58,0.18)" />
-                </View>
-              ))}
-            </View>
-            <Text style={styles.storageSub2}>Item transfer — coming soon.</Text>
           </View>
         </View>
       </Modal>
@@ -1145,6 +1271,27 @@ export default function DormitoryScreen() {
         }}
       />
 
+      <PlayerBag
+        bag={playerBag}
+        visible={bagOpen}
+        context={roomStorageUnlocked ? "roomStorage" : "room"}
+        dayIdx={dayIdx}
+        onClose={() => setBagOpen(false)}
+        onTransferItem={(slotIdx, item) => { void handleBagToRoomStorage(slotIdx, item); }}
+        onBagUpdated={setPlayerBag}
+        onShowThoughtBubble={(text) => showPlayerBubble(text, 2500)}
+        onStatsUpdated={setPlayerStats}
+        onStaminaUpdated={(stamina) => {
+          setStaminaCurrent(stamina);
+          setStaminaDisplay(stamina);
+          staminaSV.value = stamina;
+        }}
+        onLifeUpdated={(life) => {
+          setLifeCurrent(life);
+          lifeSV.value = life;
+        }}
+      />
+
       {/* ── Transition blocking overlay ── */}
       {(sleepTransitioning || isDayTransitionRef.current) && (
         <View style={[StyleSheet.absoluteFill, { zIndex: 900 }]} pointerEvents="box-only" />
@@ -1164,6 +1311,64 @@ export default function DormitoryScreen() {
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
+
+type RoomStorageSlotProps = {
+  slotIndex: number;
+  item: BagItem | null;
+  onDropOnBag: (slotIndex: number, absoluteX: number, absoluteY: number) => void;
+};
+
+function RoomStorageSlot({ slotIndex, item, onDropOnBag }: RoomStorageSlotProps) {
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const dragging = useSharedValue(0);
+  const itemImage = item ? getItemImageSource(item.id) : undefined;
+  const dragStyle = useAnimatedStyle(() => ({
+    zIndex: dragging.value ? 20 : 0,
+    opacity: dragging.value ? 0.9 : 1,
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+      { scale: dragging.value ? 1.08 : 1 },
+    ],
+  }));
+  const dragGesture = Gesture.Pan()
+    .enabled(Boolean(item))
+    .minDistance(4)
+    .onBegin(() => {
+      dragging.value = 1;
+    })
+    .onUpdate((event) => {
+      translateX.value = event.translationX;
+      translateY.value = event.translationY;
+    })
+    .onEnd((event) => {
+      runOnJS(onDropOnBag)(slotIndex, event.absoluteX, event.absoluteY);
+    })
+    .onFinalize(() => {
+      dragging.value = 0;
+      translateX.value = withTiming(0, { duration: 150 });
+      translateY.value = withTiming(0, { duration: 150 });
+    });
+
+  return (
+    <View style={styles.storageSlot}>
+      {item ? (
+        <GestureDetector gesture={dragGesture}>
+          <Animated.View style={[styles.storageItemTouch, dragStyle]}>
+            {itemImage ? (
+              <Image source={itemImage} style={styles.storageItemImage} resizeMode="contain" resizeMethod="resize" />
+            ) : (
+              <Text style={styles.storageItemFallback} numberOfLines={2}>{item.name}</Text>
+            )}
+            <ItemDurabilityBadge item={item} />
+            {item.quantity > 1 && <Text style={styles.storageQuantity}>{item.quantity}</Text>}
+          </Animated.View>
+        </GestureDetector>
+      ) : null}
+    </View>
+  );
+}
 
 type RoomOptionProps = {
   icon: React.ComponentProps<typeof Ionicons>["name"];
@@ -1202,9 +1407,12 @@ type UpgradeRowProps = {
 
 function UpgradeRow({ upgrade, resources, onTap }: UpgradeRowProps) {
   const affordable = canAfford(upgrade, resources);
+  const unavailable = !upgrade.completed && !affordable;
 
   return (
-    <TouchableOpacity style={styles.upgradeRow} onPress={onTap} activeOpacity={0.8}>
+    <View
+      style={[styles.upgradeRow, unavailable && styles.upgradeRowUnavailable, upgrade.completed && styles.upgradeRowCompleted]}
+    >
       <Text style={styles.upgradeName}>{upgrade.displayName}</Text>
       {/* Effects */}
       <View style={styles.upgradeEffects}>
@@ -1222,7 +1430,7 @@ function UpgradeRow({ upgrade, resources, onTap }: UpgradeRowProps) {
       <View style={styles.upgradeCosts}>
         {(Object.entries(upgrade.costs) as [ResourceId, number][]).map(([res, qty]) => {
           const have    = resources[res] ?? 0;
-          const missing = have < qty;
+          const missing = !upgrade.completed && have < qty;
           return (
             <Text key={res} style={[styles.upgradeCostItem, missing && styles.upgradeCostMissing]}>
               {RESOURCE_NAMES[res]} {have}/{qty}
@@ -1230,12 +1438,22 @@ function UpgradeRow({ upgrade, resources, onTap }: UpgradeRowProps) {
           );
         })}
       </View>
-      {!affordable && (
-        <View style={styles.upgradeNotAffordBadge}>
-          <Text style={styles.upgradeNotAffordText}>Not enough resources.</Text>
-        </View>
-      )}
-    </TouchableOpacity>
+      <View style={styles.upgradeActionRow}>
+        {!upgrade.completed && !affordable ? (
+          <View style={styles.upgradeNotAffordBadge}>
+            <Text style={styles.upgradeNotAffordText}>Not enough resources.</Text>
+          </View>
+        ) : <View />}
+        <TouchableOpacity
+          style={[styles.upgradeBuildButton, upgrade.completed && styles.upgradeBuildButtonCompleted]}
+          onPress={onTap}
+          disabled={upgrade.completed}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.upgradeBuildButtonText}>{upgrade.completed ? "Completed" : "Build"}</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
 
@@ -1314,6 +1532,15 @@ const styles = StyleSheet.create({
   },
 
   // Room options card
+  recoveryCard: {
+    marginHorizontal: 20, marginTop: 14, paddingVertical: 11, paddingHorizontal: 16,
+    backgroundColor: "rgba(14,8,2,0.90)", borderRadius: 14, borderWidth: 1,
+    borderColor: "rgba(196,148,58,0.35)", alignItems: "center", gap: 7,
+  },
+  recoveryTitle: { color: "rgba(240,232,213,0.70)", fontSize: 12, fontFamily: "Oldenburg" },
+  recoveryValues: { flexDirection: "row", justifyContent: "center", gap: 20 },
+  recoveryStamina: { color: "#7FD7FF", fontSize: 13, fontFamily: "Oldenburg" },
+  recoveryLife: { color: "#79D68A", fontSize: 13, fontFamily: "Oldenburg" },
   optionsCard: {
     marginHorizontal: 20, marginTop: 18,
     backgroundColor: "rgba(14,8,2,0.90)",
@@ -1388,6 +1615,22 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.03)",
     borderWidth: 1, borderColor: "rgba(196,148,58,0.18)",
   },
+  menuPanel: {
+    width: 264, backgroundColor: "#160B03", borderRadius: 20, padding: 24,
+    borderWidth: 1.5, borderColor: "rgba(196,148,58,0.38)", gap: 2,
+    shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.6, shadowRadius: 16, elevation: 24,
+  },
+  menuTitle: { color: "#F5E6C8", fontSize: 18, fontFamily: "Oldenburg", letterSpacing: 1, textAlign: "center" },
+  menuRow: { flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 13, paddingHorizontal: 6, borderRadius: 10 },
+  menuRowText: { color: "#F0E8D5", fontSize: 15, fontFamily: "Oldenburg", letterSpacing: 0.4 },
+  upgradeRowUnavailable: {
+    borderWidth: 1.5,
+    borderColor: "rgba(214,67,52,0.92)",
+  },
+  upgradeRowCompleted: {
+    opacity: 0.68,
+    backgroundColor: "rgba(0,0,0,0.20)",
+  },
   upgradeName:    { color: "#F5E6C8", fontSize: 14, fontFamily: "Oldenburg", marginBottom: 4 },
   upgradeEffects: { flexDirection: "column", gap: 2, marginBottom: 6 },
   upgradeEffect:  { color: "rgba(196,148,58,0.80)", fontSize: 12 },
@@ -1399,20 +1642,47 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8, paddingVertical: 3, alignSelf: "flex-start",
   },
   upgradeNotAffordText: { color: "#CC4400", fontSize: 11, fontFamily: "Oldenburg" },
-
-  // Storage modal
-  storagePanel: {
-    width: "90%", maxHeight: "75%", backgroundColor: "#160B03", borderRadius: 20,
-    padding: 20, borderWidth: 1.5, borderColor: "rgba(196,148,58,0.38)",
-    shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.6, shadowRadius: 16, elevation: 24,
-  },
-  storageSub:  { color: "rgba(196,148,58,0.55)", fontSize: 11, fontStyle: "italic", textAlign: "center", marginBottom: 10 },
-  storageSub2: { color: "rgba(196,148,58,0.35)", fontSize: 11, fontStyle: "italic", textAlign: "center", marginTop: 10 },
-  storageGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6, justifyContent: "center" },
-  storageSlot: {
-    width: 50, height: 50, borderRadius: 8,
-    backgroundColor: "rgba(196,148,58,0.05)",
-    borderWidth: 1, borderColor: "rgba(196,148,58,0.18)",
+  upgradeActionRow: { marginTop: 10, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  upgradeBuildButton: {
+    minWidth: 92, minHeight: 38, paddingHorizontal: 16, borderRadius: 9,
     alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(126,89,26,0.78)", borderWidth: 1, borderColor: "#C4943A",
   },
+  upgradeBuildButtonCompleted: { opacity: 0.62, backgroundColor: "rgba(196,148,58,0.10)" },
+  upgradeBuildButtonText: { color: "#F5E6C8", fontSize: 12, fontFamily: "Oldenburg" },
+
+  // Always-visible Room Storage
+  inlineStoragePanel: {
+    marginHorizontal: 20,
+    marginTop: 14,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 10,
+    gap: 9,
+    backgroundColor: "rgba(14,8,2,0.92)",
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: "rgba(196,148,58,0.35)",
+    overflow: "visible",
+  },
+  inlineStorageTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  inlineStorageTitle: { color: "#F0E8D5", fontSize: 14, fontFamily: "Oldenburg", letterSpacing: 0.5 },
+  storageSub2: { color: "rgba(196,148,58,0.35)", fontSize: 11, fontStyle: "italic", textAlign: "center", marginTop: 10 },
+  storageGrid: {
+    gap: 4, paddingTop: 5, paddingHorizontal: 5, paddingBottom: 7,
+    backgroundColor: "rgba(10,6,1,0.90)", borderRadius: 12,
+    borderWidth: 1, borderColor: "rgba(90,65,30,0.35)", overflow: "visible",
+  },
+  storageGridRow: { flexDirection: "row", alignItems: "stretch", gap: 4 },
+  storageSlot: {
+    flex: 1, aspectRatio: 1, minHeight: 44,
+    borderRadius: 8,
+    backgroundColor: "rgba(20,11,3,0.93)",
+    borderWidth: 1, borderColor: "rgba(90,65,30,0.42)",
+    alignItems: "center", justifyContent: "center", position: "relative", overflow: "visible",
+  },
+  storageItemTouch: { width: "80%", height: "80%", alignItems: "center", justifyContent: "center", position: "relative" },
+  storageItemImage: { width: "100%", height: "100%" },
+  storageItemFallback: { color: "#C4943A", fontSize: 8, lineHeight: 10, textAlign: "center", paddingHorizontal: 2 },
+  storageQuantity: { position: "absolute", right: 3, bottom: 1, color: "#FFF", fontSize: 10, fontFamily: "Oldenburg", textShadowColor: "#000", textShadowRadius: 2 },
 });

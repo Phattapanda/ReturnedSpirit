@@ -20,6 +20,8 @@ export type RoomUpgrade = {
   completed:   boolean;
 };
 
+export const SLEEP_STAMINA_SPEND_REQUIRED = 10;
+
 export const ROOM_UPGRADES_DEFAULT: RoomUpgrade[] = [
   {
     id: "room_curtain_01",
@@ -40,7 +42,7 @@ export const ROOM_UPGRADES_DEFAULT: RoomUpgrade[] = [
     displayName: "Build Storage Lvl. 1",
     costs: { wood: 10 },
     effects: {
-      unlockRoomStorage: { level: 1, rows: 2, columns: 6 },
+      unlockRoomStorage: { level: 1, rows: 2, columns: 5 },
     },
     completed: false,
   },

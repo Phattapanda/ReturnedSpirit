@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Animated,
   Image,
+  Modal,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -13,12 +14,15 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import {
   getMerchantExchangeOffer,
+  discoverGuestPreference,
   prepareGuestsForDay,
   setActiveGuest,
   subscribeFavorRewardDialog,
   type GuestId,
   type GuestVisitView,
 } from "@/src/game/guest-system";
+import { ITEM_CATALOG, type MealTag } from "@/src/game/item-system";
+import CurrencyPrice from "@/src/components/currency-price";
 
 export type GuestServiceAction = "sell" | "exchange" | "water" | "talk";
 export type GuestServiceSourcePoint = { x: number; y: number };
@@ -40,7 +44,6 @@ type GuestCardProps = {
   departing?: boolean;
 };
 
-const COIN_COPPER = require("../../assets/images/coin_copper.png");
 const OLD_FARMER = require("../../assets/images/old_farmer.png");
 const COACHMAN = require("../../assets/images/coachman.png");
 const MERCHANT = require("../../assets/images/merchant.png");
@@ -131,6 +134,7 @@ export function GuestCard({
   beverageIsAlcoholic = false,
   departing = false,
 }: GuestCardProps) {
+  const [detailsVisible, setDetailsVisible] = useState(false);
   const { profile, selected } = guest;
   const displayedSellPrice = profile.id === "local_boozer" && selectedMealIsAlcoholic && sellPriceCopper !== null
     ? sellPriceCopper * 2
@@ -194,13 +198,19 @@ export function GuestCard({
         activeOpacity={0.88}
       >
         <View style={styles.guestTopRow}>
-          <View style={styles.portraitWrap}>
+          <TouchableOpacity
+            style={styles.portraitWrap}
+            onPress={() => setDetailsVisible(true)}
+            activeOpacity={0.78}
+            accessibilityRole="button"
+            accessibilityLabel={`View details for ${profile.name}`}
+          >
             {portrait ? (
               <Image source={portrait} style={styles.portraitImage} resizeMode="cover" resizeMethod="resize" />
             ) : (
               <Ionicons name="person-outline" size={40} color="rgba(196,148,58,0.76)" />
             )}
-          </View>
+          </TouchableOpacity>
 
           <View style={styles.guestTextArea}>
             <Text style={styles.name}>{profile.name}</Text>
@@ -224,10 +234,7 @@ export function GuestCard({
               {displayedSellPrice === null ? (
                 <Text style={styles.serviceValueText}>Select meal</Text>
               ) : (
-                <>
-                  <Text style={styles.serviceValueText}>{displayedSellPrice}</Text>
-                  <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" resizeMethod="resize" />
-                </>
+                <CurrencyPrice totalCopper={displayedSellPrice} textStyle={styles.serviceValueText} />
               )}
             </View>
           </TouchableOpacity>
@@ -272,8 +279,8 @@ export function GuestCard({
               : <Image source={SERVICE_WATER} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />}
             <Text style={styles.serviceLabel}>Offer {beverageName}</Text>
             <View style={styles.serviceValueRow}>
-              <Text style={styles.serviceValueText}>for {displayedBeveragePrice}</Text>
-              <Image source={COIN_COPPER} style={styles.miniCoin} resizeMode="contain" resizeMethod="resize" />
+              <Text style={styles.serviceValueText}>for</Text>
+              <CurrencyPrice totalCopper={displayedBeveragePrice} textStyle={styles.serviceValueText} />
             </View>
           </TouchableOpacity>
 
@@ -288,7 +295,118 @@ export function GuestCard({
           </TouchableOpacity>
         </View>
       </TouchableOpacity>
+
+      <GuestDetailsModal
+        visible={detailsVisible}
+        guest={guest}
+        portrait={portrait}
+        onClose={() => setDetailsVisible(false)}
+      />
     </Animated.View>
+  );
+}
+
+function displayItemName(itemId: string | null): string {
+  if (!itemId) return "";
+  return ITEM_CATALOG[itemId]?.name ?? itemId
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function displayTag(tag: MealTag): string {
+  return tag.charAt(0).toUpperCase() + tag.slice(1).replace(/_/g, " ");
+}
+
+function GuestDetailsModal({
+  visible,
+  guest,
+  portrait,
+  onClose,
+}: {
+  visible: boolean;
+  guest: GuestVisitView;
+  portrait: ReturnType<typeof require> | undefined;
+  onClose: () => void;
+}) {
+  const { profile } = guest;
+  const learned = new Set(guest.learnedPreferenceFacts);
+  const hasPreferences = !!profile.favoriteDishId || !!profile.leastFavoriteDishId ||
+    profile.preferredMealTags.length > 0 || profile.dislikedMealTags.length > 0;
+  const satisfiedWithEverything = profile.usesFavor === false && !hasPreferences;
+
+  const maskedTags = (tags: readonly MealTag[], prefix: "preferred_tag" | "disliked_tag") => tags
+    .map((tag) => learned.has(`${prefix}:${tag}`) ? displayTag(tag) : "?")
+    .join(", ");
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <TouchableOpacity style={styles.detailsOverlay} activeOpacity={1} onPress={onClose}>
+        <TouchableOpacity style={styles.detailsCard} activeOpacity={1} onPress={() => {}}>
+          <View style={styles.detailsHeader}>
+            <View style={styles.detailsPortraitWrap}>
+              {portrait ? (
+                <Image source={portrait} style={styles.detailsPortrait} resizeMode="cover" resizeMethod="resize" />
+              ) : (
+                <Ionicons name="person-outline" size={48} color="rgba(196,148,58,0.76)" />
+              )}
+            </View>
+            <View style={styles.detailsTitleArea}>
+              <Text selectable style={styles.detailsName}>{profile.name}</Text>
+              {profile.usesFavor !== false && (
+                <Text selectable style={styles.favorText}>Favor Points: {guest.favor}/100</Text>
+              )}
+            </View>
+            <TouchableOpacity style={styles.detailsClose} onPress={onClose} activeOpacity={0.75}>
+              <Ionicons name="close" size={22} color="#F0E8D5" />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.detailsDivider} />
+
+          {satisfiedWithEverything ? (
+            <Text selectable style={styles.satisfiedText}>This guest is satisfied with everything.</Text>
+          ) : (
+            <View style={styles.preferenceList}>
+              {profile.favoriteDishId && (
+                <PreferenceRow
+                  label="Favorite dish"
+                  value={learned.has("favorite_dish") ? displayItemName(profile.favoriteDishId) : "?"}
+                />
+              )}
+              {profile.leastFavoriteDishId && (
+                <PreferenceRow
+                  label="Disliked dish"
+                  value={learned.has("least_favorite_dish") ? displayItemName(profile.leastFavoriteDishId) : "?"}
+                />
+              )}
+              {profile.preferredMealTags.length > 0 && (
+                <PreferenceRow label="Preferred tags" value={maskedTags(profile.preferredMealTags, "preferred_tag")} />
+              )}
+              {profile.dislikedMealTags.length > 0 && (
+                <PreferenceRow label="Disliked tags" value={maskedTags(profile.dislikedMealTags, "disliked_tag")} />
+              )}
+              {!hasPreferences && (
+                <Text selectable style={styles.satisfiedText}>This guest is satisfied with everything.</Text>
+              )}
+            </View>
+          )}
+
+          {hasPreferences && (
+            <Text selectable style={styles.discoveryHint}>Talk to this guest for a chance to learn an unknown preference.</Text>
+          )}
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
+
+function PreferenceRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.preferenceRow}>
+      <Text selectable style={styles.preferenceLabel}>{label}</Text>
+      <Text selectable style={styles.preferenceValue}>{value}</Text>
+    </View>
   );
 }
 
@@ -391,6 +509,14 @@ export default function DiningGuestArea({
     source?: GuestServiceSourcePoint,
   ) {
     const completed = await onService?.(guest, action, source);
+    if (action === "talk") {
+      const discovery = await discoverGuestPreference(guest.profile.id);
+      if (discovery.outcome === "learned") {
+        setGuests((current) => current.map((entry) => entry.profile.id === guest.profile.id
+          ? { ...entry, learnedPreferenceFacts: discovery.learnedFactKeys }
+          : entry));
+      }
+    }
     if (action === "exchange" && completed === true) {
       setGuests((current) => current.map((entry) => (
         entry.profile.id === guest.profile.id ? { ...entry, exchangeOffer: null } : entry
@@ -608,6 +734,111 @@ const styles = StyleSheet.create({
     color: "rgba(240,232,213,0.45)",
     fontSize: 12,
     fontStyle: "italic",
+    fontFamily: "Oldenburg",
+  },
+  detailsOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.78)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 22,
+  },
+  detailsCard: {
+    width: "100%",
+    maxWidth: 430,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: "rgba(196,148,58,0.72)",
+    backgroundColor: "#160C03",
+    padding: 18,
+    gap: 14,
+  },
+  detailsHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 13,
+  },
+  detailsPortraitWrap: {
+    width: 76,
+    height: 76,
+    borderRadius: 13,
+    overflow: "hidden",
+    borderWidth: 2,
+    borderColor: "rgba(196,148,58,0.55)",
+    backgroundColor: "rgba(30,18,5,0.95)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  detailsPortrait: {
+    width: "100%",
+    height: "100%",
+    transform: [{ scale: 1.06 }],
+  },
+  detailsTitleArea: {
+    flex: 1,
+    gap: 7,
+  },
+  detailsName: {
+    color: "#E1AF54",
+    fontSize: 18,
+    fontFamily: "Oldenburg",
+  },
+  favorText: {
+    color: "#F0E8D5",
+    fontSize: 13,
+    fontFamily: "Oldenburg",
+    fontVariant: ["tabular-nums"],
+  },
+  detailsClose: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.07)",
+    alignSelf: "flex-start",
+  },
+  detailsDivider: {
+    height: 1,
+    backgroundColor: "rgba(196,148,58,0.28)",
+  },
+  preferenceList: {
+    gap: 10,
+  },
+  preferenceRow: {
+    minHeight: 44,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: "rgba(196,148,58,0.26)",
+    backgroundColor: "rgba(255,255,255,0.025)",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  preferenceLabel: {
+    color: "rgba(240,232,213,0.62)",
+    fontSize: 10,
+    fontFamily: "Oldenburg",
+  },
+  preferenceValue: {
+    color: "#F0E8D5",
+    fontSize: 14,
+    lineHeight: 20,
+    fontFamily: "Oldenburg",
+  },
+  satisfiedText: {
+    color: "#F0E8D5",
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: "center",
+    fontFamily: "Oldenburg",
+    paddingVertical: 8,
+  },
+  discoveryHint: {
+    color: "rgba(240,232,213,0.55)",
+    fontSize: 10,
+    lineHeight: 15,
+    textAlign: "center",
     fontFamily: "Oldenburg",
   },
 });

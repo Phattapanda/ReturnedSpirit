@@ -49,7 +49,7 @@ export default function RunEndingOverlay({ visible, busy = false, onNewRun, onTa
 
 const styles = StyleSheet.create({
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 3000,
     backgroundColor: "#000",
     alignItems: "center",

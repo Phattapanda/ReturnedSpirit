@@ -97,10 +97,10 @@ export async function loadExploreNavigationUnlocked(): Promise<boolean> {
 }
 
 export async function unlockExploreFromCoachman(): Promise<TravelState> {
+  const current = await loadTravelState();
   const next: TravelState = {
-    version: 1,
+    ...current,
     exploreUnlocked: true,
-    unlockedDestinations: ["next_city", "forest_entrance"],
   };
   await AsyncStorage.setItem(TRAVEL_STATE_KEY, JSON.stringify(next));
   return next;
@@ -112,6 +112,17 @@ export async function unlockNextCityAfterEscort(): Promise<TravelState> {
     ...current,
     exploreUnlocked: true,
     unlockedDestinations: [...new Set<TravelDestinationId>([...current.unlockedDestinations, "next_city"])],
+  };
+  await AsyncStorage.setItem(TRAVEL_STATE_KEY, JSON.stringify(next));
+  return next;
+}
+
+export async function unlockForestEntranceAfterRegistration(): Promise<TravelState> {
+  const current = await loadTravelState();
+  const next: TravelState = {
+    ...current,
+    exploreUnlocked: true,
+    unlockedDestinations: [...new Set<TravelDestinationId>([...current.unlockedDestinations, "next_city", "forest_entrance"])],
   };
   await AsyncStorage.setItem(TRAVEL_STATE_KEY, JSON.stringify(next));
   return next;

@@ -45,6 +45,7 @@ import StatusModal from "@/src/components/StatusModal";
 import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
 import {
   LocationStatusBadge,
+  notifyLocationStatusChanged,
   useLocationStatusBadges,
 } from "@/src/components/location-status-badges";
 import {
@@ -159,6 +160,7 @@ interface BubbleConfig {
   text: string;
   speaker: string;
   policy: BubblePolicy;
+  highlightedPhrases?: readonly string[];
 }
 
 type LRect = { x: number; y: number; w: number; h: number };
@@ -286,7 +288,7 @@ export default function GardenScreen() {
     clearManagedInterval: clearInterval,
   } = useManagedTimers();
   const router = useRouter();
-  const { merchantPresent } = useLocationStatusBadges();
+  const { merchantPresent, sleepReady } = useLocationStatusBadges();
   const insets = useSafeAreaInsets();
   const { width: W, height: H } = useWindowDimensions();
   const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(DEFAULT_PLAYER_AVATAR_ID);
@@ -932,10 +934,11 @@ setExploreUnlocked(exploreAvailable);
     autoMs: number | null,
     onClose: () => void,
     logId?: string,
+    highlightedPhrases?: readonly string[],
   ) {
     if (bubbleTimer.current) { clearTimeout(bubbleTimer.current); bubbleTimer.current = null; }
     bubbleDoneRef.current = onClose;
-    setBubble({ text, speaker, policy });
+    setBubble({ text, speaker, policy, highlightedPhrases });
     // Log to logbook
     if (logId) {
       const dayNames = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
@@ -1030,6 +1033,8 @@ setExploreUnlocked(exploreAvailable);
       "BLOCK_ALL",
       null,
       onIntroBubble3Done,
+      "bubble.garden.herb_yield",
+      ["The herbs only need water to grow", "improve the yield"],
     );
   }
 
@@ -1056,7 +1061,9 @@ setExploreUnlocked(exploreAvailable);
     const newSpent = staminaSpentTodayRef.current + actualAmount;
     staminaSpentTodayRef.current = newSpent;
     setStaminaSpentToday(newSpent);
-    AsyncStorage.setItem(GSK.STAMINA_SPENT_TODAY, String(newSpent)).catch(() => {});
+    AsyncStorage.setItem(GSK.STAMINA_SPENT_TODAY, String(newSpent))
+      .then(() => notifyLocationStatusChanged())
+      .catch(() => {});
 
     // Float animation — slower/softer per centralized config
     setFloatText(floatLabel);
@@ -1161,7 +1168,7 @@ setExploreUnlocked(exploreAvailable);
       showPlayerBubble('"I already did this today."');
       return;
     }
-    const pullCost = calcEffectiveStaminaCost(8, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
+    const pullCost = calcEffectiveStaminaCost(5, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
     if (staminaCurrent < pullCost) { showPlayerBubble('"Not enough stamina."'); return; }
     actionLocked.current = true;
 
@@ -1613,6 +1620,8 @@ setExploreUnlocked(exploreAvailable);
           setGardenState("WAITING_FOR_WELL_ACTION");
         }, 600);
       },
+      "bubble.garden.need_water",
+      ["Now we need water", "from the well"],
     );
   }
 
@@ -1859,7 +1868,7 @@ setExploreUnlocked(exploreAvailable);
     // trap the player in Garden. The empty bucket may still be back in Kitchen.
     if (rupertInDining) {
       audioManager.playSoundEffect('footstep', { maxDurationMs: 4000 });
-      router.replace("/kitchen");
+      router.replace({ pathname: "/kitchen", params: { stamina: String(staminaCurrent) } });
       return;
     }
 
@@ -1942,7 +1951,7 @@ setExploreUnlocked(exploreAvailable);
     // Room navigation must not depend on the current stack history. Dining uses
     // replace() when returning to Garden, so back() here can otherwise reveal an
     // older Garden entry instead of Kitchen.
-    router.replace("/kitchen");
+    router.replace({ pathname: "/kitchen", params: { stamina: String(staminaCurrent) } });
   }
 
   function handleStorageTap() {
@@ -1954,7 +1963,7 @@ setExploreUnlocked(exploreAvailable);
   // ─────────────────────────────────────────────────────────────────────────
   const temporaryStaminaReduction = getActiveStaminaBuffReduction(playerStats);
   const waterCost      = calcEffectiveStaminaCost(2, playerStats.endurance, temporaryStaminaReduction);
-  const pullWeedsCost  = calcEffectiveStaminaCost(8, playerStats.endurance, temporaryStaminaReduction);
+  const pullWeedsCost  = calcEffectiveStaminaCost(5, playerStats.endurance, temporaryStaminaReduction);
   const selectedFertilizerConfig = getGardenFertilizerConfig(selectedFertilizer);
   const fertilizeCost = calcEffectiveStaminaCost(
     selectedFertilizerConfig?.staminaCost ?? 3,
@@ -2009,6 +2018,7 @@ setExploreUnlocked(exploreAvailable);
           text={bubble.text}
           top={bubbleTopPos}
           variant="speech"
+          highlightedPhrases={bubble.highlightedPhrases}
         />
       </Pressable>
     );
@@ -2200,7 +2210,7 @@ setExploreUnlocked(exploreAvailable);
           return (
             <Animated.View
               key={plotNumber}
-              ref={(view) => { auxiliaryCropAreaRefs.current[plotNumber] = view as unknown as View | null; }}
+              ref={(view: View | null) => { auxiliaryCropAreaRefs.current[plotNumber] = view; }}
               style={[styles.secondPlotWrap, plotOpacityStyle]}
             >
               <Text style={styles.secondPlotLabel}>{ordinal} Plot</Text>
@@ -2321,6 +2331,7 @@ return (
       resizeMode="contain"
       resizeMethod="resize"
     />
+    {loc.id === "dormitory" && sleepReady && <LocationStatusBadge kind="sleep" />}
     {loc.id === "explore" && merchantPresent && <LocationStatusBadge kind="merchant" />}
   </TouchableOpacity>
 );
@@ -2453,7 +2464,11 @@ return (
             <View style={styles.divider} />
             {[
               { icon: "play" as const,         label: "Resume",    action: () => setShowMenu(false) },
-              { icon: "book-outline" as const,  label: "Logbook",   action: () => { setShowMenu(false); setShowLogbook(true); } },
+              { icon: "book-outline" as const,  label: "Logbook",   action: () => {
+                setShowMenu(false);
+                loadLogbook().then(setLogbook).catch(() => {});
+                setShowLogbook(true);
+              } },
               { icon: "save-outline" as const,  label: "Save",      action: handleManualSave },
               { icon: "home-outline" as const,   label: "Main Menu", action: handleMainMenu },
               { icon: "settings-outline" as const, label: "Settings", action: () => { setShowMenu(false); router.push("/settings"); } },

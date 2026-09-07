@@ -32,8 +32,8 @@ function escapeRegExpChar(char) {
  * Escapes all characters in a given string that have a special meaning in regular expressions
  */
 function escapeRegExpString(str) {
-    var result = '';
-    for (var i = 0; i < str.length; i++) {
+    let result = '';
+    for (let i = 0; i < str.length; i++) {
         result += escapeRegExpChar(str[i]);
     }
     return result;
@@ -44,12 +44,12 @@ function escapeRegExpString(str) {
 function transform(pattern, separator) {
     if (separator === void 0) { separator = true; }
     if (Array.isArray(pattern)) {
-        var regExpPatterns = pattern.map(function (p) { return "^".concat(transform(p, separator), "$"); });
+        let regExpPatterns = pattern.map(function (p) { return "^".concat(transform(p, separator), "$"); });
         return "(?:".concat(regExpPatterns.join('|'), ")");
     }
-    var separatorSplitter = '';
-    var separatorMatcher = '';
-    var wildcard = '.';
+    let separatorSplitter = '';
+    let separatorMatcher = '';
+    let wildcard = '.';
     if (separator === true) {
         separatorSplitter = '/';
         separatorMatcher = '[/\\\\]';
@@ -66,14 +66,14 @@ function transform(pattern, separator) {
             wildcard = "[^".concat(separatorMatcher, "]");
         }
     }
-    var requiredSeparator = separator ? "".concat(separatorMatcher, "+?") : '';
-    var optionalSeparator = separator ? "".concat(separatorMatcher, "*?") : '';
-    var segments = separator ? pattern.split(separatorSplitter) : [pattern];
-    var result = '';
-    for (var s = 0; s < segments.length; s++) {
-        var segment = segments[s];
-        var nextSegment = segments[s + 1];
-        var currentSeparator = '';
+    let requiredSeparator = separator ? "".concat(separatorMatcher, "+?") : '';
+    let optionalSeparator = separator ? "".concat(separatorMatcher, "*?") : '';
+    let segments = separator ? pattern.split(separatorSplitter) : [pattern];
+    let result = '';
+    for (let s = 0; s < segments.length; s++) {
+        let segment = segments[s];
+        let nextSegment = segments[s + 1];
+        let currentSeparator = '';
         if (!segment && s > 0) {
             continue;
         }
@@ -100,8 +100,8 @@ function transform(pattern, separator) {
             }
             continue;
         }
-        for (var c = 0; c < segment.length; c++) {
-            var char = segment[c];
+        for (let c = 0; c < segment.length; c++) {
+            let char = segment[c];
             if (char === '\\') {
                 if (c < segment.length - 1) {
                     result += escapeRegExpChar(segment[c + 1]);
@@ -160,9 +160,9 @@ function wildcardMatch(pattern, options) {
     if (options.separator === '\\') {
         throw new Error('\\ is not a valid separator because it is used for escaping. Try setting the separator to `true` instead');
     }
-    var regexpPattern = transform(pattern, options.separator);
-    var regexp = new RegExp("^".concat(regexpPattern, "$"), options.flags);
-    var fn = isMatch.bind(null, regexp);
+    let regexpPattern = transform(pattern, options.separator);
+    let regexp = new RegExp("^".concat(regexpPattern, "$"), options.flags);
+    let fn = isMatch.bind(null, regexp);
     fn.options = options;
     fn.pattern = pattern;
     fn.regexp = regexp;

@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { nextRunBonusCost, REPEAT_FIGHT_KP_COST } from "@/src/game/death-angel-system";
 import type { NextRunBonuses, NextRunFreeItem } from "@/src/game/next-run";
+
+const DEATH_PORTRAIT = require("../../assets/images/death.png");
 
 type Props = {
   visible: boolean;
@@ -37,7 +39,8 @@ export default function DeathAngelOverlay({ visible, karmaPoints, busy = false, 
   return <View style={styles.overlay}>
     <ScrollView contentContainerStyle={[styles.content, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]} showsVerticalScrollIndicator={false}>
       <Text style={styles.death}>YOU DIED.</Text>
-      <Text style={styles.angelTitle}>The Death Angel</Text>
+      <Image source={DEATH_PORTRAIT} style={styles.deathPortrait} resizeMode="contain" />
+      <Text style={styles.angelTitle}>Death</Text>
       <Text style={styles.angelText}>“Another path has ended. Decide whether this fight should be rewritten, or whether a new life should begin.”</Text>
       <Text style={styles.kp}>Available: {karmaPoints} KP</Text>
       {error ? <Text selectable style={styles.error}>{error}</Text> : null}
@@ -53,8 +56,8 @@ export default function DeathAngelOverlay({ visible, karmaPoints, busy = false, 
         <Text style={styles.optionsTitle}>Blessings for the next run</Text>
         <Option selected={!!bonuses.betterValues} label="Better starting values" cost="10 KP · +10 Maximum Stamina, +5 Maximum Life" onPress={() => toggle("betterValues")} />
         <Option selected={!!bonuses.growthPoints} label="30 Growth Points" cost="10 KP" onPress={() => toggle("growthPoints")} />
-        <Option selected={bonuses.copper === 100} label="Start with 1 Silver Coin" cost="5 KP · 100 Copper" onPress={() => setBonuses((current) => ({ ...current, copper: current.copper === 100 ? 0 : 100 }))} />
-        <Option selected={bonuses.copper === 300} label="Start with 3 Silver Coins" cost="15 KP · 300 Copper" onPress={() => setBonuses((current) => ({ ...current, copper: current.copper === 300 ? 0 : 300 }))} />
+        <Option selected={bonuses.copper === 100} label="Start with 1 Silver Coin" cost="5 KP · 1 Silver Coin" onPress={() => setBonuses((current) => ({ ...current, copper: current.copper === 100 ? 0 : 100 }))} />
+        <Option selected={bonuses.copper === 300} label="Start with 3 Silver Coins" cost="15 KP · 3 Silver Coins" onPress={() => setBonuses((current) => ({ ...current, copper: current.copper === 300 ? 0 : 300 }))} />
         <Option selected={!!bonuses.preserveFavor} label="Keep Guest Favor" cost="25 KP" onPress={() => toggle("preserveFavor")} />
         <Text style={styles.freeTitle}>Free recovered item package — choose one</Text>
         {FREE_ITEMS.map((item) => <Option key={item.id} selected={bonuses.freeItem === item.id} label={item.label} cost="Delivered to the Mailbox by City Guard" onPress={() => setBonuses((current) => ({ ...current, freeItem: current.freeItem === item.id ? null : item.id }))} />)}
@@ -76,9 +79,10 @@ function Option({ selected, label, cost, onPress }: { selected: boolean; label: 
 }
 
 const styles = StyleSheet.create({
-  overlay: { ...StyleSheet.absoluteFillObject, zIndex: 4000, backgroundColor: "#030101" },
+  overlay: { ...StyleSheet.absoluteFill, zIndex: 4000, backgroundColor: "#030101" },
   content: { minHeight: "100%", paddingHorizontal: 20, alignItems: "center", gap: 13 },
   death: { color: "#B31414", fontSize: 39, fontWeight: "900", letterSpacing: 4 },
+  deathPortrait: { width: "100%", maxWidth: 360, height: 280 },
   angelTitle: { color: "#E4D1B4", fontFamily: "Oldenburg", fontSize: 22 },
   angelText: { color: "rgba(240,232,213,0.74)", fontSize: 13, lineHeight: 20, textAlign: "center", maxWidth: 380 },
   kp: { color: "#D6A33B", fontFamily: "Oldenburg", fontSize: 14, fontVariant: ["tabular-nums"] },

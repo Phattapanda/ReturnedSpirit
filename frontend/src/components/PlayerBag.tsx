@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
+import ItemDurabilityBadge from "@/src/components/item-durability-badge";
 import Animated, {
   cancelAnimation,
   useSharedValue,
@@ -31,6 +32,7 @@ import {
   isEdible,
   isConsumable,
   hasItemAttribute,
+  getItemDurability,
   removeBagItem,
   normalizeItemId,
   type PlayerBagData,
@@ -55,6 +57,45 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   bag_potato:  require("../../assets/images/bag_potato.png"),
   carrot:      require("../../assets/images/carrot.png"),
   onion:       require("../../assets/images/onion.png"),
+  egg:         require("../../assets/images/egg.png"),
+  white_meat:  require("../../assets/images/meat_white.png"),
+  red_meat:    require("../../assets/images/meat_red.png"),
+  fish:        require("../../assets/images/meat_fish.png"),
+  ember_chicken_egg: require("../../assets/images/egg_ember_chicken.png"),
+  ember_chicken_meat: require("../../assets/images/meat_ember_chicken.png"),
+  elder_ember_comb: require("../../assets/images/elder_ember_comb.png"),
+  rooster_comb: require("../../assets/images/elder_ember_comb.png"),
+  ember_feather: require("../../assets/images/ember_feather.png"),
+  fang: require("../../assets/images/fang.png"),
+  fur: require("../../assets/images/fur.png"),
+  hide: require("../../assets/images/hide.png"),
+  weak_monster_core: require("../../assets/images/monster_core_weak.png"),
+  mushroom: require("../../assets/images/mushroom.png"),
+  mushroom_rare: require("../../assets/images/mushroom_rare.png"),
+  nuts: require("../../assets/images/nuts.png"),
+  slime_gel: require("../../assets/images/slime_gel.png"),
+  tusk: require("../../assets/images/tusk.png"),
+  wild_berries: require("../../assets/images/wild_berries.png"),
+  wolf_pelt: require("../../assets/images/wolf_pelt.png"),
+  bark: require("../../assets/images/bark.png"),
+  charred_wood: require("../../assets/images/charred_wood.png"),
+  leather: require("../../assets/images/leather.png"),
+  sap: require("../../assets/images/sap.png"),
+  quest_hunters_documents: require("../../assets/images/quest_bag.png"),
+  malted_barley: require("../../assets/images/quest_item.png"),
+  brewers_yeast: require("../../assets/images/quest_item.png"),
+  dried_hop_cones: require("../../assets/images/quest_item.png"),
+  raw_wildflower_honey: require("../../assets/images/quest_item.png"),
+  mead_yeast: require("../../assets/images/quest_item.png"),
+  grown_cinnamon_stalks_cloves: require("../../assets/images/quest_item.png"),
+  yeast_nutrients: require("../../assets/images/quest_item.png"),
+  tomato: require("../../assets/images/tomato.png"),
+  pan_farmhouse: require("../../assets/images/farmhouse_pan.png"),
+  snowberrysherbet: require("../../assets/images/snowberry_sherbet.png"),
+  cooking_pot: require("../../assets/images/cooking_pot.png"),
+  frying_pan: require("../../assets/images/frying_pan.png"),
+  fine_cooking_pot: require("../../assets/images/fine_cooking_pot.png"),
+  snowberry: require("../../assets/images/snowberry.png"),
   bucket:      require("../../assets/images/bucket.png"),
   bucketwater: require("../../assets/images/bucketwater.png"),
   seed_herb:   require("../../assets/images/seed_herb.png"),
@@ -82,7 +123,11 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   nails:       require("../../assets/images/nails.png"),
   paint:       require("../../assets/images/paint.png"),
   potato:      require("../../assets/images/potato.png"),
-  standardfertilizer: require("../../assets/images/fertilizer.png"),
+  standard_fertilizer: require("../../assets/images/fertilizer.png"),
+  premium_fertilizer: require("../../assets/premiumfertilizer.png"),
+  seed_onion: require("../../assets/images/seed_onion.png"),
+  seed_potato: require("../../assets/images/seed_potato.png"),
+  crate1: require("../../assets/images/crate1.png"),
   energydrink: require("../../assets/images/energy Drink.png"),
   energypill:  require("../../assets/images/energy Pill.png"),
   healthymuffin: require("../../assets/images/healthy muffin.png"),
@@ -92,16 +137,30 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   antidote: require("../../assets/images/antidote.png"),
   ingot_iron: require("../../assets/images/ingot_iron.png"),
   ingot_copper: require("../../assets/images/ingot_copper.png"),
+  ingot_silver: require("../../assets/images/ingot_silver.png"),
+  ingot_gold: require("../../assets/images/ingot_gold.png"),
+  ore_iron: require("../../assets/images/ore_iron.png"),
+  ore_copper: require("../../assets/images/ore_copper.png"),
+  ore_silver: require("../../assets/images/ore_silver.png"),
+  ore_gold: require("../../assets/images/ore_gold.png"),
+  rope: require("../../assets/images/rope.png"),
+  torch: require("../../assets/images/torch_normal.png"),
   shard_mana: require("../../assets/images/shard_mana.png"),
   stone_mana: require("../../assets/images/stone_mana.png"),
   tool_rusty_butchering_knife: require("../../assets/images/tool_rusty_butchering_knife.png"),
+  tool_iron_butchering_knife: require("../../assets/images/tool_iron_butchering_knife.png"),
+  tool_steel_butchering_knife: require("../../assets/images/tool_steel_butchering_knife.png"),
   armor_leather_bracers: require("../../assets/images/armor_leather_bracers.png"),
   armor_leather_armor: require("../../assets/images/armor_leather_armor.png"),
   weapon_iron_dagger: require("../../assets/images/weapon_iron_dagger.png"),
   weapon_iron_shortsword: require("../../assets/images/weapon_iron_shortsword.png"),
 };
 
-export type BagContext = "kitchen" | "dining" | "garden" | "room" | "none";
+export function getItemImageSource(itemId: string): ImageSourcePropType | undefined {
+  return ITEM_IMAGES[normalizeItemId(itemId)];
+}
+
+export type BagContext = "kitchen" | "dining" | "garden" | "room" | "roomStorage" | "none";
 
 type Props = {
   bag: PlayerBagData;
@@ -197,7 +256,7 @@ export default function PlayerBag({
 
     // Slot locations always get first refusal. A tap in Kitchen or Dining Hall
     // means transfer, never consume/equip/discard.
-    if (context === "kitchen" || context === "dining") {
+    if (context === "kitchen" || context === "dining" || context === "roomStorage") {
       if (hasItemAttribute(item, ITEM_ATTRIBUTE.QUEST_ITEM)) {
         setInfoItem(item);
         setInfoSlotIndex(slotIdx);
@@ -283,6 +342,11 @@ export default function PlayerBag({
 
   async function handleDiscardYes() {
     if (!discardTarget) return;
+    if (hasItemAttribute(discardTarget.item, ITEM_ATTRIBUTE.QUEST_ITEM)) {
+      setDiscardTarget(null);
+      onShowThoughtBubble?.("I should keep this Quest Item.");
+      return;
+    }
     if (discardLocked) {
       setDiscardTarget(null);
       onShowThoughtBubble?.("\"We still need it.\"");
@@ -357,6 +421,8 @@ export default function PlayerBag({
                   ? "Tap item to unpack to table.\nLong press for details."
                   : context === "dining"
                   ? "Tap food to place it in a Meal Slot.\nLong press for details."
+                  : context === "roomStorage"
+                  ? "Tap item to move it to Room Storage.\nLong press for details."
                   : context === "garden"
                   ? "Tap item for actions.\nLong press for details."
                   : "Tap item for actions.\nLong press for details."}
@@ -381,9 +447,10 @@ export default function PlayerBag({
                   </Text>
                 )}
                 <Text style={styles.infoDesc}>{ITEM_CATALOG[infoItem.id]?.description ?? ""}</Text>
-                {infoItem.maxDurability !== undefined && (
-                  <Text style={styles.infoContents}>Durability: {infoItem.durability ?? infoItem.maxDurability}/{infoItem.maxDurability}</Text>
-                )}
+                {(() => {
+                  const durability = getItemDurability(infoItem);
+                  return durability ? <Text style={styles.infoContents}>Durability: {durability.current}/{durability.maximum}</Text> : null;
+                })()}
                 {getEquipmentKind(infoItem) && (
                   <TouchableOpacity style={styles.equipButton} onPress={() => { void handleToggleEquipment(); }} activeOpacity={0.8}>
                     <Text style={styles.equipButtonText}>{infoItem.equipped ? "Unequip" : "Equip"}</Text>
@@ -419,15 +486,17 @@ export default function PlayerBag({
         const catalog = ITEM_CATALOG[item.id];
         const equipmentKind = getEquipmentKind(item);
         const usable = isConsumable(item) || isEdible(item);
+        const discardable = !hasItemAttribute(item, ITEM_ATTRIBUTE.QUEST_ITEM);
+        const durability = getItemDurability(item);
         const effects = [
           catalog?.staminaRecovery ? `Restores ${catalog.staminaRecovery} Stamina` : null,
           catalog?.lifeRecovery ? `Restores ${catalog.lifeRecovery} Life Points` : null,
           catalog?.grantedStatusEffectId ? `Effect: ${catalog.grantedStatusEffectId.replaceAll("_", " ")}` : null,
         ].filter((effect): effect is string => !!effect);
         const equipmentValues = equipmentKind === "weapon"
-          ? [`Damage: ${catalog?.damageMin ?? 0}–${catalog?.damageMax ?? 0}`, `Basic Accuracy: ${catalog?.basicAccuracyPercent ?? 100}%`, `Durability: ${item.durability ?? item.maxDurability ?? catalog?.maxDurability ?? 0}/${item.maxDurability ?? catalog?.maxDurability ?? 0}`]
+          ? [`Damage: ${catalog?.damageMin ?? 0}–${catalog?.damageMax ?? 0}`, `Basic Accuracy: ${catalog?.basicAccuracyPercent ?? 100}%`, ...(durability ? [`Durability: ${durability.current}/${durability.maximum}`] : [])]
           : equipmentKind === "armor"
-          ? [`Physical Defense: ${catalog?.physicalDefense ?? 0}`, `Durability: ${item.durability ?? item.maxDurability ?? catalog?.maxDurability ?? 0}/${item.maxDurability ?? catalog?.maxDurability ?? 0}`]
+          ? [`Physical Defense: ${catalog?.physicalDefense ?? 0}`, ...(durability ? [`Durability: ${durability.current}/${durability.maximum}`] : [])]
           : [];
         return <Modal visible transparent animationType="fade" onRequestClose={() => setActionTarget(null)}>
           <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setActionTarget(null)}>
@@ -438,11 +507,11 @@ export default function PlayerBag({
                 <Text selectable style={styles.actionName}>{item.id === "monster_carcass" ? item.name : (catalog?.name ?? item.name)}</Text>
                 {(effects.length > 0 ? effects : equipmentValues).map((value) => <Text selectable key={value} style={styles.actionValue}>{value}</Text>)}
                 {effects.length === 0 && equipmentValues.length === 0 ? <Text selectable style={styles.actionDescription}>{catalog?.description ?? "No usable effect."}</Text> : null}
-                <Text style={styles.actionQuestion}>{usable ? "Eat or Discard?" : equipmentKind ? `${item.equipped ? "Unequip" : "Equip"} or Discard?` : "Discard this item?"}</Text>
+                <Text style={styles.actionQuestion}>{discardable ? (usable ? "Eat or Discard?" : equipmentKind ? `${item.equipped ? "Unequip" : "Equip"} or Discard?` : "Discard this item?") : "Quest Items cannot be discarded."}</Text>
                 <View style={styles.actionButtons}>
                   {usable ? <TouchableOpacity style={[styles.actionChoice, styles.useChoice]} onPress={() => { setActionTarget(null); void handleConsumablePress(slotIdx, item); }}><Text style={styles.useChoiceText}>Eat</Text></TouchableOpacity> : null}
                   {equipmentKind ? <TouchableOpacity style={[styles.actionChoice, styles.useChoice]} onPress={() => { setActionTarget(null); void toggleEquipmentAt(slotIdx); }}><Text style={styles.useChoiceText}>{item.equipped ? "Unequip" : "Equip"}</Text></TouchableOpacity> : null}
-                  <TouchableOpacity style={[styles.actionChoice, styles.discardChoice]} onPress={() => { setActionTarget(null); setDiscardTarget({ slotIdx, item }); }}><Text style={styles.discardChoiceText}>Discard</Text></TouchableOpacity>
+                  {discardable ? <TouchableOpacity style={[styles.actionChoice, styles.discardChoice]} onPress={() => { setActionTarget(null); setDiscardTarget({ slotIdx, item }); }}><Text style={styles.discardChoiceText}>Discard</Text></TouchableOpacity> : null}
                 </View>
               </View>
             </TouchableOpacity>
@@ -530,6 +599,7 @@ function BagSlot({ item, size, selected, onPressIn, onLongPress, onPress }: Slot
       {imgSrc ? (
         <>
           <Image source={imgSrc} style={styles.slotImg} resizeMode="contain" resizeMethod="resize" />
+          <ItemDurabilityBadge item={item} />
           {item?.containedQuantity != null && item.containedQuantity > 0 && (
             <View style={styles.contentsCircle}>
               <Text style={styles.contentsText}>{item.containedQuantity}</Text>

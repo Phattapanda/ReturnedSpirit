@@ -190,7 +190,7 @@ export default function GardenPlot(props: GardenPlotProps) {
     onHarvestStored,
     onActionSuccess,
     onLockedAction,
-    actionCosts = { water: 2, pullWeeds: 8, fertilize: 3 },
+    actionCosts = { water: 2, pullWeeds: 5, fertilize: 3 },
     selectedFertilizerId = "standard_fertilizer",
   } = props;
 

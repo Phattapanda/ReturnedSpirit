@@ -20,6 +20,7 @@ import {
   type MailSenderKind,
   type MailboxState,
 } from "@/src/game/mailbox-system";
+import { loadCityState } from "@/src/game/city-system";
 
 type MailboxView = "inbox" | "send";
 
@@ -73,7 +74,10 @@ export default function MailScreen() {
 
   useFocusEffect(useCallback(() => {
     let active = true;
-    Promise.all([loadGuestTutorialIntroStep(), loadMailboxState()]).then(([tutorialStep, loadedMailbox]) => {
+    (async () => {
+      await loadCityState();
+      return Promise.all([loadGuestTutorialIntroStep(), loadMailboxState()]);
+    })().then(([tutorialStep, loadedMailbox]) => {
       if (!active) return;
       setUnlocked(guestTutorialHasReached(tutorialStep, "service_complete"));
       setMailbox(loadedMailbox);
@@ -327,7 +331,7 @@ export default function MailScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#0A0500" },
   backgroundGlow: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "#241306",
     opacity: 0.78,
   },

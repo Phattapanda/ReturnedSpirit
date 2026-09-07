@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from "react";
 import { Image, StyleSheet, TouchableOpacity, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { guestTutorialHasReached, loadGuestTutorialIntroStep } from "@/src/game/guest-tutorial";
@@ -29,7 +30,7 @@ type Props = {
 export default function TavernLocationBar({ current, mailboxUnread: mailboxUnreadOverride }: Props) {
   const router = useRouter();
   const audioManager = useAudioManager();
-  const { harvestReady, merchantPresent, mailboxUnread } = useLocationStatusBadges();
+  const { harvestReady, merchantPresent, mailboxUnread, receptionistPresent, sleepReady } = useLocationStatusBadges();
   const showMailboxUnread = mailboxUnreadOverride ?? mailboxUnread;
   const [coreUnlocked, setCoreUnlocked] = useState(false);
   const [exploreUnlocked, setExploreUnlocked] = useState(false);
@@ -59,16 +60,24 @@ export default function TavernLocationBar({ current, mailboxUnread: mailboxUnrea
             style={[styles.button, enabled ? styles.buttonEnabled : styles.buttonLocked, isCurrent && styles.buttonCurrent]}
             disabled={!enabled || isCurrent || !location.route}
             activeOpacity={0.8}
-            onPress={() => {
+            onPress={async () => {
               if (!location.route) return;
               audioManager.playSoundEffect(location.id === "dormitory" ? "walking-on-wood" : "footstep", { maxDurationMs: 4000 });
+              if (location.id === "kitchen") {
+                const stamina = await AsyncStorage.getItem("@game:stamina").catch(() => null);
+                router.replace({ pathname: "/kitchen", params: stamina === null ? {} : { stamina } });
+                return;
+              }
               router.replace(location.route);
             }}
           >
             <Image source={location.image} style={[styles.image, !enabled && styles.imageLocked]} resizeMode="contain" />
             {location.id === "garden" && harvestReady && <LocationStatusBadge kind="harvest" />}
+            {location.id === "dormitory" && sleepReady && <LocationStatusBadge kind="sleep" />}
             {location.id === "mail" && showMailboxUnread && <LocationStatusBadge kind="mail" />}
-            {location.id === "explore" && merchantPresent && <LocationStatusBadge kind="merchant" />}
+            {location.id === "explore" && (receptionistPresent
+              ? <LocationStatusBadge kind="receptionist" />
+              : merchantPresent ? <LocationStatusBadge kind="merchant" /> : null)}
           </TouchableOpacity>
         );
       })}

@@ -50,7 +50,7 @@ export default function MainMenu() {
       <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
       <Image
         source={BG}
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
         contentFit="cover"
         contentPosition="top center"
       />

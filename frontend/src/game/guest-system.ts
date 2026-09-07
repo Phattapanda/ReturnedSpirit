@@ -71,8 +71,18 @@ export type PendingFavorGift = {
   item: BagItem;
 };
 
+export type GuestPreferenceFactKey =
+  | "favorite_dish"
+  | "least_favorite_dish"
+  | `preferred_tag:${MealTag}`
+  | `disliked_tag:${MealTag}`;
+
+export type GuestPreferenceDiscoveryResult =
+  | { outcome: "learned"; factKey: GuestPreferenceFactKey; learnedFactKeys: GuestPreferenceFactKey[] }
+  | { outcome: "nothing_learned" | "already_known" | "no_preferences"; learnedFactKeys: GuestPreferenceFactKey[] };
+
 export type GuestState = {
-  version: 3;
+  version: 4;
   /** Monotonic in-game day counter used to distinguish visits across week wraps. */
   calendarDaySerial: number;
   /** Current weekday in the game's existing MO=0 ... SU=6 format. */
@@ -86,6 +96,8 @@ export type GuestState = {
   giftDialogDaySerial: Record<string, number>;
   /** The day on which each guest has already received food or water. */
   servedDaySerial: Record<string, number>;
+  /** Preference facts discovered by talking to each guest. */
+  learnedPreferenceFacts: Record<string, GuestPreferenceFactKey[]>;
 };
 
 export type GuestVisitView = {
@@ -95,6 +107,7 @@ export type GuestVisitView = {
   transportDiscountPercent: number;
   selected: boolean;
   favorRewardDialog: string | null;
+  learnedPreferenceFacts: readonly GuestPreferenceFactKey[];
 };
 
 const FAVOR_GIFT_SUCCESS = "Thank you very much for your hospitality. I like coming here. Here, take this.";
@@ -190,7 +203,7 @@ export const OLD_FARMER_PROFILE: GuestProfile = {
     },
   ],
   initialFavor: 0,
-  favoriteDishId: "soup_carrot",
+  favoriteDishId: "stew_vegetable",
   leastFavoriteDishId: null,
   preferredMealTags: [],
   dislikedMealTags: [],
@@ -212,7 +225,7 @@ export const COACHMAN_PROFILE: GuestProfile = {
   ],
   initialFavor: 0,
   // Reserved canonical IDs; the actual recipes/items can be added later.
-  favoriteDishId: "stew_beef", // Beef Stew
+  favoriteDishId: "stew_beef", // Red Stew
   leastFavoriteDishId: "snowberrysherbet", // Snowberry Sherbet
   preferredMealTags: [MEAL_TAG.HEARTY, MEAL_TAG.WARM],
   dislikedMealTags: [MEAL_TAG.COLD],
@@ -237,7 +250,7 @@ export const MERCHANT_PROFILE: GuestProfile = {
 
 export const TRAVELER_PROFILE: GuestProfile = {
   id: "traveler",
-  name: "Traveler",
+  name: "Traveller",
   portraitKey: "traveler",
   visitDays: EVERY_DAY,
   initialFavor: 0,
@@ -284,7 +297,7 @@ export const LOCAL_BOOZER_PROFILE: GuestProfile = {
   exchangePool: [],
 };
 
-/** Scheduled guests are capped before the Traveler is added as the single filler guest. */
+/** Scheduled guests are capped before the Traveller is added as the single filler guest. */
 export const CURRENT_MAX_DAILY_GUESTS = 3;
 export const GUEST_PROFILES: readonly GuestProfile[] = [
   OLD_FARMER_PROFILE,
@@ -296,7 +309,7 @@ export const GUEST_PROFILES: readonly GuestProfile[] = [
 ];
 
 export const DEFAULT_GUEST_STATE: GuestState = {
-  version: 3,
+  version: 4,
   calendarDaySerial: 0,
   calendarWeekday: 0,
   favors: {},
@@ -306,6 +319,7 @@ export const DEFAULT_GUEST_STATE: GuestState = {
   pendingFavorGifts: {},
   giftDialogDaySerial: {},
   servedDaySerial: {},
+  learnedPreferenceFacts: {},
 };
 
 function normalizeWeekday(value: number): number {
@@ -387,8 +401,21 @@ function normalizeGuestState(raw: unknown): GuestState {
     }
   }
 
+  const learnedPreferenceFacts: Record<string, GuestPreferenceFactKey[]> = {};
+  if (candidate.learnedPreferenceFacts && typeof candidate.learnedPreferenceFacts === "object") {
+    for (const [guestId, facts] of Object.entries(candidate.learnedPreferenceFacts)) {
+      if (!Array.isArray(facts)) continue;
+      const profile = GUEST_PROFILES.find((entry) => entry.id === guestId);
+      if (!profile) continue;
+      const validFacts = new Set(getGuestPreferenceFactKeys(profile));
+      learnedPreferenceFacts[guestId] = [...new Set(facts.filter(
+        (fact): fact is GuestPreferenceFactKey => typeof fact === "string" && validFacts.has(fact as GuestPreferenceFactKey),
+      ))];
+    }
+  }
+
   return {
-    version: 3,
+    version: 4,
     calendarDaySerial: Math.max(0, Math.floor(Number(candidate.calendarDaySerial) || 0)),
     calendarWeekday: normalizeWeekday(Number(candidate.calendarWeekday) || 0),
     favors,
@@ -398,6 +425,7 @@ function normalizeGuestState(raw: unknown): GuestState {
     pendingFavorGifts,
     giftDialogDaySerial,
     servedDaySerial,
+    learnedPreferenceFacts,
   };
 }
 
@@ -437,13 +465,52 @@ export function getGuestExchangePool(profile: GuestProfile, favor: number): read
   return getGuestFavorTier(profile, favor)?.exchangePool ?? profile.exchangePool;
 }
 
+export function getGuestPreferenceFactKeys(profile: GuestProfile): GuestPreferenceFactKey[] {
+  return [
+    ...(profile.favoriteDishId ? ["favorite_dish" as const] : []),
+    ...(profile.leastFavoriteDishId ? ["least_favorite_dish" as const] : []),
+    ...profile.preferredMealTags.map((tag): GuestPreferenceFactKey => `preferred_tag:${tag}`),
+    ...profile.dislikedMealTags.map((tag): GuestPreferenceFactKey => `disliked_tag:${tag}`),
+  ];
+}
+
+/** Each conversation has a 33% chance to reveal one still-unknown preference. */
+export async function discoverGuestPreference(
+  guestId: GuestId,
+  random: () => number = Math.random,
+): Promise<GuestPreferenceDiscoveryResult> {
+  const profile = GUEST_PROFILES.find((entry) => entry.id === guestId);
+  if (!profile) return { outcome: "no_preferences", learnedFactKeys: [] };
+
+  const allFacts = getGuestPreferenceFactKeys(profile);
+  const state = await loadGuestState();
+  const learned = state.learnedPreferenceFacts[guestId] ?? [];
+  if (allFacts.length === 0) return { outcome: "no_preferences", learnedFactKeys: learned };
+
+  const learnedSet = new Set(learned);
+  const unknown = allFacts.filter((fact) => !learnedSet.has(fact));
+  if (unknown.length === 0) return { outcome: "already_known", learnedFactKeys: learned };
+  if (random() >= 0.33) return { outcome: "nothing_learned", learnedFactKeys: learned };
+
+  const factKey = unknown[Math.min(unknown.length - 1, Math.floor(Math.max(0, random()) * unknown.length))];
+  const learnedFactKeys = [...learned, factKey];
+  await saveGuestState({
+    ...state,
+    learnedPreferenceFacts: {
+      ...state.learnedPreferenceFacts,
+      [guestId]: learnedFactKeys,
+    },
+  });
+  return { outcome: "learned", factKey, learnedFactKeys };
+}
+
 export function getMerchantExchangeOffer(mealValueCopper: number): GuestExchangeOffer | null {
   const value = Math.max(0, Math.floor(mealValueCopper));
   if (value >= 9 && value <= 15) return exchangeOffer("nails", "Nails", 1, 100);
   if (value >= 16 && value <= 22) return exchangeOffer("cloth", "Cloth", 1, 100);
   if (value >= 23 && value <= 29) return exchangeOffer("paint", "Paint", 1, 100);
   if (value >= 30 && value <= 36) return exchangeOffer("potion_healing_low_grade", "Low Quality Healing Potion", 1, 100);
-  if (value >= 37 && value <= 44) return exchangeOffer("potion_stamina_low_grade", "Low Quality Stamina Potion", 1, 100);
+  if (value >= 37 && value <= 44) return exchangeOffer("potion_stamina_low_grade", "Low Grade Stamina Potion", 1, 100);
   if (value >= 45 && value <= 50) return exchangeOffer("ingot_iron", "Iron Ingot", 1, 100);
   if (value >= 51 && value <= 57) return exchangeOffer("ingot_copper", "Copper Ingot", 1, 100);
   if (value >= 58 && value <= 64) return exchangeOffer("shard_mana", "Mana Shard", 2, 100);
@@ -646,6 +713,7 @@ export async function prepareGuestsForDay(dayIndex: number): Promise<GuestVisitV
       transportDiscountPercent: getGuestTransportDiscountPercent(profile, favor),
       selected: state.activeGuestId === profile.id,
       favorRewardDialog: rewardDialogs[profile.id] ?? null,
+      learnedPreferenceFacts: state.learnedPreferenceFacts[profile.id] ?? [],
     };
   });
 }
@@ -797,12 +865,14 @@ export async function resetGuestRelationshipsForNextRun(
   const favors: Record<string, number> = {};
   const rewardedFavorTiers: Record<string, number[]> = {};
   const pendingFavorGifts: Record<string, PendingFavorGift[]> = {};
+  const learnedPreferenceFacts: Record<string, GuestPreferenceFactKey[]> = {};
 
   for (const profile of GUEST_PROFILES) {
     if (!preserved.has(profile.id)) continue;
     favors[profile.id] = clampFavor(state.favors[profile.id] ?? profile.initialFavor);
     rewardedFavorTiers[profile.id] = [...(state.rewardedFavorTiers[profile.id] ?? [])];
     pendingFavorGifts[profile.id] = [...(state.pendingFavorGifts[profile.id] ?? [])];
+    learnedPreferenceFacts[profile.id] = [...(state.learnedPreferenceFacts[profile.id] ?? [])];
   }
 
   return saveGuestState({
@@ -810,5 +880,6 @@ export async function resetGuestRelationshipsForNextRun(
     favors,
     rewardedFavorTiers,
     pendingFavorGifts,
+    learnedPreferenceFacts,
   });
 }

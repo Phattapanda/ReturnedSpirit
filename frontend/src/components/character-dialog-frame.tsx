@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState, type ReactNode } from "react";
-import { Animated, Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions, type ImageSourcePropType } from "react-native";
+import React, { useEffect, useRef, type ReactNode } from "react";
+import { Animated, Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions, type ImageSourcePropType, type LayoutRectangle } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -13,6 +13,7 @@ type Props = {
   children?: ReactNode;
   actions?: ReactNode;
   bottomOffset?: number;
+  onCharacterLayout?: (layout: LayoutRectangle) => void;
 };
 
 export default function CharacterDialogFrame({
@@ -25,6 +26,7 @@ export default function CharacterDialogFrame({
   children,
   actions,
   bottomOffset = 0,
+  onCharacterLayout,
 }: Props) {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
@@ -32,7 +34,6 @@ export default function CharacterDialogFrame({
   const characterX = useRef(new Animated.Value(playerCharacter ? -width : width)).current;
   const panelOpacity = useRef(new Animated.Value(0)).current;
   const panelY = useRef(new Animated.Value(18)).current;
-  const [panelHeight, setPanelHeight] = useState(0);
   const entranceRef = useRef({ playerCharacter, width });
   entranceRef.current = { playerCharacter, width };
 
@@ -60,32 +61,31 @@ export default function CharacterDialogFrame({
 
   if (!visible) return null;
 
-  const characterHeight = Math.min(height * 0.76, 760);
-  const characterWidth = Math.min(width * 0.9, 540);
-  // Keep the same part of every character above the dialog panel, even when a
-  // character is intentionally rendered smaller (for example Old Farmer).
-  const characterBottom = bottomOffset + panelHeight * Math.max(0, 1 - characterScale);
-
+  const maximumCharacterHeight = Math.min(height * 0.76, 760) * characterScale;
+  const maximumCharacterWidth = Math.min(width * 0.9, 540) * characterScale;
+  const resolvedCharacter = characterSource ? Image.resolveAssetSource(characterSource) : null;
+  const characterAspectRatio = resolvedCharacter?.width && resolvedCharacter?.height
+    ? resolvedCharacter.width / resolvedCharacter.height
+    : maximumCharacterWidth / maximumCharacterHeight;
+  const characterWidth = Math.min(maximumCharacterWidth, maximumCharacterHeight * characterAspectRatio);
+  const characterHeight = characterWidth / characterAspectRatio;
   return (
     <View style={styles.blocker}>
       <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.dimmer, { opacity: dimOpacity }]} />
       {characterSource ? (
         <Animated.View
           pointerEvents="none"
+          onLayout={(event) => onCharacterLayout?.(event.nativeEvent.layout)}
           style={[
             styles.characterLayer,
             playerCharacter ? styles.playerCharacter : styles.npcCharacter,
-            { bottom: characterBottom, width: characterWidth * characterScale, height: characterHeight * characterScale, transform: [{ translateX: characterX }] },
+            { bottom: 0, width: characterWidth, height: characterHeight, transform: [{ translateX: characterX }] },
           ]}
         >
           <Image source={characterSource} style={styles.characterImage} resizeMode="contain" resizeMethod="auto" fadeDuration={0} />
         </Animated.View>
       ) : null}
       <Animated.View
-        onLayout={(event) => {
-          const nextHeight = event.nativeEvent.layout.height;
-          if (Math.abs(nextHeight - panelHeight) > 0.5) setPanelHeight(nextHeight);
-        }}
         style={[
           styles.panel,
           { paddingBottom: insets.bottom + 14, bottom: bottomOffset, opacity: panelOpacity, transform: [{ translateY: panelY }] },
@@ -108,7 +108,7 @@ export default function CharacterDialogFrame({
 }
 
 const styles = StyleSheet.create({
-  blocker: { ...StyleSheet.absoluteFillObject, zIndex: 1900 },
+  blocker: { ...StyleSheet.absoluteFill, zIndex: 1900 },
   dimmer: { backgroundColor: "rgba(0,0,0,0.58)" },
   characterLayer: { position: "absolute", zIndex: 1 },
   playerCharacter: { left: -12 },

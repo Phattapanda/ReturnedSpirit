@@ -14,22 +14,27 @@ export const SMALL_CRATE_SLOT_COUNT = 6;
 export type SmallCrateState = {
   version: 1;
   owned: boolean;
+  count: number;
   slots: (BagItem | null)[];
 };
 
 export const DEFAULT_SMALL_CRATE_STATE: SmallCrateState = {
   version: 1,
   owned: false,
+  count: 0,
   slots: Array(SMALL_CRATE_SLOT_COUNT).fill(null),
 };
 
 export function normalizeSmallCrateState(value: Partial<SmallCrateState> | null | undefined): SmallCrateState {
   const parsedSlots = Array.isArray(value?.slots) ? value.slots : [];
+  const legacyCount = value?.owned === true ? Math.max(1, Math.ceil(parsedSlots.length / SMALL_CRATE_SLOT_COUNT)) : 0;
+  const count = Math.max(legacyCount, Math.floor(Number(value?.count) || 0));
   return {
     version: 1,
-    owned: value?.owned === true,
+    owned: count > 0,
+    count,
     slots: Array.from(
-      { length: SMALL_CRATE_SLOT_COUNT },
+      { length: Math.max(SMALL_CRATE_SLOT_COUNT, count * SMALL_CRATE_SLOT_COUNT) },
       (_, index) => normalizeBagItem(parsedSlots[index] ?? null),
     ),
   };
@@ -70,7 +75,7 @@ export function addItemToSmallCrate(item: BagItem, state: SmallCrateState) {
     level: 1,
     rows: 2,
     columns: 3,
-    slotCount: SMALL_CRATE_SLOT_COUNT,
+    slotCount: normalized.slots.length,
     maxStackSize: 9,
     unlocked: true,
     slots: normalized.slots,

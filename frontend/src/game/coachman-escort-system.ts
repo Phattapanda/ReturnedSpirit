@@ -18,13 +18,14 @@ export const COACHMAN_ESCORT_KEY = "@tutorial:coachman_escort";
 export const ESCORT_WEAPON_ID = "weapon_iron_shortsword";
 export const ESCORT_ARMOR_ID = "armor_leather_armor";
 
-export type CoachmanEscortPhase = "locked" | "rupert_warned" | "offer_pending" | "accepted" | "declined" | "journey" | "combat" | "post_combat" | "complete";
+export type CoachmanEscortPhase = "locked" | "rupert_warned" | "offer_pending" | "accepted" | "declined" | "journey" | "combat" | "post_combat" | "city_arrival" | "city_exploration" | "complete";
 
 export type CoachmanEscortState = {
   version: 1;
   phase: CoachmanEscortPhase;
   equipmentPending: boolean;
   bonusCopperAccepted: boolean;
+  guildIntroductionSeen: boolean;
 };
 
 export const DEFAULT_COACHMAN_ESCORT_STATE: CoachmanEscortState = {
@@ -32,17 +33,19 @@ export const DEFAULT_COACHMAN_ESCORT_STATE: CoachmanEscortState = {
   phase: "locked",
   equipmentPending: false,
   bonusCopperAccepted: false,
+  guildIntroductionSeen: false,
 };
 
 function normalizeState(raw: unknown): CoachmanEscortState {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_COACHMAN_ESCORT_STATE };
   const candidate = raw as Partial<CoachmanEscortState>;
-  const phases = new Set<CoachmanEscortPhase>(["locked", "rupert_warned", "offer_pending", "accepted", "declined", "journey", "combat", "post_combat", "complete"]);
+  const phases = new Set<CoachmanEscortPhase>(["locked", "rupert_warned", "offer_pending", "accepted", "declined", "journey", "combat", "post_combat", "city_arrival", "city_exploration", "complete"]);
   return {
     version: 1,
     phase: phases.has(candidate.phase as CoachmanEscortPhase) ? candidate.phase as CoachmanEscortPhase : "locked",
     equipmentPending: candidate.equipmentPending === true,
     bonusCopperAccepted: candidate.bonusCopperAccepted === true,
+    guildIntroductionSeen: candidate.guildIntroductionSeen === true,
   };
 }
 
@@ -70,7 +73,7 @@ export async function markRupertMonsterWarningSeen(): Promise<CoachmanEscortStat
 
 export async function markCoachmanOfferStarted(): Promise<CoachmanEscortState> {
   const state = await loadCoachmanEscortState();
-  if (state.phase === "accepted" || state.phase === "declined" || state.phase === "complete") return state;
+  if (state.phase === "accepted" || state.phase === "declined" || state.phase === "city_arrival" || state.phase === "city_exploration" || state.phase === "complete") return state;
   return saveCoachmanEscortState({ ...state, phase: "offer_pending" });
 }
 
@@ -102,7 +105,7 @@ async function deliverEquipmentToKitchen(): Promise<boolean> {
 
 export async function acceptCoachmanEscort(withCopperBonus: boolean): Promise<CoachmanEscortState> {
   const state = await loadCoachmanEscortState();
-  if (state.phase === "accepted" || state.phase === "journey" || state.phase === "combat" || state.phase === "post_combat" || state.phase === "complete") return state;
+  if (state.phase === "accepted" || state.phase === "journey" || state.phase === "combat" || state.phase === "post_combat" || state.phase === "city_arrival" || state.phase === "city_exploration" || state.phase === "complete") return state;
   if (!withCopperBonus) await addGuestFavor("coachman", 10);
   if (withCopperBonus) await saveCurrencyCopper((await loadCurrencyCopper()) + 50);
   const delivered = await deliverEquipmentToKitchen();
@@ -147,6 +150,12 @@ export async function prepareCoachmanEscortDeparture(): Promise<EscortPreparatio
 export async function setCoachmanEscortPhase(phase: CoachmanEscortPhase): Promise<CoachmanEscortState> {
   const state = await loadCoachmanEscortState();
   return saveCoachmanEscortState({ ...state, phase });
+}
+
+export async function markGuildIntroductionSeen(): Promise<CoachmanEscortState> {
+  const state = await loadCoachmanEscortState();
+  if (state.guildIntroductionSeen) return state;
+  return saveCoachmanEscortState({ ...state, guildIntroductionSeen: true });
 }
 
 export function bagHasEscortEquipment(bag: PlayerBagData): boolean {

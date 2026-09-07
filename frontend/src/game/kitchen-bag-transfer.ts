@@ -38,9 +38,9 @@ function unchanged(
 
 /**
  * Kitchen slot map used by KitchenScreen:
- *   0..11  table
- *   12..14 craft ingredients
- *   15     craft tool
+ *   0..99    table (including every unlocked upgrade row)
+ *   100..102 craft ingredients
+ *   103      craft tool
  *
  * This adapter deliberately contains no tutorial/guest locks. It only translates
  * Kitchen slot addressing to the shared container-to-Bag transfer rules.
@@ -50,11 +50,11 @@ export function planKitchenItemToBag(
   bag: PlayerBagData,
   state: KitchenTransferState,
 ): KitchenToBagResult {
-  if (sourceSlot < 0 || sourceSlot > 15) {
+  if (sourceSlot < 0 || sourceSlot > 103) {
     return unchanged(bag, state);
   }
 
-  if (sourceSlot <= 11) {
+  if (sourceSlot < 100) {
     const plan = planContainerItemToBag(state.tableItems, sourceSlot, bag);
     return {
       tableItems: plan.updatedSourceSlots,
@@ -67,8 +67,8 @@ export function planKitchenItemToBag(
     };
   }
 
-  if (sourceSlot <= 14) {
-    const sourceIdx = sourceSlot - 12;
+  if (sourceSlot < 103) {
+    const sourceIdx = sourceSlot - 100;
     const plan = planContainerItemToBag(state.craftIngredients, sourceIdx, bag);
     return {
       tableItems: state.tableItems.map(item => item ? { ...item } : null),
