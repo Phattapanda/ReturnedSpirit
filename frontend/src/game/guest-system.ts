@@ -114,6 +114,43 @@ const FAVOR_GIFT_SUCCESS = "Thank you very much for your hospitality. I like com
 const FAVOR_GIFT_DEFERRED = "Thank you very much for your hospitality.  I’d like to give you something. I don’t have it with me right now, but I’ll bring it next time.";
 const favorRewardListeners = new Set<(guestId: GuestId, text: string) => void>();
 
+export type FavorChangeFeedbackKind = "increase" | "big_increase" | "stage_increase" | "decrease";
+
+export type FavorChangeFeedback = {
+  guestId: GuestId;
+  previousFavor: number;
+  nextFavor: number;
+  delta: number;
+  kind: FavorChangeFeedbackKind;
+};
+
+const FAVOR_STAGE_THRESHOLDS = [25, 50, 75, 99, 100] as const;
+const favorChangeListeners = new Set<(feedback: FavorChangeFeedback) => void>();
+
+export function subscribeFavorChangeFeedback(listener: (feedback: FavorChangeFeedback) => void): () => void {
+  favorChangeListeners.add(listener);
+  return () => { favorChangeListeners.delete(listener); };
+}
+
+function emitFavorChangeFeedback(guestId: GuestId, previousFavor: number, nextFavor: number) {
+  const delta = nextFavor - previousFavor;
+  if (delta === 0) return;
+
+  const crossedFavorStage = delta > 0 && FAVOR_STAGE_THRESHOLDS.some(
+    (threshold) => previousFavor < threshold && nextFavor >= threshold,
+  );
+  const kind: FavorChangeFeedbackKind = delta < 0
+    ? "decrease"
+    : crossedFavorStage
+      ? "stage_increase"
+      : delta >= 3
+        ? "big_increase"
+        : "increase";
+
+  const feedback = { guestId, previousFavor, nextFavor, delta, kind };
+  for (const listener of favorChangeListeners) listener(feedback);
+}
+
 export function subscribeFavorRewardDialog(listener: (guestId: GuestId, text: string) => void): () => void {
   favorRewardListeners.add(listener);
   return () => { favorRewardListeners.delete(listener); };
@@ -152,10 +189,13 @@ export const OLD_FARMER_PROFILE: GuestProfile = {
     {
       minFavor: 0, maxFavor: 24, visitDays: OLD_FARMER_VISIT_DAYS,
       exchangePool: [
-        exchangeOffer("potato", "Potato", 1, 25),
-        exchangeOffer("carrot", "Carrot", 1, 25),
-        exchangeOffer("standard_fertilizer", "Standard Fertilizer", 2, 25),
-        exchangeOffer("seed_carrot", "Carrot Seed", 1, 25),
+        exchangeOffer("potato", "Potato", 1, 17.5),
+        exchangeOffer("carrot", "Carrot", 1, 17.5),
+        exchangeOffer("standard_fertilizer", "Standard Fertilizer", 2, 17.5),
+        exchangeOffer("seed_carrot", "Carrot Seed", 1, 17.5),
+        exchangeOffer("onion", "Onion", 1, 10),
+        exchangeOffer("seed_potato", "Potato Seed", 1, 10),
+        exchangeOffer("egg", "Egg", 1, 10),
       ],
     },
     {
@@ -203,7 +243,7 @@ export const OLD_FARMER_PROFILE: GuestProfile = {
     },
   ],
   initialFavor: 0,
-  favoriteDishId: "stew_vegetable",
+  favoriteDishId: "soup_carrot",
   leastFavoriteDishId: null,
   preferredMealTags: [],
   dislikedMealTags: [],
@@ -808,6 +848,7 @@ export function setGuestFavor(guestId: GuestId, favor: number): Promise<GuestSta
           }
         : state.pendingFavorGifts,
     });
+    emitFavorChangeFeedback(guestId, previousFavor, nextFavor);
     if (crossedThresholds.length > 0) await addKarmaPoints(crossedThresholds.length * 10);
 
     if (crossedThresholds.length > 0) {

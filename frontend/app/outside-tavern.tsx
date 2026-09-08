@@ -11,14 +11,16 @@ import TavernLocationTransition from "@/src/components/tavern-location-transitio
 import TravelHeader from "@/src/components/travel-header";
 import CurrencyPrice from "@/src/components/currency-price";
 import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
+import StoryDialogOverlay, { type StoryDialogChoice, type StoryDialogLine } from "@/src/components/story-dialog-overlay";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { useHaptics } from "@/src/feedback/haptics-provider";
-import { getCoachmanTravelStatus, loadTravelState, payForCarriage, spendWalkingStamina } from "@/src/game/travel-system";
-import { ITEM_CATALOG } from "@/src/game/item-system";
+import { getCoachmanTravelStatus, loadTravelState, payForCarriage, spendWalkingStamina, unlockNextCityAfterEscort } from "@/src/game/travel-system";
+import { ITEM_CATALOG, PLAYER_BAG_KEY, normalizePlayerBagData } from "@/src/game/item-system";
 import { loadGuestState } from "@/src/game/guest-system";
 import { areRegularGuestsUnlockedForDay, loadPostGuestTutorialState } from "@/src/game/post-guest-tutorial";
 import { MERCHANT_STOCK, prepareMerchantShop, purchaseMerchantItem, type MerchantShopState, type MerchantStockId } from "@/src/game/merchant-shop";
-import { loadCoachmanEscortState, prepareCoachmanEscortDeparture } from "@/src/game/coachman-escort-system";
+import { finalizeCoachmanEscortDecline, loadCoachmanEscortState, prepareCoachmanEscortDeparture, reconsiderCoachmanEscort } from "@/src/game/coachman-escort-system";
+import { DIALOG_CHARACTER_ASSETS } from "@/src/assets/dialog-character-assets";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
 import { QUESTS, loadCityState, turnInQuest, type CityState, type QuestId } from "@/src/game/city-system";
 
@@ -90,6 +92,7 @@ export default function OutsideTavernScreen() {
   const [cityState, setCityState] = useState<CityState | null>(null);
   const [cityUnlocked, setCityUnlocked] = useState(false);
   const [forestEntranceUnlocked, setForestEntranceUnlocked] = useState(false);
+  const [coachmanReoffer, setCoachmanReoffer] = useState<"question" | "accepted" | "declined" | null>(null);
 
   useFocusEffect(useCallback(() => {
     let active = true;
@@ -106,13 +109,16 @@ export default function OutsideTavernScreen() {
       if (!active) return;
       const escortActive = escortState.phase === "accepted" || escortState.phase === "journey";
       setEscortTutorialActive(escortActive);
-      setCoachmanAvailable(coachman.available || (escortActive && guestState.calendarDaySerial + 1 === 10));
+      const declinedReofferReady = escortState.phase !== "declined"
+        || escortState.declinedDaySerial === null
+        || guestState.calendarDaySerial > escortState.declinedDaySerial;
+      setCoachmanAvailable((coachman.available && declinedReofferReady) || (escortActive && guestState.calendarDaySerial + 1 === 10));
       setMerchantAvailable(
         areRegularGuestsUnlockedForDay(postGuestState, guestState.calendarDaySerial) &&
         (guestState.calendarDaySerial + 1) % 4 === 0,
       );
       setReceptionistPresent(escortState.phase === "complete" && day === 6);
-      setCityUnlocked(escortState.phase === "complete");
+      setCityUnlocked(travelState.unlockedDestinations.includes("next_city"));
       setForestEntranceUnlocked(
         escortState.phase === "complete" && travelState.unlockedDestinations.includes("forest_entrance"),
       );
@@ -129,6 +135,11 @@ export default function OutsideTavernScreen() {
     floatingMessageTimer.current = setTimeout(() => setFloatingMessage(null), 1000);
   }
 
+  async function chooseCoachmanView() {
+    triggerHaptic("choice"); setMessage(null); setView("coachman");
+    const escort = await loadCoachmanEscortState();
+    if (escort.phase === "declined") setCoachmanReoffer("question");
+  }
   function chooseView(next: OutsideView) { triggerHaptic("choice"); setMessage(null); setView(next); }
   function showTravelLocked() {
     triggerHaptic("choice"); setThought("I currently have no reason to travel.");
@@ -199,11 +210,43 @@ export default function OutsideTavernScreen() {
   }
   async function travelToCity(mode: "coachman" | "walk") {
     if (!cityUnlocked) { showTravelLocked(); return; }
+    if (mode === "walk") {
+      const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
+      const currentBag = normalizePlayerBagData(rawBag ? JSON.parse(rawBag) : {});
+      if (!currentBag.unlocked || !currentBag.slots.some((slot) => slot === null)) {
+        setMessage("I need a free slot in my bag before walking to the city.");
+        return;
+      }
+    }
     const paid = mode === "coachman" ? await payForCarriage(15) : (await spendWalkingStamina(30)).ok;
     if (!paid) { setMessage(mode === "coachman" ? "I need 15 Copper for the trip." : "I need 30 Stamina to walk to the city."); return; }
     audioManager.playSoundEffect("footstep", { maxDurationMs: 2200 });
-    router.push({ pathname: "/next-city", params: { returnTo: "outside" } });
+    if (mode === "walk") router.push({ pathname: "/coachman-escort", params: { mode: "walk" } });
+    else router.push({ pathname: "/next-city", params: { returnTo: "outside" } });
   }
+  async function acceptCoachmanReoffer() {
+    await reconsiderCoachmanEscort();
+    setEscortTutorialActive(true);
+    setCoachmanReoffer("accepted");
+  }
+  async function declineCoachmanReoffer() {
+    await finalizeCoachmanEscortDecline();
+    const travel = await unlockNextCityAfterEscort();
+    setCityUnlocked(travel.unlockedDestinations.includes("next_city"));
+    setEscortTutorialActive(false);
+    setCoachmanReoffer("declined");
+  }
+  const coachmanReofferLine: StoryDialogLine | null = coachmanReoffer === "question"
+    ? { speaker: "Coachman", portrait: DIALOG_CHARACTER_ASSETS.coachman, text: "Good morning, I just wanted to ask if you’ve changed your mind?" }
+    : coachmanReoffer === "accepted"
+      ? { speaker: "Coachman", portrait: DIALOG_CHARACTER_ASSETS.coachman, text: "Thank you. Talk to me when you’re ready to leave." }
+      : coachmanReoffer === "declined"
+        ? { speaker: "Coachman", portrait: DIALOG_CHARACTER_ASSETS.coachman, text: "A real shame." }
+        : null;
+  const coachmanReofferChoices: readonly StoryDialogChoice[] = coachmanReoffer === "question" ? [
+    { label: "YES", onPress: () => { void acceptCoachmanReoffer(); } },
+    { label: "NO", onPress: () => { void declineCoachmanReoffer(); } },
+  ] : [];
   async function travelToForestEntrance(mode: "coachman" | "walk") {
     if (!forestEntranceUnlocked) { showTravelLocked(); return; }
     const paid = mode === "coachman" ? await payForCarriage(25) : (await spendWalkingStamina(50)).ok;
@@ -237,7 +280,7 @@ export default function OutsideTavernScreen() {
       {view === "menu" && <View style={styles.panel}>
         <Text style={styles.panelTitle}>What would you like to do?</Text>
         {receptionistPresent && optionButton("Talk to Guild Receptionist", RECEPTIONIST, () => chooseView("receptionist"))}
-        {coachmanAvailable && optionButton("Talk to Coachman", COACHMAN, () => chooseView("coachman"))}
+        {coachmanAvailable && optionButton("Talk to Coachman", COACHMAN, () => { void chooseCoachmanView(); })}
         {merchantAvailable && optionButton("Talk to Merchant", MERCHANT, () => { void openMerchant(); })}
         {optionButton("Travel on foot", null, () => chooseView("walk"))}
       </View>}
@@ -296,6 +339,13 @@ export default function OutsideTavernScreen() {
       </View>
     )}
     {departing && <Animated.View pointerEvents="auto" style={[StyleSheet.absoluteFill, styles.departureFade, { opacity: departureFade }]} />}
+    <StoryDialogOverlay
+      visible={coachmanReoffer !== null}
+      line={coachmanReofferLine}
+      choices={coachmanReofferChoices}
+      onContinue={() => { if (coachmanReoffer !== "question") setCoachmanReoffer(null); }}
+      onSkip={() => { if (coachmanReoffer !== "question") setCoachmanReoffer(null); }}
+    />
     <View style={{ paddingBottom: insets.bottom, backgroundColor: "rgba(10,5,1,0.96)" }}><TavernLocationBar current="explore" /></View>
   </View></TavernLocationTransition>;
 }
@@ -305,7 +355,7 @@ const styles = StyleSheet.create({
   panel: { borderRadius: 18, borderCurve: "continuous", borderWidth: 1.5, borderColor: "rgba(196,148,58,0.58)", backgroundColor: "rgba(18,9,2,0.94)", padding: 14, gap: 10 }, panelTitle: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 17, lineHeight: 24 }, panelSubtitle: { color: "#C4943A", fontFamily: "Oldenburg", fontSize: 13 },
   optionButton: { minHeight: 72, flexDirection: "row", alignItems: "center", gap: 12, padding: 10, borderRadius: 13, borderWidth: 1, borderColor: "rgba(196,148,58,0.34)", backgroundColor: "rgba(48,27,7,0.78)" }, optionPortrait: { width: 52, height: 52, borderRadius: 10, borderWidth: 1.5, borderColor: "#C4943A" }, optionIcon: { width: 52, height: 52, alignItems: "center", justifyContent: "center" }, optionText: { flex: 1, color: "#F0E8D5", fontFamily: "Oldenburg", fontSize: 15 },
   personRow: { flexDirection: "row", alignItems: "center", gap: 13 }, personPortrait: { width: 76, height: 88, borderRadius: 11, borderWidth: 2, borderColor: "#C4943A" }, personText: { flex: 1, gap: 4 }, destinationButton: { minHeight: 58, borderRadius: 12, borderWidth: 1, borderColor: "rgba(196,148,58,0.30)", backgroundColor: "rgba(48,27,7,0.74)", paddingHorizontal: 14, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, destinationName: { color: "#F0E8D5", fontFamily: "Oldenburg", fontSize: 14 }, costRow: { flexDirection: "row", alignItems: "center", gap: 5 }, costText: { color: "#E7C77A", fontFamily: "Oldenburg", fontSize: 14, fontVariant: ["tabular-nums"] }, coin: { width: 18, height: 18 },
-  receptionistPortrait: { width: 96, height: 130, borderRadius: 12 }, receptionistText: { color: "rgba(240,232,213,0.72)", fontSize: 12, lineHeight: 18 }, receptionistQuest: { flexDirection: "row", alignItems: "center", gap: 9, padding: 10, borderRadius: 12, backgroundColor: "rgba(48,27,7,0.74)", borderWidth: 1, borderColor: "rgba(196,148,58,0.3)" },
+  receptionistPortrait: { width: 115, height: 156, borderRadius: 12 }, receptionistText: { color: "rgba(240,232,213,0.72)", fontSize: 12, lineHeight: 18 }, receptionistQuest: { flexDirection: "row", alignItems: "center", gap: 9, padding: 10, borderRadius: 12, backgroundColor: "rgba(48,27,7,0.74)", borderWidth: 1, borderColor: "rgba(196,148,58,0.3)" },
   stockRow: { flexDirection: "row", alignItems: "center", gap: 9, padding: 9, borderRadius: 12, borderWidth: 1, borderColor: "rgba(196,148,58,0.28)", backgroundColor: "rgba(48,27,7,0.72)" }, stockIcon: { width: 48, height: 48, alignItems: "center", justifyContent: "center" }, stockImage: { width: 46, height: 46 }, stockText: { flex: 1, gap: 2 }, stockName: { color: "#F0E8D5", fontFamily: "Oldenburg", fontSize: 12 }, stockDetails: { color: "rgba(240,232,213,0.65)", fontSize: 10, lineHeight: 14 }, stockRemaining: { color: "#C4943A", fontSize: 10, fontVariant: ["tabular-nums"] }, buyButton: { minWidth: 58, minHeight: 44, paddingHorizontal: 8, borderRadius: 10, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, borderWidth: 1.5, borderColor: "#C4943A", backgroundColor: "rgba(112,73,18,0.86)" }, buyPrice: { color: "#FFF", fontFamily: "Oldenburg", fontSize: 12 }, disabled: { opacity: 0.35 },
   backButton: { alignSelf: "center", marginTop: 4, paddingHorizontal: 26, paddingVertical: 10 }, backText: { color: "#C4943A", fontFamily: "Oldenburg", fontSize: 13 }, message: { color: "#F5E6C8", backgroundColor: "rgba(54,28,6,0.94)", borderRadius: 10, padding: 11, textAlign: "center", fontSize: 13 },
   crateDelivery: { position: "absolute", left: 0, top: 0, width: 68, height: 68, zIndex: 1000 },

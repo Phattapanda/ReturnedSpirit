@@ -18,7 +18,7 @@ export const COACHMAN_ESCORT_KEY = "@tutorial:coachman_escort";
 export const ESCORT_WEAPON_ID = "weapon_iron_shortsword";
 export const ESCORT_ARMOR_ID = "armor_leather_armor";
 
-export type CoachmanEscortPhase = "locked" | "rupert_warned" | "offer_pending" | "accepted" | "declined" | "journey" | "combat" | "post_combat" | "city_arrival" | "city_exploration" | "complete";
+export type CoachmanEscortPhase = "locked" | "rupert_warned" | "offer_pending" | "accepted" | "declined" | "declined_final" | "journey" | "combat" | "post_combat" | "city_arrival" | "city_exploration" | "complete";
 
 export type CoachmanEscortState = {
   version: 1;
@@ -26,6 +26,8 @@ export type CoachmanEscortState = {
   equipmentPending: boolean;
   bonusCopperAccepted: boolean;
   guildIntroductionSeen: boolean;
+  walkingArrivalGuardSeen: boolean;
+  declinedDaySerial: number | null;
 };
 
 export const DEFAULT_COACHMAN_ESCORT_STATE: CoachmanEscortState = {
@@ -34,18 +36,22 @@ export const DEFAULT_COACHMAN_ESCORT_STATE: CoachmanEscortState = {
   equipmentPending: false,
   bonusCopperAccepted: false,
   guildIntroductionSeen: false,
+  walkingArrivalGuardSeen: false,
+  declinedDaySerial: null,
 };
 
 function normalizeState(raw: unknown): CoachmanEscortState {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_COACHMAN_ESCORT_STATE };
   const candidate = raw as Partial<CoachmanEscortState>;
-  const phases = new Set<CoachmanEscortPhase>(["locked", "rupert_warned", "offer_pending", "accepted", "declined", "journey", "combat", "post_combat", "city_arrival", "city_exploration", "complete"]);
+  const phases = new Set<CoachmanEscortPhase>(["locked", "rupert_warned", "offer_pending", "accepted", "declined", "declined_final", "journey", "combat", "post_combat", "city_arrival", "city_exploration", "complete"]);
   return {
     version: 1,
     phase: phases.has(candidate.phase as CoachmanEscortPhase) ? candidate.phase as CoachmanEscortPhase : "locked",
     equipmentPending: candidate.equipmentPending === true,
     bonusCopperAccepted: candidate.bonusCopperAccepted === true,
     guildIntroductionSeen: candidate.guildIntroductionSeen === true,
+    walkingArrivalGuardSeen: candidate.walkingArrivalGuardSeen === true,
+    declinedDaySerial: Number.isFinite(candidate.declinedDaySerial) ? Math.max(0, Math.floor(candidate.declinedDaySerial!)) : null,
   };
 }
 
@@ -113,8 +119,8 @@ export async function acceptCoachmanEscort(withCopperBonus: boolean): Promise<Co
 }
 
 export async function declineCoachmanEscort(): Promise<CoachmanEscortState> {
-  const state = await loadCoachmanEscortState();
-  return saveCoachmanEscortState({ ...state, phase: "declined" });
+  const [state, guestState] = await Promise.all([loadCoachmanEscortState(), loadGuestState()]);
+  return saveCoachmanEscortState({ ...state, phase: "declined", declinedDaySerial: guestState.calendarDaySerial });
 }
 
 export type EscortPreparationResult = "ready" | "equipment_in_kitchen" | "bag_full";
@@ -152,10 +158,30 @@ export async function setCoachmanEscortPhase(phase: CoachmanEscortPhase): Promis
   return saveCoachmanEscortState({ ...state, phase });
 }
 
+export async function reconsiderCoachmanEscort(): Promise<CoachmanEscortState> {
+  const state = await loadCoachmanEscortState();
+  if (state.phase !== "declined") return state;
+  await addGuestFavor("coachman", 5);
+  const delivered = await deliverEquipmentToKitchen();
+  return saveCoachmanEscortState({ ...state, phase: "accepted", equipmentPending: !delivered, bonusCopperAccepted: false });
+}
+
+export async function finalizeCoachmanEscortDecline(): Promise<CoachmanEscortState> {
+  const state = await loadCoachmanEscortState();
+  if (state.phase !== "declined") return state;
+  return saveCoachmanEscortState({ ...state, phase: "declined_final" });
+}
+
 export async function markGuildIntroductionSeen(): Promise<CoachmanEscortState> {
   const state = await loadCoachmanEscortState();
   if (state.guildIntroductionSeen) return state;
   return saveCoachmanEscortState({ ...state, guildIntroductionSeen: true });
+}
+
+export async function markWalkingArrivalGuardSeen(): Promise<CoachmanEscortState> {
+  const state = await loadCoachmanEscortState();
+  if (state.walkingArrivalGuardSeen) return state;
+  return saveCoachmanEscortState({ ...state, walkingArrivalGuardSeen: true });
 }
 
 export function bagHasEscortEquipment(bag: PlayerBagData): boolean {

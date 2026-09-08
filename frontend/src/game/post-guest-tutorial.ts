@@ -34,6 +34,7 @@ import {
   getActiveStaminaBuffReduction,
   normalizePlayerStats,
 } from "@/src/game/player-stats";
+import { loadTavernQuestState } from "@/src/game/tavern-quest-system";
 
 export const POST_GUEST_TUTORIAL_STATE_KEY = "@tutorial:post_guest_state";
 const GARDEN_INVENTORY_KEY = "@garden:inventory";
@@ -251,7 +252,7 @@ function consumeBagItems(playerBag: PlayerBagData, itemIds: readonly string[]): 
 }
 
 export async function purchaseTavernDrinkUpgrade(upgradeId: TavernDrinkUpgradeId): Promise<TavernDrinkUpgradeResult> {
-  const state = await loadPostGuestTutorialState();
+  const [state, tavernQuests] = await Promise.all([loadPostGuestTutorialState(), loadTavernQuestState()]);
   const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
   let playerBag = { ...DEFAULT_BAG, slots: [...DEFAULT_BAG.slots] };
   if (rawBag) {
@@ -262,7 +263,7 @@ export async function purchaseTavernDrinkUpgrade(upgradeId: TavernDrinkUpgradeId
   if (alreadyUnlocked) return { ok: true, alreadyUnlocked: true, state, playerBag };
 
   const prerequisiteMet = upgradeId === "serve_ale"
-    ? isGuestAreaComplete(state)
+    ? isGuestAreaComplete(state) && tavernQuests.claimed.serve_water
     : state.aleServiceUnlocked;
   if (!prerequisiteMet) {
     return { ok: false, reason: "prerequisite_locked", missingItems: [], state, playerBag };

@@ -30,6 +30,7 @@ import GuestTutorialDialog, { type GuestTutorialDialogLine } from "@/src/compone
 import { DIALOG_CHARACTER_ASSETS, OLD_FARMER_DIALOG_SCALE, RUPERT_DIALOG_SCALE, getDialogExpressionForStamina, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
 import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import StatusModal from "@/src/components/StatusModal";
+import QuestBookButton from "@/src/components/quest-book";
 import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
 import TavernLocationTransition from "@/src/components/tavern-location-transition";
 import CivilServantDialog from "@/src/components/CivilServantDialog";
@@ -67,6 +68,7 @@ import {
   type PlayerBagData,
 } from "@/src/game/item-system";
 import { addCurrencyCopper } from "@/src/game/currency-system";
+import { recordTavernService } from "@/src/game/tavern-quest-system";
 import {
   addGuestFavor,
   evaluateGuestMealFavor,
@@ -231,8 +233,7 @@ function farmerIntroduction(playerName: string): TutorialLine[] {
 function serviceReaction(): TutorialLine[] {
   return [
     { speaker: "Old Farmer", portrait: "old_farmer", text: '"That hit the spot. I\'ll come back soon."' },
-    { speaker: "Old Farmer", portrait: "old_farmer", text: '"Before I go, take this carrot seed. Maybe you can find some space for it."' },
-    { speaker: "Rupert", portrait: "rupert_laugh", text: '"Not bad for your first guest."' },
+    { id: "dining.tutorial.carrot_gift", speaker: "Old Farmer", portrait: "old_farmer", text: '"Before I go, take these carrot seeds as a welcome gift. Please take good care of the old man over there."', highlightedPhrases: ["take these carrot seeds as a welcome gift"] },
   ];
 }
 
@@ -282,7 +283,7 @@ export default function DiningScreen() {
     clearManagedTimeout: clearTimeout,
   } = useManagedTimers();
   const router = useRouter();
-  const { harvestReady, merchantPresent, sleepReady } = useLocationStatusBadges();
+  const { harvestReady, merchantPresent, receptionistPresent, sleepReady } = useLocationStatusBadges();
   const insets = useSafeAreaInsets();
   const { width: W, height: H } = useWindowDimensions();
   const audioManager = useAudioManager();
@@ -628,14 +629,18 @@ export default function DiningScreen() {
   }
 
   function skipCurrentTutorialDialog() {
-    if (favorDialogLine || serviceDialogLine) return;
+    if (favorDialogLine) { setFavorDialogLine(null); return; }
+    if (serviceDialogLine) { void closeServiceDialog(); return; }
     if (coachmanIntroLine && coachmanIntroIndex < coachmanIntroLines.length - 1) {
       setCoachmanIntroIndex(coachmanIntroLines.length - 1);
       return;
     }
+    if (coachmanIntroLine) { void advanceCoachmanIntroduction(); return; }
     if (!coachmanIntroLine && tutorialLineIndex < tutorialLines.length - 1) {
       setTutorialLineIndex(tutorialLines.length - 1);
+      return;
     }
+    void advanceTutorialDialog();
   }
 
   function tutorialPortraitSource(portrait: TutorialPortrait): ImageSourcePropType {
@@ -653,10 +658,6 @@ export default function DiningScreen() {
   }
 
   const coachmanIntroLine = coachmanIntroLines[coachmanIntroIndex] ?? null;
-  const canSkipCurrentDialog = !favorDialogLine && !serviceDialogLine && (
-    (coachmanIntroLine !== null && coachmanIntroIndex < coachmanIntroLines.length - 1)
-    || (coachmanIntroLine === null && tutorialLineIndex < tutorialLines.length - 1)
-  );
   const currentTutorialLine = favorDialogLine ?? serviceDialogLine ?? coachmanIntroLine ?? tutorialLines[tutorialLineIndex] ?? null;
   const dialogLine: GuestTutorialDialogLine | null = currentTutorialLine ? {
     speaker: currentTutorialLine.speaker,
@@ -669,7 +670,7 @@ export default function DiningScreen() {
         ? getPlayerDialogScale(playerAvatarId)
         : currentTutorialLine.portrait === "rupert" || currentTutorialLine.portrait === "rupert_laugh" || currentTutorialLine.portrait === "rupert_sad"
           ? RUPERT_DIALOG_SCALE
-        : 1,
+        : 0.8,
     highlightedPhrases: currentTutorialLine.highlightedPhrases,
   } : null;
 
@@ -805,7 +806,7 @@ export default function DiningScreen() {
   }
 
   function farmerMealReaction(reaction: GuestMealReaction): string {
-    if (reaction === "favorite") return '"Vegetable Stew. You remembered my favorite."';
+    if (reaction === "favorite") return '"Carrot Soup. You remembered my favorite."';
     if (reaction === "favored") return '"That was a fine meal. Thank you."';
     if (reaction === "disliked" || reaction === "least_favorite") return '"Not quite to my taste, but I appreciate the effort."';
     return '"That hit the spot. Thank you."';
@@ -826,8 +827,9 @@ export default function DiningScreen() {
     }, 720);
   }
 
-  async function markGuestServed(guestId: GuestId) {
+  async function markGuestServed(guestId: GuestId, kind?: "food" | "water") {
     const state = await persistGuestServed(guestId);
+    if (kind) await recordTavernService(kind);
     notifyLocationStatusChanged();
     triggerHaptic("guest-served");
     return state;
@@ -874,7 +876,7 @@ export default function DiningScreen() {
 
       if (action === "water") {
         setServiceBusy(true);
-        await markGuestServed(guestId);
+        await markGuestServed(guestId, "water");
         await addCurrencyCopper(beveragePriceForGuest(guestId));
         setServiceBusy(false);
         showStandaloneServiceDialog(
@@ -928,7 +930,7 @@ export default function DiningScreen() {
 
         setMealState(nextMealState);
         if (result.playerBag) setPlayerBag(result.playerBag);
-        await markGuestServed(guestId);
+        await markGuestServed(guestId, "food");
         const target = result.destination === "garden_storage"
           ? await measureViewCenter(gardenNavButtonRef, { x: W * 0.25, y: H - insets.bottom - 42 })
           : await measureViewCenter(bagButtonRef, { x: W - 54, y: insets.top + 150 });
@@ -948,7 +950,7 @@ export default function DiningScreen() {
         setServiceBusy(true);
         setMealState(nextMealState);
         await saveDiningMealState(nextMealState);
-        await markGuestServed(guestId);
+        await markGuestServed(guestId, "food");
         const mealImage = MEAL_IMAGES[activeMeal.id] ?? IMG.soup_herb;
         runTransfer(mealImage, W * 0.5 - 18, headerH + 165, start.x - 18, start.y - 18, () => {
           audioManager.playSoundEffect("bling", { maxDurationMs: 2000 });
@@ -978,7 +980,7 @@ export default function DiningScreen() {
       if (action === "water") {
         setServiceBusy(true);
         if (tavernBeverage.alcoholic) await addGuestFavor("local_boozer", 1);
-        await markGuestServed("local_boozer");
+        await markGuestServed("local_boozer", "water");
         await addCurrencyCopper(beveragePriceForGuest("local_boozer"));
         setServiceBusy(false);
         showStandaloneServiceDialog(
@@ -1016,7 +1018,7 @@ export default function DiningScreen() {
       setMealState(nextMealState);
       await saveDiningMealState(nextMealState);
       if (alcoholic) await addGuestFavor("local_boozer", 1);
-      await markGuestServed("local_boozer");
+      await markGuestServed("local_boozer", "food");
 
       const start = source ?? { x: W * 0.3, y: headerH + 350 };
       const mealImage = MEAL_IMAGES[activeMeal.id] ?? IMG.soup_herb;
@@ -1046,7 +1048,7 @@ export default function DiningScreen() {
 
       if (action === "water") {
         setServiceBusy(true);
-        await markGuestServed("coachman");
+        await markGuestServed("coachman", "water");
         await addCurrencyCopper(beveragePriceForGuest("coachman"));
         setServiceBusy(false);
         showStandaloneServiceDialog(
@@ -1077,7 +1079,7 @@ export default function DiningScreen() {
         setMealState(nextMealState);
         await saveDiningMealState(nextMealState);
         if (reaction.favorDelta !== 0) await addGuestFavor("coachman", reaction.favorDelta);
-        await markGuestServed("coachman");
+        await markGuestServed("coachman", "food");
 
         const start = source ?? { x: W * 0.3, y: headerH + 350 };
         const mealImage = MEAL_IMAGES[activeMeal.id] ?? IMG.soup_herb;
@@ -1208,7 +1210,7 @@ export default function DiningScreen() {
       setMealState(nextMealState);
       if (result.playerBag) setPlayerBag(result.playerBag);
       if (reaction.favorDelta !== 0) await addGuestFavor("old_farmer", reaction.favorDelta);
-      await markGuestServed("old_farmer");
+      await markGuestServed("old_farmer", "food");
 
       const start = source ?? { x: W * 0.5, y: headerH + 360 };
       const target = result.destination === "garden_storage"
@@ -1241,7 +1243,7 @@ export default function DiningScreen() {
 
     if (guestTutorialHasReached(tutorialStep, "service_complete") && action === "water") {
       setServiceBusy(true);
-      await markGuestServed("old_farmer");
+      await markGuestServed("old_farmer", "water");
       await addCurrencyCopper(beveragePriceForGuest("old_farmer"));
       setServiceBusy(false);
       showStandaloneServiceDialog(
@@ -1272,7 +1274,7 @@ export default function DiningScreen() {
       setMealState(nextMealState);
       await saveDiningMealState(nextMealState);
       if (reaction.favorDelta !== 0) await addGuestFavor("old_farmer", reaction.favorDelta);
-      await markGuestServed("old_farmer");
+      await markGuestServed("old_farmer", "food");
 
       const start = source ?? { x: W * 0.3, y: headerH + 350 };
       const mealImage = MEAL_IMAGES[activeMeal.id] ?? IMG.soup_herb;
@@ -1474,6 +1476,7 @@ export default function DiningScreen() {
             </View>
           </View>
 
+          <QuestBookButton onBagUpdated={setPlayerBag} />
           <View style={styles.rightHeaderColumn}>
             <View style={styles.rightHeader}>
               <View style={styles.dayBadge}>
@@ -1608,6 +1611,7 @@ export default function DiningScreen() {
                 : OLD_FARMER_SELL_PRICE_COPPER}
               selectedMealIsAlcoholic={selectedMealIsAlcoholic}
               beverageName={tavernBeverage.name}
+              beverageId={tavernBeverage.id}
               beveragePriceCopper={tavernBeverage.priceCopper}
               beverageIsAlcoholic={tavernBeverage.alcoholic}
               departingGuestId={departingGuestId}
@@ -1684,7 +1688,7 @@ const locationAction = guestDormitoryBlocked
               {content}
               {loc.id === "garden" && harvestReady && <LocationStatusBadge kind="harvest" />}
               {loc.id === "dormitory" && sleepReady && <LocationStatusBadge kind="sleep" />}
-              {loc.id === "explore" && merchantPresent && <LocationStatusBadge kind="merchant" />}
+              {loc.id === "explore" && (receptionistPresent ? <LocationStatusBadge kind="receptionist" /> : merchantPresent ? <LocationStatusBadge kind="merchant" /> : null)}
             </TouchableOpacity>
           );
         })}
@@ -1700,7 +1704,7 @@ const locationAction = guestDormitoryBlocked
             : coachmanIntroLine
               ? () => { void advanceCoachmanIntroduction(); }
               : advanceTutorialDialog}
-        onSkip={canSkipCurrentDialog ? skipCurrentTutorialDialog : undefined}
+        onSkip={dialogLine ? skipCurrentTutorialDialog : undefined}
       />
 
       <CivilServantDialog
@@ -1807,15 +1811,16 @@ const styles = StyleSheet.create({
 
   header: {
     flexDirection: "column",
-    paddingHorizontal: 12,
+    paddingLeft: 4,
+    paddingRight: 12,
     paddingBottom: 6,
     backgroundColor: "rgba(14,7,1,0.85)",
     borderBottomWidth: 1,
     borderBottomColor: "rgba(196,148,58,0.20)",
     zIndex: 2,
   },
-  headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  leftHeader: { flex: 1, gap: 5 },
+  headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 6 },
+  leftHeader: { flex: 1, gap: 4, zIndex: 20 },
   statBarOuter: {
     flexDirection: "row",
     alignItems: "center",
@@ -1823,9 +1828,10 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1.5,
     borderColor: "rgba(130,90,20,0.50)",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    gap: 7,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    gap: 4,
+    overflow: "visible",
   },
   statBarTrack: { flex: 1, height: 9, borderRadius: 5, backgroundColor: "#2A1800", overflow: "hidden" },
   statBarFill: { height: "100%", borderRadius: 5 },
@@ -1842,7 +1848,7 @@ const styles = StyleSheet.create({
   lifeFill: { backgroundColor: "#CC2200" },
   statBarText: { color: "#F0E8D5", fontSize: 11, fontFamily: "Oldenburg", minWidth: 40, textAlign: "right" },
   locationName: { color: "#F0E8D5", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 1, textAlign: "center", marginTop: 4 },
-  rightHeaderColumn: { alignItems: "flex-end", alignSelf: "flex-start", gap: 4, marginLeft: 10, transform: [{ translateY: -2 }] },
+  rightHeaderColumn: { alignItems: "flex-end", alignSelf: "flex-start", gap: 4, marginLeft: 2, transform: [{ translateY: -2 }] },
   rightHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
   dayBadge: {
     width: 38,

@@ -39,6 +39,7 @@ type GuestCardProps = {
   sellPriceCopper?: number | null;
   selectedMealIsAlcoholic?: boolean;
   beverageName?: string;
+  beverageId?: "water" | "standard_ale" | "honey_mead";
   beveragePriceCopper?: number;
   beverageIsAlcoholic?: boolean;
   departing?: boolean;
@@ -52,10 +53,12 @@ const CITY_GUARD = require("../../assets/images/city_guard.png");
 const LOCAL_BOOZER = require("../../assets/images/local_boozer.png");
 const SERVICE_SELL = require("../../assets/images/service_sell.png");
 const SERVICE_WATER = require("../../assets/images/service_water.png");
+const SERVICE_STANDARD_ALE = require("../../assets/images/standard_ale.png");
 const SERVICE_TALK = require("../../assets/images/service_talk.png");
 const TRADE_POTATO = require("../../assets/images/potato.png");
 const TRADE_CARROT = require("../../assets/images/carrot.png");
 const TRADE_ONION = require("../../assets/images/onion.png");
+const TRADE_EGG = require("../../assets/images/egg.png");
 const TRADE_FERTILIZER = require("../../assets/images/fertilizer.png");
 const TRADE_PREMIUM_FERTILIZER = require("../../assets/premiumfertilizer.png");
 const TRADE_SEED_POTATO = require("../../assets/images/seed_potato.png");
@@ -79,6 +82,7 @@ const TRADE_IMAGES: Record<string, ReturnType<typeof require>> = {
   potato: TRADE_POTATO,
   carrot: TRADE_CARROT,
   onion: TRADE_ONION,
+  egg: TRADE_EGG,
   standard_fertilizer: TRADE_FERTILIZER,
   premium_fertilizer: TRADE_PREMIUM_FERTILIZER,
   seed_potato: TRADE_SEED_POTATO,
@@ -130,6 +134,7 @@ export function GuestCard({
   sellPriceCopper = null,
   selectedMealIsAlcoholic = false,
   beverageName = "Water",
+  beverageId = "water",
   beveragePriceCopper = 1,
   beverageIsAlcoholic = false,
   departing = false,
@@ -274,9 +279,11 @@ export function GuestCard({
             onPress={() => onService?.(guest, "water")}
             activeOpacity={0.8}
           >
-            {beverageIsAlcoholic
-              ? <Ionicons name="beer-outline" size={29} color="#C4943A" />
-              : <Image source={SERVICE_WATER} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />}
+            {beverageId === "standard_ale"
+              ? <Image source={SERVICE_STANDARD_ALE} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />
+              : beverageIsAlcoholic
+                ? <Ionicons name="beer-outline" size={29} color="#C4943A" />
+                : <Image source={SERVICE_WATER} style={styles.serviceImage} resizeMode="contain" resizeMethod="resize" />}
             <Text style={styles.serviceLabel}>Offer {beverageName}</Text>
             <View style={styles.serviceValueRow}>
               <Text style={styles.serviceValueText}>for</Text>
@@ -418,6 +425,7 @@ type DiningGuestAreaProps = {
   sellPriceCopper?: number | null;
   selectedMealIsAlcoholic?: boolean;
   beverageName?: string;
+  beverageId?: "water" | "standard_ale" | "honey_mead";
   beveragePriceCopper?: number;
   beverageIsAlcoholic?: boolean;
   departingGuestId?: GuestId | null;
@@ -453,6 +461,7 @@ export default function DiningGuestArea({
   sellPriceCopper = null,
   selectedMealIsAlcoholic = false,
   beverageName = "Water",
+  beverageId = "water",
   beveragePriceCopper = 1,
   beverageIsAlcoholic = false,
   departingGuestId = null,
@@ -564,6 +573,7 @@ export default function DiningGuestArea({
           sellPriceCopper={sellPriceCopper}
           selectedMealIsAlcoholic={selectedMealIsAlcoholic}
           beverageName={beverageName}
+          beverageId={beverageId}
           beveragePriceCopper={beveragePriceCopper}
           beverageIsAlcoholic={beverageIsAlcoholic}
           departing={departingGuestId === guest.profile.id}

@@ -22,7 +22,8 @@
  */
 
 import { Asset } from 'expo-asset';
-import { Image, Platform } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
+import { Image as NativeImage, Platform } from 'react-native';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -169,6 +170,7 @@ export const ASSET_REGISTRY: AssetEntry[] = [
   { key: 'energydrink',   module: require('../../assets/images/energy Drink.png'),  group: 'items' },
   { key: 'energypill',    module: require('../../assets/images/energy Pill.png'),   group: 'items' },
   { key: 'goldenapple',   module: require('../../assets/images/golden apple.png'),  group: 'items' },
+  { key: 'empty_bottle',  module: require('../../assets/images/empty_bottle.png'),  group: 'items' },
   { key: 'rope',          module: require('../../assets/images/rope.png'),          group: 'items' },
   { key: 'torch',         module: require('../../assets/images/torch_normal.png'),  group: 'items' },
   { key: 'ore_iron',      module: require('../../assets/images/ore_iron.png'),      group: 'items' },
@@ -268,6 +270,8 @@ export const ASSET_REGISTRY: AssetEntry[] = [
   { key: 'hunters_camp', module: require('../../assets/images/hunters_camp.png'), group: 'backgrounds' },
   { key: 'dialog_receptionist', module: require('../../assets/images/dialog/dialogue_receptionist.png'), group: 'ui' },
   { key: 'receptionist', module: require('../../assets/images/receptionist.png'), group: 'ui' },
+  { key: 'dialog_receptionist_merchant', module: require('../../assets/images/dialog/dialogue_receptionist_merchant.png'), group: 'ui' },
+  { key: 'receptionist_merchant', module: require('../../assets/images/receptionist_merchant.png'), group: 'ui' },
   { key: 'city_artisans_district', module: require('../../assets/images/artisans_district.png'), group: 'backgrounds' },
   { key: 'city_adventurers_guild', module: require('../../assets/images/adventurers_guild.png'), group: 'backgrounds' },
   { key: 'city_merchant_guild', module: require('../../assets/images/merchant_guild.png'), group: 'backgrounds' },
@@ -278,6 +282,7 @@ export const ASSET_REGISTRY: AssetEntry[] = [
   { key: 'brewers_yeast', module: require('../../assets/images/quest_item.png'), group: 'items' },
   { key: 'dried_hop_cones', module: require('../../assets/images/quest_item.png'), group: 'items' },
   { key: 'raw_wildflower_honey', module: require('../../assets/images/quest_item.png'), group: 'items' },
+  { key: 'standard_ale', module: require('../../assets/images/standard_ale.png'), group: 'items' },
   { key: 'mead_yeast', module: require('../../assets/images/quest_item.png'), group: 'items' },
   { key: 'grown_cinnamon_stalks_cloves', module: require('../../assets/images/quest_item.png'), group: 'items' },
   { key: 'yeast_nutrients', module: require('../../assets/images/quest_item.png'), group: 'items' },
@@ -286,6 +291,14 @@ export const ASSET_REGISTRY: AssetEntry[] = [
   { key: 'snowberrysherbet', module: require('../../assets/images/snowberry_sherbet.png'), group: 'items' },
   { key: 'cooking_pot', module: require('../../assets/images/cooking_pot.png'), group: 'items' },
   { key: 'frying_pan', module: require('../../assets/images/frying_pan.png'), group: 'items' },
+  { key: 'tool_kitchen_knife', module: require('../../assets/images/cooking_knife.png'), group: 'items' },
+  { key: 'recipe_tool_hand', module: require('../../assets/images/tool_hand.png'), group: 'ui' },
+  { key: 'questbook', module: require('../../assets/images/questbook.png'), group: 'ui' },
+  { key: 'recipe_book', module: require('../../assets/images/recipe_book.png'), group: 'ui' },
+  { key: 'favor_increase', module: require('../../assets/images/favor_increase.png'), group: 'ui' },
+  { key: 'favor_big_increase', module: require('../../assets/images/favor_big_increase.png'), group: 'ui' },
+  { key: 'favor_stage_increase', module: require('../../assets/images/favor_stage_increase.png'), group: 'ui' },
+  { key: 'favor_decrease', module: require('../../assets/images/favor_decrease.png'), group: 'ui' },
   { key: 'fine_cooking_pot', module: require('../../assets/images/fine_cooking_pot.png'), group: 'items' },
   { key: 'oldpot', module: require('../../assets/images/oldpot.png'), group: 'items' },
   { key: 'snowberry', module: require('../../assets/images/snowberry.png'), group: 'items' },
@@ -450,14 +463,17 @@ async function _loadOne(entry: AssetEntry): Promise<void> {
       const uri = asset.localUri ?? asset.uri;
       if (uri) await _decodeWeb(uri);
     } else {
-      // Native (Expo Go + production):
-      // Image.prefetch() warms the exact HTTP/file cache that React Native's
-      // Image component reads. This is the only mechanism that makes require()
-      // assets render instantly on Android without an OutOfMemoryError.
-      // downloadAsync() writes to a different file-system path that the RN
-      // Image renderer does NOT consult in Expo Go dev mode.
-      const uri = asset.uri;
-      if (uri) await Image.prefetch(uri);
+      // Warm both render paths used by the game. Asset.downloadAsync guarantees
+      // the file exists locally; the two prefetches then prepare expo-image and
+      // React Native Image before the loading screen is released.
+      await asset.downloadAsync();
+      const uris = [...new Set([asset.localUri, asset.uri].filter((uri): uri is string => !!uri))];
+      for (const uri of uris) {
+        await Promise.allSettled([
+          ExpoImage.prefetch(uri),
+          NativeImage.prefetch(uri),
+        ]);
+      }
     }
 
     _cache.set(entry.key, { asset, status: 'ready' });
@@ -486,16 +502,28 @@ export async function preloadGameplayAssets(
 ): Promise<void> {
   _allReady = false;
 
-  // Clear cache on each call so that Image.prefetch() re-warms the RN image
-  // cache on every game start. This guarantees fresh renders even after
-  // hot-reloads or if the native cache was evicted between sessions.
-  _cache.clear();
-
   const total = ASSET_REGISTRY.length;
   let loaded = 0;
 
-  await Promise.allSettled(
-    ASSET_REGISTRY.map(async (entry) => {
+  // Critical tutorial assets go first. Limiting concurrency prevents Android
+  // and the Metro development server from being flooded by every image at once.
+  const ordered = [
+    ...ASSET_REGISTRY.filter((entry) => entry.critical),
+    ...ASSET_REGISTRY.filter((entry) => !entry.critical && (
+      entry.group === 'portraits_player'
+      || entry.group === 'portraits_rupert'
+      || entry.key.startsWith('dialog_')
+    )),
+    ...ASSET_REGISTRY.filter((entry) => !entry.critical && !(
+      entry.group === 'portraits_player'
+      || entry.group === 'portraits_rupert'
+      || entry.key.startsWith('dialog_')
+    )),
+  ];
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < ordered.length) {
+      const entry = ordered[cursor++];
       try {
         await _loadOne(entry);
       } catch {
@@ -504,8 +532,9 @@ export async function preloadGameplayAssets(
         loaded += 1;
         onProgress?.(loaded, total);
       }
-    }),
-  );
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(8, total) }, () => worker()));
 
   _allReady = true;
 }

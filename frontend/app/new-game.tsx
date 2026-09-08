@@ -10,13 +10,14 @@ import {
   KeyboardAvoidingView,
   Platform,
   Image,
+  Keyboard,
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Image as BackgroundImage } from "expo-image";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { createSnapshot } from "@/src/game/save-manager";
+import { ALL_SNAPSHOT_KEYS, createSnapshot } from "@/src/game/save-manager";
 import { EMBER_ROOSTER_ENCOUNTER_SEEN_KEY } from "@/src/game/encounter-cinematics";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
@@ -80,12 +81,11 @@ export default function NewGame() {
     );
     setSlots(updated);
     await AsyncStorage.setItem("game_slots", JSON.stringify(updated));
-    await AsyncStorage.setItem("@game:player_name", name.trim());
-    await AsyncStorage.setItem(PLAYER_AVATAR_KEY, String(selectedAvatarId));
-    await AsyncStorage.setItem("@game:active_slot", String(selectedSlot));
+    Keyboard.dismiss();
 
     // ── Full game-state reset so new game always starts clean ──────────────
-    await AsyncStorage.multiRemove([
+    await AsyncStorage.multiRemove([...new Set([
+      ...ALL_SNAPSHOT_KEYS,
       // Kitchen tutorial
       "@tutorial:kitchen_done",
       "@kitchen:soup_demo_seen",
@@ -153,6 +153,11 @@ export default function NewGame() {
       "@shared:resources",
       // Logbook
       "@game:logbook",
+    ])]);
+    await AsyncStorage.multiSet([
+      ["@game:player_name", name.trim()],
+      [PLAYER_AVATAR_KEY, String(selectedAvatarId)],
+      ["@game:active_slot", String(selectedSlot)],
     ]);
 
     // ── Create initial snapshot so Load Game restores a clean new game ─────
@@ -220,9 +225,14 @@ export default function NewGame() {
       >
         <KeyboardAvoidingView
           style={styles.modalOverlay}
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
-          <View style={[styles.sheet, { paddingBottom: insets.bottom + 24 }]}>
+          <ScrollView
+            style={styles.sheetScroll}
+            contentContainerStyle={[styles.sheet, { paddingBottom: insets.bottom + 24 }]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle}>Begin Your Story</Text>
             <Text style={styles.sheetSub}>Choose your avatar</Text>
@@ -265,7 +275,7 @@ export default function NewGame() {
             <TouchableOpacity testID="cancel-modal-button" onPress={() => setShowModal(false)}>
               <Text style={styles.cancelText}>Cancel</Text>
             </TouchableOpacity>
-          </View>
+          </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
     </View>
@@ -328,6 +338,7 @@ const styles = StyleSheet.create({
   slotSub: { fontSize: 13, color: "#8B7355", marginTop: 2 },
   inUseLabel: { fontSize: 13, color: "#8B7355", fontStyle: "italic" },
   modalOverlay: { flex: 1, justifyContent: "flex-end", backgroundColor: "rgba(0,0,0,0.45)" },
+  sheetScroll: { flexGrow: 0, maxHeight: "92%", backgroundColor: "#F0EDE4", borderTopLeftRadius: 24, borderTopRightRadius: 24 },
   sheet: {
     backgroundColor: "#F0EDE4",
     borderTopLeftRadius: 24,

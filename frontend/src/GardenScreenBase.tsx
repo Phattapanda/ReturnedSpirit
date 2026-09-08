@@ -42,6 +42,7 @@ import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import { loadLogbook, type LogEntry, LOGBOOK_KEY } from "@/src/game/logbook";
 import ActivityBar from "@/src/components/ActivityBar";
 import StatusModal from "@/src/components/StatusModal";
+import QuestBookButton from "@/src/components/quest-book";
 import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
 import {
   LocationStatusBadge,
@@ -288,7 +289,7 @@ export default function GardenScreen() {
     clearManagedInterval: clearInterval,
   } = useManagedTimers();
   const router = useRouter();
-  const { merchantPresent, sleepReady } = useLocationStatusBadges();
+  const { merchantPresent, receptionistPresent, sleepReady } = useLocationStatusBadges();
   const insets = useSafeAreaInsets();
   const { width: W, height: H } = useWindowDimensions();
   const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(DEFAULT_PLAYER_AVATAR_ID);
@@ -1365,8 +1366,6 @@ setExploreUnlocked(exploreAvailable);
     }
 
     // Free-play harvest: every harvest bag gets its own next free Player Bag slot.
-    const harvestCost = calcEffectiveStaminaCost(1, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
-    if (staminaCurrentRef.current < harvestCost) { showPlayerBubble('"Not enough stamina."'); return; }
     actionLocked.current = true;
 
     const finalYield = plotData.baseYield + plotData.accumulatedWeedYieldBonus + plotData.accumulatedFertilizerYieldBonus;
@@ -1398,7 +1397,6 @@ setExploreUnlocked(exploreAvailable);
       await addKarmaPoints(1);
       await recordTitheHarvest();
       audioManager.playSoundEffect('action', { maxDurationMs: 3000 });
-      deductStamina(harvestCost, `-${harvestCost}`);
       await animateHarvestToPlayerBag(harvestBag, "primary");
     } catch {
       showPlayerBubble('"I can\'t store this harvest right now."');
@@ -2122,6 +2120,7 @@ setExploreUnlocked(exploreAvailable);
               <Text style={styles.statBarText}>{lifeCurrent}/{playerStats.maximumLife}</Text>
             </View>
           </View>
+          <QuestBookButton onBagUpdated={setPlayerBag} />
           <View style={styles.rightHeaderColumn}>
             <View style={styles.rightHeader}>
               <View style={styles.dayBadge}><Text style={styles.dayText}>{DAYS[dayIdx]}</Text></View>
@@ -2332,7 +2331,7 @@ return (
       resizeMethod="resize"
     />
     {loc.id === "dormitory" && sleepReady && <LocationStatusBadge kind="sleep" />}
-    {loc.id === "explore" && merchantPresent && <LocationStatusBadge kind="merchant" />}
+    {loc.id === "explore" && (receptionistPresent ? <LocationStatusBadge kind="receptionist" /> : merchantPresent ? <LocationStatusBadge kind="merchant" /> : null)}
   </TouchableOpacity>
 );
         })}
@@ -2697,20 +2696,21 @@ const styles = StyleSheet.create({
   // Header
   header: {
     flexDirection: "column",
-    paddingHorizontal: 12,
+    paddingLeft: 4,
+    paddingRight: 12,
     paddingBottom: 6,
     backgroundColor: "rgba(14, 7, 1, 0.84)",
     borderBottomWidth: 1,
     borderBottomColor: "rgba(196, 148, 58, 0.22)",
     zIndex: 2,
   },
-  headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
-  leftHeader: { flex: 1, gap: 5 },
+  headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 6 },
+  leftHeader: { flex: 1, gap: 4, zIndex: 50, elevation: 20 },
   statBarOuter: {
     flexDirection: "row", alignItems: "center",
     backgroundColor: "rgba(10,5,0,0.82)", borderRadius: 18,
     borderWidth: 1.5, borderColor: "rgba(130,90,20,0.50)",
-    paddingHorizontal: 10, paddingVertical: 5, gap: 7,
+    paddingHorizontal: 6, paddingVertical: 3, gap: 4,
     overflow: "visible",
   },
   statBarTrackWrap: { flex: 1, height: 9, position: "relative", overflow: "visible" },
@@ -2729,11 +2729,11 @@ const styles = StyleSheet.create({
   staFloat: {
     position: "absolute", right: -8, top: 12,
     backgroundColor: "rgba(200,50,20,0.90)", borderRadius: 10,
-    paddingHorizontal: 7, paddingVertical: 2, zIndex: 10,
+    paddingHorizontal: 7, paddingVertical: 2, zIndex: 1000, elevation: 30,
   },
   staFloatText: { color: "#FFF", fontSize: 12, fontFamily: "Oldenburg", fontWeight: "700" },
   locationName: { color: "#F0E8D5", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 1, textAlign: "center", marginTop: 4 },
-  rightHeaderColumn: { alignItems: "flex-end", alignSelf: "flex-start", gap: 4, marginLeft: 10, transform: [{ translateY: -2 }] },
+  rightHeaderColumn: { alignItems: "flex-end", alignSelf: "flex-start", gap: 4, marginLeft: 2, transform: [{ translateY: -2 }] },
   rightHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
   dayBadge: {
     width: 38, height: 38, borderRadius: 8,

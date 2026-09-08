@@ -358,7 +358,11 @@ export default function IntroScreen() {
 
   async function saveIntroProgress() {
     try {
-      await AsyncStorage.setItem(NEXT_RUN_INTRO_PENDING_KEY, "false");
+      await AsyncStorage.multiSet([
+        [NEXT_RUN_INTRO_PENDING_KEY, "false"],
+        ["@game:stamina", "20"],
+        ["@game:life", "10"],
+      ]);
       const rawSlot = await AsyncStorage.getItem("@game:active_slot");
       const rawSlots = await AsyncStorage.getItem("game_slots");
       if (rawSlot && rawSlots) {
@@ -484,7 +488,7 @@ export default function IntroScreen() {
           playerCharacter={introPlayerSpeaking}
           characterScale={introPlayerSpeaking ? INTRO_PLAYER_DIALOG_SCALE : RUPERT_DIALOG_SCALE}
           speakerName={currentDialogEntry.speakerName}
-          onSkip={skipDialogDestination ? skipDialog : undefined}
+          onSkip={currentDialogEntry.choices ? undefined : skipDialogDestination ? skipDialog : advanceDialog}
           actions={currentDialogEntry.choices ? (
             <View style={styles.introChoiceRow}>
               {currentDialogEntry.choices.map((choice, index) => (

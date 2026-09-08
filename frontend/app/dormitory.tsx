@@ -45,6 +45,7 @@ import SceneBackground from "@/src/components/SceneBackground";
 import CurrencyHud from "@/src/components/CurrencyHud";
 import ItemDurabilityBadge from "@/src/components/item-durability-badge";
 import StatusModal from "@/src/components/StatusModal";
+import QuestBookButton from "@/src/components/quest-book";
 import PlayerBag, { BagIconButton, getItemImageSource } from "@/src/components/PlayerBag";
 import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
 import TavernLocationTransition from "@/src/components/tavern-location-transition";
@@ -1060,6 +1061,7 @@ export default function DormitoryScreen() {
             </View>
           </View>
 
+          <QuestBookButton onBagUpdated={setPlayerBag} />
           <View style={styles.rightHeaderColumn}>
             <View style={styles.rightHeader}>
               <View style={styles.dayBadge}>
@@ -1413,46 +1415,46 @@ function UpgradeRow({ upgrade, resources, onTap }: UpgradeRowProps) {
     <View
       style={[styles.upgradeRow, unavailable && styles.upgradeRowUnavailable, upgrade.completed && styles.upgradeRowCompleted]}
     >
-      <Text style={styles.upgradeName}>{upgrade.displayName}</Text>
-      {/* Effects */}
-      <View style={styles.upgradeEffects}>
-        {upgrade.effects.sleepStaminaRecovery ? (
-          <Text style={styles.upgradeEffect}>⚡ +{upgrade.effects.sleepStaminaRecovery} Stamina Recovery</Text>
-        ) : null}
-        {upgrade.effects.sleepLifeRecovery ? (
-          <Text style={styles.upgradeEffect}>♥ +{upgrade.effects.sleepLifeRecovery} Life Recovery</Text>
-        ) : null}
-        {upgrade.effects.unlockRoomStorage ? (
-          <Text style={styles.upgradeEffect}>🗄 Unlocks Room Storage</Text>
-        ) : null}
-      </View>
-      {/* Costs */}
-      <View style={styles.upgradeCosts}>
-        {(Object.entries(upgrade.costs) as [ResourceId, number][]).map(([res, qty]) => {
-          const have    = resources[res] ?? 0;
-          const missing = !upgrade.completed && have < qty;
-          return (
-            <Text key={res} style={[styles.upgradeCostItem, missing && styles.upgradeCostMissing]}>
-              {RESOURCE_NAMES[res]} {have}/{qty}
-            </Text>
-          );
-        })}
-      </View>
-      <View style={styles.upgradeActionRow}>
+      <View style={styles.upgradeDetails}>
+        <Text style={styles.upgradeName}>{upgrade.displayName}</Text>
+        {/* Effects */}
+        <View style={styles.upgradeEffects}>
+          {upgrade.effects.sleepStaminaRecovery ? (
+            <Text style={styles.upgradeEffect}>⚡ +{upgrade.effects.sleepStaminaRecovery} Stamina Recovery</Text>
+          ) : null}
+          {upgrade.effects.sleepLifeRecovery ? (
+            <Text style={styles.upgradeEffect}>♥ +{upgrade.effects.sleepLifeRecovery} Life Recovery</Text>
+          ) : null}
+          {upgrade.effects.unlockRoomStorage ? (
+            <Text style={styles.upgradeEffect}>🗄 Unlocks Room Storage</Text>
+          ) : null}
+        </View>
+        {/* Costs */}
+        <View style={styles.upgradeCosts}>
+          {(Object.entries(upgrade.costs) as [ResourceId, number][]).map(([res, qty]) => {
+            const have    = resources[res] ?? 0;
+            const missing = !upgrade.completed && have < qty;
+            return (
+              <Text key={res} style={[styles.upgradeCostItem, missing && styles.upgradeCostMissing]}>
+                {RESOURCE_NAMES[res]} {have}/{qty}
+              </Text>
+            );
+          })}
+        </View>
         {!upgrade.completed && !affordable ? (
           <View style={styles.upgradeNotAffordBadge}>
             <Text style={styles.upgradeNotAffordText}>Not enough resources.</Text>
           </View>
-        ) : <View />}
-        <TouchableOpacity
-          style={[styles.upgradeBuildButton, upgrade.completed && styles.upgradeBuildButtonCompleted]}
-          onPress={onTap}
-          disabled={upgrade.completed}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.upgradeBuildButtonText}>{upgrade.completed ? "Completed" : "Build"}</Text>
-        </TouchableOpacity>
+        ) : null}
       </View>
+      <TouchableOpacity
+        style={[styles.upgradeBuildButton, upgrade.completed && styles.upgradeBuildButtonCompleted]}
+        onPress={onTap}
+        disabled={upgrade.completed}
+        activeOpacity={0.8}
+      >
+        <Text style={styles.upgradeBuildButtonText}>{upgrade.completed ? "Completed" : "Build"}</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -1465,18 +1467,18 @@ const styles = StyleSheet.create({
   fadeBlack: { backgroundColor: "#000" },
 
   header: {
-    flexDirection: "column", paddingHorizontal: 12, paddingBottom: 6,
+    flexDirection: "column", paddingLeft: 4, paddingRight: 12, paddingBottom: 6,
     backgroundColor: "rgba(14,7,1,0.85)",
     borderBottomWidth: 1, borderBottomColor: "rgba(196,148,58,0.20)",
     zIndex: 2,
   },
-  headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  leftHeader:   { flex: 1, gap: 5 },
+  headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 6 },
+  leftHeader:   { flex: 1, gap: 4, zIndex: 50, elevation: 20 },
   statBarOuter: {
     flexDirection: "row", alignItems: "center",
     backgroundColor: "rgba(10,5,0,0.82)", borderRadius: 18,
     borderWidth: 1.5, borderColor: "rgba(130,90,20,0.50)",
-    paddingHorizontal: 10, paddingVertical: 5, gap: 7,
+    paddingHorizontal: 6, paddingVertical: 3, gap: 4, overflow: "visible",
   },
   statBarTrackWrap: { flex: 1, height: 9, position: "relative", overflow: "visible" },
   statBarTrack: { flex: 1, height: 9, borderRadius: 5, backgroundColor: "#2A1800", overflow: "hidden" },
@@ -1488,11 +1490,11 @@ const styles = StyleSheet.create({
   },
   lifeFill:     { backgroundColor: "#CC2200" },
   statBarText:  { color: "#F0E8D5", fontSize: 11, fontFamily: "Oldenburg", minWidth: 40, textAlign: "right" },
-  regenFloat:   { position: "absolute", right: -8, top: 12, zIndex: 500 },
+  regenFloat:   { position: "absolute", right: -8, top: 12, zIndex: 1000, elevation: 30 },
   regenStaText: { color: "#C4943A", fontFamily: "Oldenburg", fontSize: 13, fontWeight: "700" },
   regenLifeText:{ color: "#CC2200", fontFamily: "Oldenburg", fontSize: 13, fontWeight: "700" },
   locationName: { color: "#F0E8D5", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 1, textAlign: "center", marginTop: 4 },
-  rightHeaderColumn: { alignItems: "flex-end", alignSelf: "flex-start", gap: 4, marginLeft: 10, transform: [{ translateY: -2 }] },
+  rightHeaderColumn: { alignItems: "flex-end", alignSelf: "flex-start", gap: 4, marginLeft: 2, transform: [{ translateY: -2 }] },
   rightHeader:  { flexDirection: "row", alignItems: "center", gap: 8 },
   dayBadge: {
     width: 38, height: 38, borderRadius: 8,
@@ -1614,6 +1616,7 @@ const styles = StyleSheet.create({
     marginBottom: 10, borderRadius: 12,
     backgroundColor: "rgba(255,255,255,0.03)",
     borderWidth: 1, borderColor: "rgba(196,148,58,0.18)",
+    flexDirection: "row", alignItems: "center", gap: 12,
   },
   menuPanel: {
     width: 264, backgroundColor: "#160B03", borderRadius: 20, padding: 24,
@@ -1631,6 +1634,7 @@ const styles = StyleSheet.create({
     opacity: 0.68,
     backgroundColor: "rgba(0,0,0,0.20)",
   },
+  upgradeDetails: { flex: 1, minWidth: 0 },
   upgradeName:    { color: "#F5E6C8", fontSize: 14, fontFamily: "Oldenburg", marginBottom: 4 },
   upgradeEffects: { flexDirection: "column", gap: 2, marginBottom: 6 },
   upgradeEffect:  { color: "rgba(196,148,58,0.80)", fontSize: 12 },
@@ -1642,7 +1646,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8, paddingVertical: 3, alignSelf: "flex-start",
   },
   upgradeNotAffordText: { color: "#CC4400", fontSize: 11, fontFamily: "Oldenburg" },
-  upgradeActionRow: { marginTop: 10, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
   upgradeBuildButton: {
     minWidth: 92, minHeight: 38, paddingHorizontal: 16, borderRadius: 9,
     alignItems: "center", justifyContent: "center",

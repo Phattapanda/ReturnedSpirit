@@ -3,12 +3,17 @@ import type { PlayerAvatarId } from "@/src/game/player-avatar";
 
 export type DialogExpression = "normal" | "laugh" | "sad" | "sick" | "tired";
 export const PLAYER_DIALOG_SCALE = 0.8;
-export const AVATAR2_DIALOG_SCALE = 0.675;
+export const AVATAR2_DIALOG_SCALE = 0.8;
 export const AVATAR3_DIALOG_SCALE = 0.8;
-export const INTRO_PLAYER_DIALOG_SCALE = 0.7;
+export const INTRO_PLAYER_DIALOG_SCALE = 0.8;
 export const RUPERT_DIALOG_SCALE = 0.95;
-export const OLD_FARMER_DIALOG_SCALE = 0.75;
+export const OLD_FARMER_DIALOG_SCALE = 0.8;
 export const COACHMAN_DIALOG_SCALE = 0.8;
+
+export const MERCHANT_GUILD_RECEPTIONIST_ASSETS = {
+  dialog: require("../../assets/images/dialog/dialogue_receptionist_merchant.png"),
+  portrait: require("../../assets/images/receptionist_merchant.png"),
+} as const;
 
 export function getPlayerDialogScale(avatarId: PlayerAvatarId): number {
   if (avatarId === 2) return AVATAR2_DIALOG_SCALE;
@@ -31,6 +36,7 @@ export const DIALOG_CHARACTER_ASSETS = {
   traveller: require("../../assets/images/dialog/dialogue_traveller.png"),
   cityGuard: require("../../assets/images/dialog/dialogue_city_guard.png"),
   localBoozer: require("../../assets/images/dialog/dialogue_local_boozer.png"),
+  merchantGuildReceptionist: MERCHANT_GUILD_RECEPTIONIST_ASSETS.dialog,
   rupert: {
     normal: require("../../assets/images/dialog/dialogue_rupert_normal.png"),
     laugh: require("../../assets/images/dialog/dialogue_rupert_laugh.png"),

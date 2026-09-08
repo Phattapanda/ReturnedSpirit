@@ -75,6 +75,8 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   PROGRESSION_STATE_KEY,
   "@game:bag_inspected",
   "@game:logbook",
+  "@game:questbook_unlocked",
+  "@game:tavern_quests",
   CURRENCY_KEY,
   GUEST_STATE_KEY,
   DINING_MEAL_STATE_KEY,
@@ -155,6 +157,8 @@ export async function createSnapshot(
   try {
     if (trigger === "new_game") {
       await AsyncStorage.multiSet([
+        ["@game:stamina", "20"],
+        ["@game:life", "10"],
         [CURRENCY_KEY, String(DEFAULT_CURRENCY_COPPER)],
         [GUEST_STATE_KEY, JSON.stringify(DEFAULT_GUEST_STATE)],
         [DINING_MEAL_STATE_KEY, JSON.stringify(DEFAULT_DINING_MEAL_STATE)],

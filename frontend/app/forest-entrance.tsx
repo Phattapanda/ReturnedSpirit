@@ -18,8 +18,8 @@ import { useHaptics } from "@/src/feedback/haptics-provider";
 import {
   FOREST_FLOOR_COUNT, FOREST_FORWARD_STAMINA_COST, FOREST_MONSTERS, FOREST_REST_FLOORS,
   FOREST_SEARCH_BASE_SUCCESS, FOREST_SEARCH_PERCEPTION_BONUS,
-  attackForestMonster, bandageAtForestRestArea, defendAgainstForestMonster, escapeForestCombat,
-  collectPendingForestCarcass, enterForestDungeon, forestAreaForFloor, goForwardInForest, hideFromForestMonster, leaveForestDungeon, searchForestArea,
+  ambushHiddenForestMonster, attackForestMonster, bandageAtForestRestArea, defendAgainstForestMonster, escapeForestCombat,
+  collectPendingForestCarcass, enterForestDungeon, forestAreaForFloor, goForwardInForest, hideFromForestMonster, leaveForestDungeon, letHiddenForestMonsterPass, searchForestArea,
   type DungeonActionResult, type ForestDungeonState, type ForestMonsterId,
 } from "@/src/game/forest-dungeon-system";
 import { beginChosenNextRun, repeatForestFight } from "@/src/game/death-angel-system";
@@ -133,6 +133,7 @@ export default function ForestEntranceScreen() {
   const [attackEffect, setAttackEffect] = useState<keyof typeof ATTACK_IMAGES | null>(null);
   const [defeatedMonsterVisible, setDefeatedMonsterVisible] = useState(false);
   const [lootFlights, setLootFlights] = useState<NonNullable<DungeonActionResult["lootFlights"]>>([]);
+  const scrollRef = useRef<ScrollView>(null);
   const contractShown = useRef(false);
   const returnFade = useRef(new Animated.Value(0)).current;
   const monsterAttackScale = useSharedValue(1);
@@ -253,6 +254,10 @@ export default function ForestEntranceScreen() {
   useEffect(() => { if (floor?.message) setMessage(floor.message); }, [floor?.message, floorNumber]);
 
   useEffect(() => {
+    requestAnimationFrame(() => scrollRef.current?.scrollTo({ y: 0, animated: false }));
+  }, [floorNumber]);
+
+  useEffect(() => {
     if (!state || contractShown.current) return;
     contractShown.current = true;
     void activeSupporter().then((loaded) => {
@@ -325,6 +330,7 @@ export default function ForestEntranceScreen() {
       }
       if (result.playerAttack?.defeated || (result.lootFlights?.length && result.state.floors[String(result.state.currentFloor)]?.monster?.phase === "defeated")) {
         setState({ ...result.state, floors: { ...result.state.floors } });
+        setKarmaPoints((await loadProgressionState()).karmaPoints);
         await playDefeatAnimation(result.lootFlights ?? []);
       } else {
         setState({ ...result.state, floors: { ...result.state.floors } });
@@ -465,6 +471,10 @@ export default function ForestEntranceScreen() {
       <ActionButton label="Leave Dungeon" disabled={busy} onPress={() => { void leaveSafely(); }} />
     </>;
     if (monsterState?.phase === "noticed") return <ActionButton label="Hide" subtitle="50% + Luck chance to remain unseen" disabled={busy} onPress={() => { void perform(hideFromForestMonster); }} />;
+    if (monsterState?.phase === "hidden") return <View style={styles.combatGrid}>
+      <ActionButton label="Ambush" subtitle="Critical damage · Keep the initiative" disabled={busy} onPress={() => { void perform(ambushHiddenForestMonster); }} />
+      <ActionButton label="Hide" subtitle="Let the monster pass · Search the area" disabled={busy} onPress={() => { void perform(letHiddenForestMonsterPass); }} />
+    </View>;
     if (monsterState?.phase === "combat") return <View style={styles.combatGrid}>
       <ActionButton label="Attack Head" subtitle="-30% hit · +50% damage" disabled={busy} onPress={() => { void perform(() => attackForestMonster("head")); }} />
       <ActionButton label="Attack Body" subtitle="Normal hit chance" disabled={busy} onPress={() => { void perform(() => attackForestMonster("body")); }} />
@@ -494,16 +504,18 @@ export default function ForestEntranceScreen() {
       supporterImage={supporter ? SUPPORTER_IMAGES[supporter.definition.id] : undefined}
       onSupporterPress={() => { void openSupporterBag(); }}
     />
-    <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: 128, paddingBottom: insets.bottom + 22 }]} contentInsetAdjustmentBehavior="automatic" showsVerticalScrollIndicator={false}>
-      {monster && (monsterState?.phase !== "defeated" || defeatedMonsterVisible) ? <View style={styles.monsterCard}>
-        {monster.boss ? <Text style={styles.bossLabel}>BOSS</Text> : null}
-        <View style={styles.monsterImageWrap}>
-          <Reanimated.Image source={MONSTER_IMAGES[monster.id]} style={[styles.monsterImage, monsterAttackStyle]} resizeMode="contain" />
-          {attackEffect ? <Image source={ATTACK_IMAGES[attackEffect]} style={styles.attackEffect} resizeMode="contain" /> : null}
-        </View>
-        <Text style={styles.monsterName}>{monster.name}</Text>
-        <View style={styles.monsterLifeRow}><View style={styles.monsterLifeTrack}><View style={[styles.monsterLifeFill, { width: `${monsterLifePercent * 100}%` }]} /></View><Text style={styles.monsterLifeText}>{monsterState!.life}/{monsterState!.maximumLife} LP</Text></View>
-      </View> : <View style={styles.openSpace} />}
+    <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: 128, paddingBottom: insets.bottom + 22 }]} contentInsetAdjustmentBehavior="automatic" showsVerticalScrollIndicator={false}>
+      <View style={styles.monsterStage}>
+        {monster && ((monsterState?.phase !== "defeated" && monsterState?.phase !== "avoided") || defeatedMonsterVisible) ? <View style={styles.monsterCard}>
+          {monster.boss ? <Text style={styles.bossLabel}>BOSS</Text> : null}
+          <View style={styles.monsterImageWrap}>
+            <Reanimated.Image source={MONSTER_IMAGES[monster.id]} style={[styles.monsterImage, monster.id === "elder_ember_rooster" && styles.elderMonsterImage, monsterAttackStyle]} resizeMode="contain" />
+            {attackEffect ? <Image source={ATTACK_IMAGES[attackEffect]} style={styles.attackEffect} resizeMode="contain" /> : null}
+          </View>
+          <Text style={styles.monsterName}>{monster.name}</Text>
+          <View style={styles.monsterLifeRow}><View style={styles.monsterLifeTrack}><View style={[styles.monsterLifeFill, { width: `${monsterLifePercent * 100}%` }]} /></View><Text style={styles.monsterLifeText}>{monsterState!.life}/{monsterState!.maximumLife} LP</Text></View>
+        </View> : null}
+      </View>
       <View style={styles.messageCard}><CombatMessage message={message} /></View>
       <View style={styles.actionPanel}>{actionContent}</View>
     </ScrollView>
@@ -589,11 +601,13 @@ export default function ForestEntranceScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#071006" }, backgroundShade: { backgroundColor: "rgba(3,10,2,0.22)" }, scroll: { flex: 1 },
   floorTransitionBlack: { zIndex: 1000, backgroundColor: "#000" },
-  content: { flexGrow: 1, justifyContent: "flex-end", paddingHorizontal: 14, gap: 10 }, openSpace: { minHeight: 170 },
-  monsterCard: { alignItems: "center", justifyContent: "flex-end", minHeight: 250, gap: 5 },
+  content: { flexGrow: 1, justifyContent: "flex-start", paddingHorizontal: 14, gap: 10 },
+  monsterStage: { width: "100%", height: 250, alignItems: "center", justifyContent: "flex-end" },
+  monsterCard: { width: "100%", height: 250, alignItems: "center", justifyContent: "flex-end", gap: 5 },
   monsterImageWrap: { width: "100%", height: 205, alignItems: "center", justifyContent: "center" },
   monsterImage: { width: "74%", height: 205 },
-  attackEffect: { position: "absolute", width: "70%", height: "70%", zIndex: 12 },
+  elderMonsterImage: { width: "96.2%", height: 266.5 },
+  attackEffect: { position: "absolute", left: "8%", top: "8%", width: "84%", height: "84%", zIndex: 30 },
   lootFlightImage: { position: "absolute", width: 50, height: 50, zIndex: 3500 },
   bossLabel: { color: "#FFD36A", fontFamily: "Oldenburg", fontSize: 12, letterSpacing: 3, textShadowColor: "#000", textShadowRadius: 5 },
   monsterName: { color: "#FFF4D8", fontFamily: "Oldenburg", fontSize: 18, textShadowColor: "#000", textShadowRadius: 5 },
@@ -602,7 +616,7 @@ const styles = StyleSheet.create({
   messageCard: { borderRadius: 12, borderWidth: 1, borderColor: "rgba(196,148,58,0.48)", backgroundColor: "rgba(14,8,2,0.86)", padding: 10 }, message: { color: "#F0E8D5", fontSize: 12, lineHeight: 18, textAlign: "center" },
   damageReceived: { color: "#FF554D", fontWeight: "800" },
   damageDealt: { color: "#65D77A", fontWeight: "800" },
-  actionPanel: { gap: 8, borderRadius: 17, borderCurve: "continuous", borderWidth: 1.5, borderColor: "rgba(196,148,58,0.58)", backgroundColor: "rgba(18,9,2,0.94)", padding: 11 }, combatGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  actionPanel: { marginTop: "auto", gap: 8, borderRadius: 17, borderCurve: "continuous", borderWidth: 1.5, borderColor: "rgba(196,148,58,0.58)", backgroundColor: "rgba(18,9,2,0.94)", padding: 11 }, combatGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   actionButton: { minHeight: 54, flexGrow: 1, flexBasis: "46%", alignItems: "center", justifyContent: "center", gap: 3, borderRadius: 11, borderCurve: "continuous", borderWidth: 1, borderColor: "rgba(196,148,58,0.48)", backgroundColor: "rgba(65,39,10,0.86)", paddingHorizontal: 10, paddingVertical: 9 },
   dangerButton: { borderColor: "rgba(181,73,51,0.72)", backgroundColor: "rgba(98,28,18,0.78)" }, disabledButton: { opacity: 0.36 }, actionText: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 14, textAlign: "center" }, dangerText: { color: "#FFE0D8" }, actionSubtitle: { color: "rgba(240,232,213,0.58)", fontSize: 9, textAlign: "center" },
   deathCard: { alignItems: "center", gap: 12, paddingVertical: 20 }, deathTitle: { color: "#B91F16", fontSize: 38, fontWeight: "800", letterSpacing: 3 }, deathText: { color: "#F0E8D5", textAlign: "center", lineHeight: 20 },

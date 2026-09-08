@@ -53,10 +53,10 @@ export type MerchantStockDefinition = {
 
 export const MERCHANT_STOCK: Record<MerchantStockId, MerchantStockDefinition> = {
   bucket: { id: "bucket", priceCopper: 25, maxPurchases: 2 },
-  egg: { id: "egg", priceCopper: 24, maxPurchases: 2 },
-  chicken: { id: "chicken", priceCopper: 40, maxPurchases: 2 },
+  egg: { id: "egg", priceCopper: 14, maxPurchases: 2 },
+  chicken: { id: "chicken", priceCopper: 23, maxPurchases: 2 },
   fish: { id: "fish", priceCopper: 44, maxPurchases: 2 },
-  beef: { id: "beef", priceCopper: 50, maxPurchases: 2 },
+  beef: { id: "beef", priceCopper: 29, maxPurchases: 2 },
   bag2: { id: "bag2", priceCopper: 100, maxPurchases: 1 },
   crate1: { id: "crate1", priceCopper: 40, maxPurchases: 3 },
   seed_herb: { id: "seed_herb", priceCopper: 8, maxPurchases: 3 },
@@ -80,18 +80,14 @@ export type MerchantShopState = {
   purchased: Partial<Record<MerchantStockId, number>>;
 };
 
-const FIXED_GENERAL_STOCK: MerchantStockId[] = [
-  "seed_herb", "seed_carrot", "seed_potato", "seed_onion",
-  "standard_fertilizer", "nails", "cloth", "paint",
-];
-
-function rollStock(randomValue = Math.random): MerchantStockId[] {
-  const ids = (Object.keys(MERCHANT_STOCK) as MerchantStockId[]).filter((id) => id !== "bag2" && !FIXED_GENERAL_STOCK.includes(id));
+function rollStock(count: number, randomValue = Math.random, keep: readonly MerchantStockId[] = []): MerchantStockId[] {
+  const kept = [...new Set(keep.filter((id) => id !== "bag2" && !!MERCHANT_STOCK[id]))];
+  const ids = (Object.keys(MERCHANT_STOCK) as MerchantStockId[]).filter((id) => id !== "bag2" && !kept.includes(id));
   for (let index = ids.length - 1; index > 0; index -= 1) {
     const swapIndex = Math.floor(randomValue() * (index + 1));
     [ids[index], ids[swapIndex]] = [ids[swapIndex], ids[index]];
   }
-  return [...FIXED_GENERAL_STOCK, ...ids.slice(0, 4)];
+  return [...kept, ...ids].slice(0, count);
 }
 
 export async function prepareMerchantShop(): Promise<MerchantShopState> {
@@ -104,8 +100,12 @@ export async function prepareMerchantShop(): Promise<MerchantShopState> {
     try {
       const parsed = JSON.parse(raw) as MerchantShopState;
       if (parsed.daySerial === guestState.calendarDaySerial && Array.isArray(parsed.stockIds)) {
-        const stockIds = [...FIXED_GENERAL_STOCK, ...parsed.stockIds.filter((id) => id !== "bag2" && !FIXED_GENERAL_STOCK.includes(id))];
-        if (!backpackOwned) stockIds.unshift("bag2");
+        const rotatingCount = backpackOwned ? 5 : 4;
+        const previousRotating = parsed.stockIds.filter((id) => id !== "bag2" && !!MERCHANT_STOCK[id]);
+        const stockIds = [
+          ...(!backpackOwned ? ["bag2" as const] : []),
+          ...rollStock(rotatingCount, Math.random, previousRotating.slice(0, rotatingCount)),
+        ];
         const normalized = { ...parsed, stockIds };
         if (JSON.stringify(normalized.stockIds) !== JSON.stringify(parsed.stockIds)) await AsyncStorage.setItem(MERCHANT_SHOP_KEY, JSON.stringify(normalized));
         return normalized;
@@ -115,7 +115,7 @@ export async function prepareMerchantShop(): Promise<MerchantShopState> {
   const next: MerchantShopState = {
     version: 1,
     daySerial: guestState.calendarDaySerial,
-    stockIds: [...(!backpackOwned ? ["bag2" as const] : []), ...rollStock()],
+    stockIds: [...(!backpackOwned ? ["bag2" as const] : []), ...rollStock(backpackOwned ? 5 : 4)],
     purchased: {},
   };
   await AsyncStorage.setItem(MERCHANT_SHOP_KEY, JSON.stringify(next));
@@ -210,7 +210,9 @@ export function purchaseMerchantItem(stockId: MerchantStockId): Promise<Merchant
       if (await spendCurrencyCopper(definition.priceCopper) === null) return { ok: false, reason: "insufficient_copper" };
       const nextShop: MerchantShopState = {
         ...shop,
-        stockIds: stockId === "bag2" ? shop.stockIds.filter((id) => id !== "bag2") : shop.stockIds,
+        stockIds: stockId === "bag2"
+          ? rollStock(5, Math.random, shop.stockIds.filter((id) => id !== "bag2"))
+          : shop.stockIds,
         purchased: { ...shop.purchased, [stockId]: bought + 1 },
       };
       try {

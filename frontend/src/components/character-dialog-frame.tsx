@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, type ReactNode } from "react";
-import { Animated, Image, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions, type ImageSourcePropType, type LayoutRectangle } from "react-native";
+import { Animated, Image as NativeImage, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions, type ImageSourcePropType, type LayoutRectangle } from "react-native";
+import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -20,7 +21,7 @@ export default function CharacterDialogFrame({
   visible,
   characterSource,
   playerCharacter = false,
-  characterScale = 1,
+  characterScale = 0.8,
   speakerName,
   onSkip,
   children,
@@ -63,7 +64,7 @@ export default function CharacterDialogFrame({
 
   const maximumCharacterHeight = Math.min(height * 0.76, 760) * characterScale;
   const maximumCharacterWidth = Math.min(width * 0.9, 540) * characterScale;
-  const resolvedCharacter = characterSource ? Image.resolveAssetSource(characterSource) : null;
+  const resolvedCharacter = characterSource ? NativeImage.resolveAssetSource(characterSource) : null;
   const characterAspectRatio = resolvedCharacter?.width && resolvedCharacter?.height
     ? resolvedCharacter.width / resolvedCharacter.height
     : maximumCharacterWidth / maximumCharacterHeight;
@@ -82,7 +83,7 @@ export default function CharacterDialogFrame({
             { bottom: 0, width: characterWidth, height: characterHeight, transform: [{ translateX: characterX }] },
           ]}
         >
-          <Image source={characterSource} style={styles.characterImage} resizeMode="contain" resizeMethod="auto" fadeDuration={0} />
+          <Image key={resolvedCharacter?.uri ?? String(characterSource)} source={characterSource} style={styles.characterImage} contentFit="contain" transition={0} cachePolicy="memory-disk" />
         </Animated.View>
       ) : null}
       <Animated.View

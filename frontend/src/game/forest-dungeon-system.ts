@@ -83,7 +83,7 @@ export type ForestMonsterState = {
   id: ForestMonsterId;
   life: number;
   maximumLife: number;
-  phase: "noticed" | "combat" | "defeated";
+  phase: "noticed" | "hidden" | "avoided" | "combat" | "defeated";
 };
 
 export type ForestFloorState = {
@@ -179,7 +179,9 @@ function normalizeFloor(raw: Partial<ForestFloorState> | undefined, floor: numbe
         id: raw.monster.id,
         life: Math.max(0, Math.floor(Number(raw.monster.life) || 0)),
         maximumLife: FOREST_MONSTERS[raw.monster.id].maximumLife,
-        phase: raw.monster.phase === "noticed" || raw.monster.phase === "defeated" ? raw.monster.phase : "combat" as const,
+        phase: raw.monster.phase === "noticed" || raw.monster.phase === "hidden" || raw.monster.phase === "avoided" || raw.monster.phase === "defeated"
+          ? raw.monster.phase
+          : "combat" as const,
       }
     : fallback.monster;
   return {
@@ -280,6 +282,16 @@ function spawnMonster(floor: number): ForestMonsterState {
 function createCarcass(monster: ForestMonsterDefinition): BagItem {
   const definition = getButcheringDefinition(monster.id);
   return { id: "monster_carcass", itemType: "monster_carcass", name: definition?.carcassName ?? `${monster.name} Carcass`, quantity: 1, monsterId: monster.id, attributes: ["material"] };
+}
+
+const SLASHING_WEAPON_IDS = new Set([
+  "weapon_iron_dagger",
+  "weapon_iron_shortsword",
+  "weapon_iron_sword",
+]);
+
+function normalAttackKind(weapon: BagItem | null): "slash" | "punch" {
+  return weapon && SLASHING_WEAPON_IDS.has(weapon.id) ? "slash" : "punch";
 }
 
 function createMaterial(id: string, quantity = 1): BagItem {
@@ -408,7 +420,9 @@ export async function searchForestArea(): Promise<DungeonActionResult> {
     return { ok: true, state: nextState, message: nextFloor.message, life: paidLife, stamina, bag };
   }
 
-  const eventRoll = Math.random() * 100;
+  // After deliberately letting a monster pass, searching should inspect the
+  // newly safe area rather than immediately spawning a replacement encounter.
+  const eventRoll = floor.monster?.phase === "avoided" ? 50 + Math.random() * 50 : Math.random() * 100;
   if (eventRoll < 50) {
     nextFloor.monster = spawnMonster(state.currentFloor);
     const monster = FOREST_MONSTERS[nextFloor.monster.id];
@@ -517,35 +531,66 @@ export async function hideFromForestMonster(): Promise<DungeonActionResult> {
   const nextState: ForestDungeonState = { ...state, floors: { ...state.floors, [String(state.currentFloor)]: nextFloor } };
   await saveFightSnapshot(nextState, runtime.life, runtime.stamina, runtime.bag);
   if (Math.random() * 100 < clampPercent(50 + runtime.stats.luck)) {
-    const weapon = getEquippedItem(runtime.bag, "weapon");
-    const damage = rollPlayerPhysicalDamage(runtime.stats.strength, monster.physicalDefense, weapon) * 2;
-    nextMonster.life = Math.max(0, nextMonster.life - damage);
-    let bag = weapon ? consumeWeaponDurability(runtime.bag) : runtime.bag;
-    let message = `I remain unseen and strike critically for ${damage} damage.`;
-    let lootFlights: DungeonLootFlight[] | undefined;
-    if (nextMonster.life <= 0) {
-      nextMonster.phase = "defeated";
-      const loot = await grantMonsterDefeatRewards(nextFloor, bag, monster);
-      bag = loot.bag;
-      message += loot.message;
-      lootFlights = loot.lootFlights;
-      await recordMonsterDefeat(monster.id);
-    }
-    await saveRuntime(nextState, runtime.life, runtime.stamina, bag);
+    nextMonster.phase = "hidden";
+    const message = `I remain unseen. I can ambush the ${monster.name} or stay hidden and let it pass.`;
+    await saveRuntime(nextState, runtime.life, runtime.stamina, runtime.bag);
     return {
       ok: true,
       state: nextState,
       message,
       life: runtime.life,
       stamina: runtime.stamina,
-      bag,
-      playerAttack: { kind: weapon ? "critical" : "punch", damage, defeated: nextMonster.life <= 0 },
-      lootFlights,
+      bag: runtime.bag,
     };
   }
   await saveForestDungeonState(nextState);
   const result = await monsterAttack(nextState, runtime, false);
   return { ...result, message: `The ${monster.name} discovers me. ${result.message}` };
+}
+
+export async function ambushHiddenForestMonster(): Promise<DungeonActionResult> {
+  const state = await loadForestDungeonState();
+  const runtime = await loadRuntime();
+  const floor = currentFloorOf(state);
+  if (!floor.monster || floor.monster.phase !== "hidden") return { ok: false, state, message: "There is no hidden ambush to make.", ...runtime };
+  const monster = FOREST_MONSTERS[floor.monster.id];
+  const weapon = getEquippedItem(runtime.bag, "weapon");
+  const damage = rollPlayerPhysicalDamage(runtime.stats.strength, monster.physicalDefense, weapon) * 2;
+  floor.monster.life = Math.max(0, floor.monster.life - damage);
+  floor.monster.phase = floor.monster.life <= 0 ? "defeated" : "combat";
+  let bag = weapon ? consumeWeaponDurability(runtime.bag) : runtime.bag;
+  let message = `I ambush the ${monster.name} and strike critically for ${damage} damage. I retain the initiative.`;
+  let lootFlights: DungeonLootFlight[] | undefined;
+  if (floor.monster.phase === "defeated") {
+    const loot = await grantMonsterDefeatRewards(floor, bag, monster);
+    bag = loot.bag;
+    message += loot.message;
+    lootFlights = loot.lootFlights;
+    await recordMonsterDefeat(monster.id);
+  }
+  await saveRuntime(state, runtime.life, runtime.stamina, bag);
+  return {
+    ok: true,
+    state,
+    message,
+    life: runtime.life,
+    stamina: runtime.stamina,
+    bag,
+    playerAttack: { kind: weapon ? "critical" : "punch", damage, defeated: floor.monster.phase === "defeated" },
+    lootFlights,
+  };
+}
+
+export async function letHiddenForestMonsterPass(): Promise<DungeonActionResult> {
+  const state = await loadForestDungeonState();
+  const runtime = await loadRuntime();
+  const floor = currentFloorOf(state);
+  if (!floor.monster || floor.monster.phase !== "hidden") return { ok: false, state, message: "There is no monster passing by.", ...runtime };
+  const monster = FOREST_MONSTERS[floor.monster.id];
+  floor.monster.phase = "avoided";
+  floor.message = `I stay hidden until the ${monster.name} passes. The area is safe to search.`;
+  await saveRuntime(state, runtime.life, runtime.stamina, runtime.bag);
+  return { ok: true, state, message: floor.message, life: runtime.life, stamina: runtime.stamina, bag: runtime.bag };
 }
 
 export async function attackForestMonster(target: "head" | "body"): Promise<DungeonActionResult> {
@@ -566,7 +611,7 @@ export async function attackForestMonster(target: "head" | "body"): Promise<Dung
     floor.monster.life = Math.max(0, floor.monster.life - damage);
     if (weapon) bag = consumeWeaponDurability(bag);
     message = `I hit the ${monster.name}'s ${target} for ${damage} damage.`;
-    playerAttack = { kind: weapon ? "slash" : "punch", damage, defeated: floor.monster.life <= 0 };
+    playerAttack = { kind: normalAttackKind(weapon), damage, defeated: floor.monster.life <= 0 };
     if (floor.monster.life <= 0) {
       floor.monster.phase = "defeated";
       const loot = await grantMonsterDefeatRewards(floor, bag, monster);
@@ -631,7 +676,7 @@ export async function goForwardInForest(): Promise<DungeonActionResult> {
   const state = await loadForestDungeonState();
   const runtime = await loadRuntime();
   const floor = currentFloorOf(state);
-  if (floor.monster && floor.monster.phase !== "defeated") return { ok: false, state, message: "The monster blocks the way forward.", ...runtime };
+  if (floor.monster && floor.monster.phase !== "defeated" && floor.monster.phase !== "avoided") return { ok: false, state, message: "The monster blocks the way forward.", ...runtime };
   if (floor.carcassPending) return { ok: false, state, message: "I need room in my bags for the remaining battle loot first.", ...runtime };
   const activityCost = dungeonActivityCost(runtime.bag, FOREST_FORWARD_STAMINA_COST);
   const payment = payDungeonActivityCost(runtime.stamina, runtime.life, activityCost);

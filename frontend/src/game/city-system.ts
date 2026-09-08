@@ -19,6 +19,7 @@ import { deliverMailboxMessage, type MailReward } from "@/src/game/mailbox-syste
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats } from "@/src/game/player-stats";
 import { loadCoachmanEscortState, setCoachmanEscortPhase } from "@/src/game/coachman-escort-system";
 import { getButcheringDefinition, rollButcheringOutputs } from "@/src/game/butchering-system";
+import { addKarmaPoints } from "@/src/game/progression";
 
 export const CITY_STATE_KEY = "@game:next_city";
 export const SUPPORTER_BAG_KEY = "@game:supporter_bag";
@@ -60,6 +61,7 @@ export type CityState = {
     monsterId?: string; outputs?: { itemId: string; quantity: number }[];
   }[];
   merchantReputation: number;
+  merchantGuildIntroductionSeen: boolean;
   healingPotionContract: "available" | "accepted" | "completed";
   blessing: { id: TempleBlessingId; status: "prepared" | "active" } | null;
 };
@@ -92,6 +94,7 @@ function normalizeCityState(raw: unknown, day: number): CityState {
     questRollWeek: Math.floor(day / 7),
     pendingProcessing: Array.isArray(value.pendingProcessing) ? value.pendingProcessing : [],
     merchantReputation: Math.max(0, Math.floor(value.merchantReputation ?? 0)),
+    merchantGuildIntroductionSeen: value.merchantGuildIntroductionSeen === true,
     healingPotionContract: value.healingPotionContract === "accepted" || value.healingPotionContract === "completed" ? value.healingPotionContract : "available",
     blessing: value.blessing && (value.blessing.id === "endurance" || value.blessing.id === "fortune" || value.blessing.id === "protection")
       ? { id: value.blessing.id, status: value.blessing.status === "active" ? "active" : "prepared" }
@@ -133,6 +136,12 @@ export async function loadCityState(): Promise<CityState> {
 export async function saveCityState(state: CityState): Promise<CityState> {
   await AsyncStorage.setItem(CITY_STATE_KEY, JSON.stringify(state));
   return state;
+}
+
+export async function markMerchantGuildIntroductionSeen(): Promise<CityState> {
+  const state = await loadCityState();
+  if (state.merchantGuildIntroductionSeen) return state;
+  return saveCityState({ ...state, merchantGuildIntroductionSeen: true });
 }
 
 async function loadBag(): Promise<PlayerBagData> {
@@ -516,12 +525,26 @@ export async function turnInQuest(id: QuestId): Promise<CityActionResult> {
   if (requirement) { requirementMet = itemCount(bag, requirement[0]) >= requirement[1]; if (requirementMet) bag = consumeItems(bag, requirement[0], requirement[1]); }
   if (!requirementMet) return { ok: false, message: "The quest requirements are not complete yet." };
   const def = QUESTS[id]; state.guildReputation += def.reputation; state.quests[id] = { status: "completed", progress: quest.progress };
-  await AsyncStorage.multiSet([[PLAYER_BAG_KEY, JSON.stringify(bag)], [CITY_STATE_KEY, JSON.stringify(state)]]); await addCurrencyCopper(def.rewardCopper);
-  return { ok: true, message: `Quest complete: ${formatCurrencyAmount(def.rewardCopper)} and ${def.reputation} Guild Reputation awarded.` };
+  await AsyncStorage.multiSet([[PLAYER_BAG_KEY, JSON.stringify(bag)], [CITY_STATE_KEY, JSON.stringify(state)]]);
+  await Promise.all([addCurrencyCopper(def.rewardCopper), addKarmaPoints(5)]);
+  return { ok: true, message: `Quest complete: ${formatCurrencyAmount(def.rewardCopper)}, ${def.reputation} Guild Reputation, and 5 KP awarded.` };
 }
 
 export async function recordMonsterDefeat(monsterId: string): Promise<void> {
-  if (monsterId !== "wild_wolf") return; const state = await loadCityState(); const quest = state.quests.wolves;
+  const karmaReward: Record<string, number> = {
+    forest_slime: 3,
+    feral_rabbit: 3,
+    wild_boar: 3,
+    wild_wolf: 3,
+    goblin_forager: 3,
+    ember_chick: 4,
+    ember_chicken: 5,
+    ember_rooster: 8,
+    elder_ember_rooster: 15,
+  };
+  await addKarmaPoints(karmaReward[monsterId] ?? 3);
+  if (monsterId !== "wild_wolf") return;
+  const state = await loadCityState(); const quest = state.quests.wolves;
   if (quest.status !== "accepted") return; quest.progress = Math.min(3, quest.progress + 1); if (quest.progress >= 3) quest.status = "ready"; await saveCityState(state);
 }
 

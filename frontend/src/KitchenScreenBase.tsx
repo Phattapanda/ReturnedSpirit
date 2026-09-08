@@ -37,6 +37,7 @@ import { useAudioManager } from "@/src/audio/AudioProvider";
 import { useHaptics } from "@/src/feedback/haptics-provider";
 import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import StatusModal from "@/src/components/StatusModal";
+import QuestBookButton from "@/src/components/quest-book";
 import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
 import StoryDialogOverlay, { type StoryDialogChoice, type StoryDialogLine } from "@/src/components/story-dialog-overlay";
 import CharacterDialogFrame from "@/src/components/character-dialog-frame";
@@ -141,6 +142,8 @@ import {
   type TitheEventPhase,
 } from "@/src/game/tithe-system";
 import { loadExploreNavigationUnlocked } from "@/src/game/travel-system";
+import { unlockQuestBook } from "@/src/game/questbook-system";
+import { loadTavernQuestState, notifyTavernQuestPrerequisitesChanged, subscribeTavernQuests } from "@/src/game/tavern-quest-system";
 import {
   DEFAULT_SMALL_CRATE_STATE,
   KITCHEN_SMALL_CRATE_KEY,
@@ -268,9 +271,30 @@ const BASE_KITCHEN_TABLE_SLOT_COUNT = 12;
 // collide with Ingredient/Tool gesture identifiers.
 const CRAFT_INGREDIENT_SLOT_BASE = 100;
 const CRAFT_TOOL_SLOT = CRAFT_INGREDIENT_SLOT_BASE + 3;
+const CRAFT_TOOL_IDS = new Set([
+  "oldpot",
+  "cooking_pot",
+  "fine_cooking_pot",
+  "tool_kitchen_knife",
+  "tool_rusty_butchering_knife",
+  "tool_iron_butchering_knife",
+  "tool_steel_butchering_knife",
+]);
 
 function isKitchenTableSlot(slot: number): boolean {
   return slot >= 0 && slot < CRAFT_INGREDIENT_SLOT_BASE;
+}
+
+function isCraftToolItem(item: BagItem | null | undefined): boolean {
+  return !!item && CRAFT_TOOL_IDS.has(item.id);
+}
+
+function UpgradeRequirement({ label, have, need }: { label: string; have: number; need: number }) {
+  return (
+    <Text style={[styles.upgradeRequirement, have < need && styles.upgradeRequirementMissing]}>
+      {label} {have}/{need}
+    </Text>
+  );
 }
 
 const IMG = {
@@ -367,6 +391,7 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   stew_fisherman: require("../assets/images/stew_fisherman.png"),
   bucket:      require("../assets/images/bucket.png"),
   bucketwater: require("../assets/images/bucketwater.png"),
+  empty_bottle: require("../assets/images/empty_bottle.png"),
   seed_herb:   require("../assets/images/seed_herb.png"),
   herbs:       require("../assets/images/herbs.png"),
   oldpot:      require("../assets/images/oldpot.png"),
@@ -380,6 +405,8 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   crate1: require("../assets/images/crate1.png"),
   monster_carcass: require("../assets/images/monster_carcass.png"),
   potion_stamina_low_grade: require("../assets/images/potion_stamina_low_grade.png"),
+  questbook: require("../assets/images/questbook.png"),
+  recipe_book: require("../assets/images/recipe_book.png"),
   potion_healing_low_grade: require("../assets/images/potion_healing_low_grade.png"),
   standard_fertilizer: require("../assets/images/fertilizer.png"),
   premium_fertilizer: require("../assets/premiumfertilizer.png"),
@@ -398,7 +425,29 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   energypill: require("../assets/images/energy Pill.png"),
   healthymuffin: require("../assets/images/healthy muffin.png"),
   goldenapple: require("../assets/images/golden apple.png"),
+  tool_kitchen_knife: require("../assets/images/cooking_knife.png"),
 };
+
+type RecipeCategoryId = "hand" | "pot" | "pan" | "knife";
+
+const RECIPE_CATEGORIES: readonly {
+  id: RecipeCategoryId;
+  label: string;
+  image: ImageSourcePropType;
+}[] = [
+  { id: "hand", label: "Hand Recipes", image: require("../assets/images/tool_hand.png") },
+  { id: "pot", label: "Pot Recipes", image: require("../assets/images/oldpot.png") },
+  { id: "pan", label: "Pan Recipes", image: require("../assets/images/frying_pan.png") },
+  { id: "knife", label: "Knife Recipes", image: require("../assets/images/cooking_knife.png") },
+] as const;
+
+function recipeCategoryForTool(toolId: string | null): RecipeCategoryId {
+  if (!toolId) return "hand";
+  if (toolId === "oldpot" || toolId === "cooking_pot" || toolId === "fine_cooking_pot") return "pot";
+  if (toolId === "frying_pan") return "pan";
+  if (toolId.includes("knife")) return "knife";
+  return "hand";
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -422,6 +471,7 @@ const D_UPGRADE_INTRO: DLine[] = [
   { id: "d_upgrade.1", speaker: "Rupert", portrait: "normal", text: '"You can always talk to me if you want to change something."', highlightedPhrases: ["talk to me if you want to change something"] },
   { id: "d_upgrade.2", speaker: "Rupert", portrait: "normal", text: '"If we have more mouths to feed, we need a second garden bed."', highlightedPhrases: ["need a second garden bed"] },
   { id: "d_upgrade.3", speaker: "Rupert", portrait: "sad", text: '"The dining hall would need to be thoroughly cleaned to be ready for other guests again."', highlightedPhrases: ["cleaned to be ready for other guests"] },
+  { id: "d_upgrade.4", speaker: "Rupert", portrait: "normal", text: '"Here, take this book. You can use it to organize your thoughts."' },
 ];
 
 const D_POST_CONSUMPTION: DLine[] = [
@@ -511,7 +561,7 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
     clearManagedInterval: clearInterval,
   } = useManagedTimers();
   const router = useRouter();
-  const { harvestReady, merchantPresent, sleepReady } = useLocationStatusBadges();
+  const { harvestReady, merchantPresent, receptionistPresent, sleepReady } = useLocationStatusBadges();
   const insets = useSafeAreaInsets();
   const { width: W, height: H } = useWindowDimensions();
   const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(DEFAULT_PLAYER_AVATAR_ID);
@@ -544,6 +594,8 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
     return () => { void setPlaytimePaused(false); };
   }, [showMenu]);
   const [showRecipes, setShowRecipes] = useState(false);
+  const [recipeCategory, setRecipeCategory] = useState<RecipeCategoryId | null>(null);
+  const [recipeSlotSize, setRecipeSlotSize] = useState(44);
   const [discoveredRecipeIds, setDiscoveredRecipeIds] = useState<string[]>([]);
   const discoveredRecipeIdsRef = useRef<string[]>([]);
   const [newRecipePresentation, setNewRecipePresentation] = useState<{ name: string; outputId: string } | null>(null);
@@ -595,6 +647,18 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
   }
   const [upgradeBusy, setUpgradeBusy] = useState(false);
   const [upgradeMessage, setUpgradeMessage] = useState<string | null>(null);
+  const [aleQuestUnlocked, setAleQuestUnlocked] = useState(false);
+  useEffect(() => {
+    if (!upgradeMessage) return;
+    const timer = setTimeout(() => setUpgradeMessage(null), 1000);
+    return () => clearTimeout(timer);
+  }, [upgradeMessage, setTimeout, clearTimeout]);
+  useEffect(() => {
+    let active = true;
+    void loadTavernQuestState().then((state) => { if (active) setAleQuestUnlocked(state.claimed.serve_water); });
+    const unsubscribe = subscribeTavernQuests((state) => { if (active) setAleQuestUnlocked(state.claimed.serve_water); });
+    return () => { active = false; unsubscribe(); };
+  }, []);
   const [guestCalendarDaySerial, setGuestCalendarDaySerial] = useState(0);
   const [barWidth, setBarWidth] = useState(0);
 
@@ -1097,6 +1161,7 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
   const playerPortraitRef  = useRef<View>(null);
   const rupertPortraitRef  = useRef<View>(null);
   const bagIconRef         = useRef<View>(null);
+  const questBookTargetRef = useRef<View>(null);
   const smallCratePanelRef = useRef<View>(null);
   const garbageBinRef      = useRef<View>(null);
   const tableSlotRefs      = useRef<(View | null)[]>(Array(30).fill(null));
@@ -1245,9 +1310,9 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
 
         // Load life (persist initial value if absent)
         const rawLife = await AsyncStorage.getItem(SK.LIFE);
-        const lf = rawLife ? Math.min(Math.max(parseInt(rawLife, 10), 0), 30) : 0;
+        const lf = rawLife ? Math.min(Math.max(parseInt(rawLife, 10), 0), 30) : 10;
         setLifeCurrent(lf);
-        if (!rawLife) AsyncStorage.setItem(SK.LIFE, "0").catch(() => {});
+        if (!rawLife) AsyncStorage.setItem(SK.LIFE, "10").catch(() => {});
 
         // Load day
         const rawDay = await AsyncStorage.getItem(SK.DAY_INDEX);
@@ -1456,13 +1521,44 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
         postGuestIntroStartedRef.current = false;
         return;
       }
-      showDialog(D_UPGRADE_INTRO, async () => {
-        const next = await markUpgradeIntroSeen();
-        setPostGuestState(next);
-        postGuestIntroStartedRef.current = false;
-      });
+      showDialog(D_UPGRADE_INTRO, flyQuestBookFromRupert);
     }, delayMs);
     return true;
+  }
+
+  async function finishQuestBookGift() {
+    try {
+      const next = await markUpgradeIntroSeen();
+      setPostGuestState(next);
+      await unlockQuestBook();
+    } finally {
+      soupVis.value = 0;
+      postGuestIntroStartedRef.current = false;
+    }
+  }
+
+  function flyQuestBookFromRupert() {
+    setTimeout(() => {
+      measureCenterInRoot(rupertPortraitRef.current, layouts.current.rupert, (start) => {
+        measureCenterInRoot(questBookTargetRef.current, null, (target) => {
+          if (!start || !target) {
+            void finishQuestBookGift();
+            return;
+          }
+          setFlyingItemId("questbook");
+          soupFlySize.value = Math.max(52, target.h * 1.35);
+          soupX.value = start.x;
+          soupY.value = start.y;
+          soupScale.value = 1;
+          soupVis.value = 1;
+          soupX.value = withTiming(target.x, { duration: 900 });
+          soupScale.value = withTiming(0.78, { duration: 900 });
+          soupY.value = withTiming(target.y, { duration: 900 }, (finished) => {
+            if (finished) runOnJS(finishQuestBookGift)();
+          });
+        });
+      });
+    }, 100);
   }
 
   async function handleRupertUpgradeTap() {
@@ -1490,6 +1586,7 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
     try {
       const result = await purchaseGardenPlotBuild(plotNumber);
       setPostGuestState(result.state);
+      void notifyTavernQuestPrerequisitesChanged();
       setSharedResources(result.resources);
       if (!result.ok) {
         setUpgradeMessage(result.reason === "prerequisite_locked"
@@ -1618,6 +1715,7 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
       const result = await cleanGuestAreaOnce();
       notifyLocationStatusChanged();
       setPostGuestState(result.state);
+      void notifyTavernQuestPrerequisitesChanged();
       setStaminaCurrent(result.remainingStamina);
       setStaminaDisplay(result.remainingStamina);
       staminaSV.value = result.remainingStamina;
@@ -3195,9 +3293,9 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     }
     // Once crafting is finished (and in normal Kitchen IDLE), the Tool slot remains a
     // normal movable slot, but ingredient slots do not silently re-enable crafting.
-    if (draggedItem?.id !== "crate1" && next === null && cur !== "COOKING_UNPACK_WAIT" && srcSlot !== 15 &&
+    if (isCraftToolItem(draggedItem) && next === null && cur !== "COOKING_UNPACK_WAIT" && srcSlot !== CRAFT_TOOL_SLOT &&
         lcs[3] && inRect(itemX, itemY, lcs[3]!)) {
-      next = 15;
+      next = CRAFT_TOOL_SLOT;
     }
     if (next === null) {
       for (let i = 0; i < lts.length; i++) {
@@ -3574,7 +3672,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       }
     }
     // Tool is available after Rupert introduces it, including after crafting / normal IDLE.
-    if (draggedItem.id !== "crate1" && destSlot < 0 && cur !== "COOKING_UNPACK_WAIT" && lcs[3] && inRect(absX, absY, lcs[3]!)) {
+    if (isCraftToolItem(draggedItem) && destSlot < 0 && cur !== "COOKING_UNPACK_WAIT" && lcs[3] && inRect(absX, absY, lcs[3]!)) {
       destSlot = CRAFT_TOOL_SLOT;
     }
     if (destSlot < 0) {
@@ -3914,8 +4012,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       const soup1 = completedTable.findIndex(it => it?.id === "soup_herb");
       if (soup1 >= 0) { setSoupSlot(soup1); soupSlotRef.current = soup1; }
       showBubble(
-        '"We made enough for two. Can you please split them into 2 bowls?"',
-        "Rupert", "ALLOW_ITEM", null, () => {}, "bubble.cooking.split_soup_request",
+        '"We made enough for two. Can you please split them into two bowls?"',
+        "Rupert", "ALLOW_ITEM", null, () => {}, "bubble.cooking.split_soup_request", ["split them"],
       );
     }), newlyDiscoveredRecipe ? NEW_RECIPE_HOLD_MS + 450 : 400);
     setTimeout(() => { setCraftingInteractionLocked(false); }, 2000);
@@ -4146,7 +4244,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     if (remainingSlot < 0) { setTimeout(finishCookingTutorial, 500); return; }
     setSoupSlot(remainingSlot); soupSlotRef.current = remainingSlot;
     if (shareDone && !eatDone) {
-      showBubble('"Now eat yours while it is still warm."', "Rupert", "ALLOW_ITEM", 6000, () => {}, "bubble.cooking.eat_instruction");
+      showBubble('"Now eat yours while it’s still warm."', "Rupert", "ALLOW_ITEM", 6000, () => {}, "bubble.cooking.eat_instruction", ["eat yours"]);
     } else {
       showBubble('"Please pass me the other bowl."', "Rupert", "ALLOW_ITEM", 6000, () => {}, "bubble.cooking.share_instruction");
     }
@@ -4163,7 +4261,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         "Rupert", "BLOCK_ALL", null,
         () => {
           showBubble(
-            '"Let’s check out the front door in the dining hall."',
+            '"Let’s check out the front door in the Dining Hall."',
             "Rupert", "BLOCK_ALL", null,
             () => {
               saveGuestTutorialIntroStep("dining_prompt").catch(() => {});
@@ -4171,7 +4269,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
               setTutState("WAITING_FOR_DINING_LOCATION_CLICK");
             },
             "bubble.guest.dining_prompt",
-            ["dining hall"],
+            ["Dining Hall"],
           );
         },
         "bubble.guest.knock",
@@ -4451,9 +4549,15 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     postGuestState.guestAreaCompletedDaySerial !== null &&
     guestCalendarDaySerial > postGuestState.guestAreaCompletedDaySerial
   );
+  const countBagItem = (itemId: string) => {
+    const normalizedId = normalizeItemId(itemId);
+    return playerBag.slots.reduce((total, item) => (
+      item && normalizeItemId(item.id) === normalizedId ? total + item.quantity : total
+    ), 0);
+  };
   const hasQuestItems = (requirements: readonly { id: string }[]) => requirements.every((required) => {
     const requiredId = normalizeItemId(required.id);
-    return playerBag.slots.some((item) => item && normalizeItemId(item.id) === requiredId && item.quantity > 0);
+    return countBagItem(requiredId) > 0;
   });
 
   return (
@@ -4537,6 +4641,9 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
               </View>
               <Text style={styles.statBarText}>{lifeCurrent}/30</Text>
             </View>
+          </View>
+          <View ref={questBookTargetRef} collapsable={false}>
+            <QuestBookButton onBagUpdated={setPlayerBag} />
           </View>
           <View style={styles.rightHeaderColumn}>
             <View style={styles.rightHeader}>
@@ -4657,9 +4764,9 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                 {/* Tool slot */}
                 <View
                   ref={(r) => { craftSlotRefs.current[3] = r; }}
-                  style={[styles.craftSlot, styles.craftSlotTool, hoveredSlot === CRAFT_TOOL_SLOT && soupDragging && styles.slotHovered]}
+                  style={[styles.craftSlot, styles.craftSlotTool, hoveredSlot === CRAFT_TOOL_SLOT && soupDragging && styles.toolSlotHovered]}
                 >
-                  {!craftTool && <Ionicons name="hand-right-outline" size={26} color="#8B6914" />}
+                  {!craftTool && <Image source={require("../assets/images/tool_hand.png")} style={styles.baseHandTool} resizeMode="contain" resizeMethod="resize" />}
                   {craftTool && isKitchenItemInteractionState(ts) ? (
                     <GestureDetector gesture={createCookingItemGesture(CRAFT_TOOL_SLOT, craftTool.id)}>
                       <View style={styles.soupSlotTouch}>
@@ -4682,16 +4789,27 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                   ) : null}
                 </View>
                 {/* Result / Recipe slot — output only, never a drag target */}
-                <View ref={craftResultSlotRef} collapsable={false} style={styles.craftResultSlotFrame}>
+                <View ref={craftResultSlotRef} collapsable={false} style={styles.craftResultSlotFrame} onLayout={(event) => {
+                  const { width, height } = event.nativeEvent.layout;
+                  const measured = Math.min(width, height);
+                  if (measured > 0 && measured !== recipeSlotSize) setRecipeSlotSize(measured);
+                }}>
                   <TouchableOpacity
                     style={[
                       styles.craftSlot,
                       styles.craftResultSlotFill,
                       styles.craftSlotRecipe,
-                      craftResult ? { borderColor: "#5A9F5A", borderWidth: 1.5 } : {},
+                      craftResult
+                        ? { borderColor: "#5A9F5A", borderWidth: 1.5 }
+                        : styles.craftSlotRecipeBookPlaceholder,
                     ]}
                     activeOpacity={0.7}
-                    onPress={() => !craftResult && !tutActive && setShowRecipes(true)}
+                    onPress={() => {
+                      if (!craftResult && !tutActive) {
+                        setRecipeCategory(null);
+                        setShowRecipes(true);
+                      }
+                    }}
                     disabled={!!craftResult}
                   >
                     {craftResult ? (
@@ -4704,7 +4822,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                         {previewDiscovered && craftResult.quantity > 1 && <Text style={styles.tableItemQty}>{craftResult.quantity}</Text>}
                       </View>
                     ) : (
-                      <Text style={styles.craftSlotText}>Recipe</Text>
+                      <Image source={ITEM_IMAGES.recipe_book} style={[styles.recipeBookSlotImage, { width: recipeSlotSize * 0.78 + 13, height: recipeSlotSize * 0.78 + 13 }]} resizeMode="contain" resizeMethod="resize" />
                     )}
                   </TouchableOpacity>
                 </View>
@@ -4936,7 +5054,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
               {renderLocContent(isEffectivelyActive)}
               {isGardenBtn && harvestReady && <LocationStatusBadge kind="harvest" />}
               {loc.id === "dormitory" && sleepReady && <LocationStatusBadge kind="sleep" />}
-              {loc.id === "explore" && merchantPresent && <LocationStatusBadge kind="merchant" />}
+              {loc.id === "explore" && (receptionistPresent ? <LocationStatusBadge kind="receptionist" /> : merchantPresent ? <LocationStatusBadge kind="merchant" /> : null)}
             </TouchableOpacity>
           );
         })}
@@ -5001,7 +5119,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
           characterScale={kitchenDialogPlayerSpeaking ? getPlayerDialogScale(playerAvatarId) : RUPERT_DIALOG_SCALE}
           speakerName={kitchenDialogSpeaker}
           bottomOffset={ts === "NAME_INPUT" && keyboardH > 0 ? keyboardH : 0}
-          onSkip={dlgActive && dlgIdx < dlgLines.length - 1 ? skipDialogToLastLine : undefined}
+          onSkip={dlgActive ? (dlgIdx < dlgLines.length - 1 ? skipDialogToLastLine : advanceDialog) : undefined}
           actions={ts === "NAME_INPUT" && nameInputOpen ? (
             <View style={styles.nameDialogActions}>
               <TextInput
@@ -5075,7 +5193,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
         line={escortDialogLines[escortDialogIndex] ?? null}
         choices={escortDialogChoices()}
         onContinue={advanceEscortKitchenDialog}
-        onSkip={escortDialogIndex < escortDialogLines.length - 1 ? skipEscortKitchenDialog : undefined}
+        onSkip={escortDialogIndex < escortDialogLines.length - 1 ? skipEscortKitchenDialog : advanceEscortKitchenDialog}
       />
 
       {/* ── Menu Modal */}
@@ -5225,14 +5343,16 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
                   <View key={`build-${plotNumber}`} style={[styles.upgradeCard, unavailable && styles.upgradeCardUnavailable, unlocked && styles.upgradeCardCompleted]}>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.upgradeName}>Build {ordinal} Plot</Text>
-                      <Text style={styles.upgradeCost}>
-                        {plotNumber === 2 ? "4 Wood + 4 Stone" : "8 Wood + 8 Stone + 4 Nails"}
-                      </Text>
+                      <View style={styles.upgradeRequirements}>
+                        <UpgradeRequirement label="Wood" have={sharedResources.wood} need={plotNumber === 2 ? SECOND_PLOT_WOOD_COST : LATER_PLOT_WOOD_COST} />
+                        <UpgradeRequirement label="Stone" have={sharedResources.stone} need={plotNumber === 2 ? SECOND_PLOT_STONE_COST : LATER_PLOT_STONE_COST} />
+                        {plotNumber > 2 && <UpgradeRequirement label="Nails" have={sharedResources.nails} need={LATER_PLOT_NAILS_COST} />}
+                      </View>
                       {!prerequisiteUnlocked && <Text style={styles.upgradeLockedText}>Requires the previous plot.</Text>}
                     </View>
                     <TouchableOpacity
-                      style={[styles.upgradeBuildBtn, unlocked && styles.upgradeBuildBtnDone, !prerequisiteUnlocked && styles.upgradeBuildBtnDisabled]}
-                      disabled={upgradeBusy || unlocked || !prerequisiteUnlocked}
+                      style={[styles.upgradeBuildBtn, unlocked && styles.upgradeBuildBtnDone, unavailable && styles.upgradeBuildBtnDisabled]}
+                      disabled={upgradeBusy || unlocked || unavailable}
                       onPress={() => { void handleGardenPlotBuild(plotNumber); }}
                       activeOpacity={0.8}
                     >
@@ -5254,14 +5374,20 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
                   <View key={`yield-${plotNumber}`} style={[styles.upgradeCard, !completed && !hasFertilizer && styles.upgradeCardUnavailable, completed && styles.upgradeCardCompleted]}>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.upgradeName}>Upgrade {ordinal} Plot</Text>
-                      <Text style={styles.upgradeCost}>
-                        {level === 0 ? "5× Standard Fertilizer" : level === 1 ? "5× Premium Fertilizer" : "Maximum level"}
-                      </Text>
+                      {completed ? <Text style={styles.upgradeCost}>Maximum level</Text> : (
+                        <View style={styles.upgradeRequirements}>
+                          <UpgradeRequirement
+                            label={level === 0 ? "Standard Fertilizer" : "Premium Fertilizer"}
+                            have={level === 0 ? gardenFertilizerQuantities.standard : gardenFertilizerQuantities.premium}
+                            need={level === 0 ? PLOT_STANDARD_FERTILIZER_COST : PLOT_PREMIUM_FERTILIZER_COST}
+                          />
+                        </View>
+                      )}
                       <Text style={styles.upgradeOwned}>Minimum Yield: {level === 0 ? 5 : level === 1 ? 7 : 10}</Text>
                     </View>
                     <TouchableOpacity
-                      style={[styles.upgradeBuildBtn, level >= 2 && styles.upgradeBuildBtnDone]}
-                      disabled={upgradeBusy || level >= 2}
+                      style={[styles.upgradeBuildBtn, completed && styles.upgradeBuildBtnDone, !completed && !hasFertilizer && styles.upgradeBuildBtnDisabled]}
+                      disabled={upgradeBusy || completed || !hasFertilizer}
                       onPress={() => { void handlePlotYieldUpgrade(plotNumber); }}
                       activeOpacity={0.8}
                     >
@@ -5306,12 +5432,18 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
                 ]}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.upgradeName}>New table and chairs.</Text>
-                    <Text style={styles.upgradeCost}>15 Wood + 10 Nails + 1 Paint</Text>
+                    <View style={styles.upgradeRequirements}>
+                      <UpgradeRequirement label="Wood" have={sharedResources.wood} need={TABLE_CHAIRS_WOOD_COST} />
+                      <UpgradeRequirement label="Nails" have={sharedResources.nails} need={TABLE_CHAIRS_NAILS_COST} />
+                      <UpgradeRequirement label="Paint" have={sharedResources.paint} need={TABLE_CHAIRS_PAINT_COST} />
+                    </View>
                     <Text style={styles.upgradeOwned}>Attract more guests · Maximum guests +1</Text>
                   </View>
                   <TouchableOpacity
-                    style={[styles.upgradeBuildBtn, postGuestState.tableAndChairsCompletedDaySerial !== null && styles.upgradeBuildBtnDone]}
-                    disabled={upgradeBusy || postGuestState.tableAndChairsCompletedDaySerial !== null}
+                    style={[styles.upgradeBuildBtn, postGuestState.tableAndChairsCompletedDaySerial !== null && styles.upgradeBuildBtnDone, postGuestState.tableAndChairsCompletedDaySerial === null && (
+                      sharedResources.wood < TABLE_CHAIRS_WOOD_COST || sharedResources.nails < TABLE_CHAIRS_NAILS_COST || sharedResources.paint < TABLE_CHAIRS_PAINT_COST
+                    ) && styles.upgradeBuildBtnDisabled]}
+                    disabled={upgradeBusy || postGuestState.tableAndChairsCompletedDaySerial !== null || sharedResources.wood < TABLE_CHAIRS_WOOD_COST || sharedResources.nails < TABLE_CHAIRS_NAILS_COST || sharedResources.paint < TABLE_CHAIRS_PAINT_COST}
                     onPress={() => { void handleTableAndChairsUpgrade(); }}
                     activeOpacity={0.8}
                   >
@@ -5332,12 +5464,12 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
                     <View key={`kitchen-table-${level}`} style={[styles.upgradeCard, !unlocked && !affordable && styles.upgradeCardUnavailable, unlocked && styles.upgradeCardCompleted]}>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.upgradeName}>{names[level - 1]}</Text>
-                        <CurrencyPrice totalCopper={KITCHEN_TABLE_UPGRADE_SILVER_COSTS[level - 1] * COPPER_PER_SILVER} style={styles.upgradePrice} textStyle={styles.upgradeCost} />
+                        <CurrencyPrice totalCopper={KITCHEN_TABLE_UPGRADE_SILVER_COSTS[level - 1] * COPPER_PER_SILVER} style={styles.upgradePrice} textStyle={!affordable && !unlocked ? styles.upgradeRequirementMissing : styles.upgradeCost} />
                         <Text style={styles.upgradeOwned}>Kitchen Table · +1 row · {2 + level}×{KITCHEN_TABLE_COLUMNS} slots</Text>
                       </View>
                       <TouchableOpacity
-                        style={[styles.upgradeBuildBtn, unlocked && styles.upgradeBuildBtnDone]}
-                        disabled={upgradeBusy || unlocked}
+                        style={[styles.upgradeBuildBtn, unlocked && styles.upgradeBuildBtnDone, !unlocked && !affordable && styles.upgradeBuildBtnDisabled]}
+                        disabled={upgradeBusy || unlocked || !affordable}
                         onPress={() => { void handleKitchenTableUpgrade(level); }}
                         activeOpacity={0.8}
                       >
@@ -5356,16 +5488,18 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
                 </View>
               )}
 
-              {upgradeCategory === "tavern" && guestAreaComplete && (
+              {upgradeCategory === "tavern" && guestAreaComplete && aleQuestUnlocked && (
                 <View style={[styles.upgradeCard, !postGuestState.aleServiceUnlocked && !hasQuestItems(ALE_QUEST_ITEMS) && styles.upgradeCardUnavailable, postGuestState.aleServiceUnlocked && styles.upgradeCardCompleted]}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.upgradeName}>Serve Ale</Text>
-                    <Text style={styles.upgradeCost}>{ALE_QUEST_ITEMS.map((item) => item.name).join(" · ")}</Text>
+                    <View style={styles.upgradeRequirements}>
+                      {ALE_QUEST_ITEMS.map((item) => <UpgradeRequirement key={item.id} label={item.name} have={countBagItem(item.id)} need={1} />)}
+                    </View>
                     <View style={styles.upgradeOwnedRow}><Text style={styles.upgradeOwnedInline}>Standard Ale · Unlimited ·</Text><CurrencyPrice totalCopper={5} textStyle={styles.upgradeOwnedInline} /></View>
                   </View>
                   <TouchableOpacity
-                    style={[styles.upgradeBuildBtn, postGuestState.aleServiceUnlocked && styles.upgradeBuildBtnDone]}
-                    disabled={upgradeBusy || postGuestState.aleServiceUnlocked}
+                    style={[styles.upgradeBuildBtn, postGuestState.aleServiceUnlocked && styles.upgradeBuildBtnDone, !postGuestState.aleServiceUnlocked && !hasQuestItems(ALE_QUEST_ITEMS) && styles.upgradeBuildBtnDisabled]}
+                    disabled={upgradeBusy || postGuestState.aleServiceUnlocked || !hasQuestItems(ALE_QUEST_ITEMS)}
                     onPress={() => { void handleTavernDrinkUpgrade("serve_ale"); }}
                     activeOpacity={0.8}
                   >
@@ -5378,12 +5512,14 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
                 <View style={[styles.upgradeCard, !postGuestState.honeyMeadServiceUnlocked && !hasQuestItems(HONEY_MEAD_QUEST_ITEMS) && styles.upgradeCardUnavailable, postGuestState.honeyMeadServiceUnlocked && styles.upgradeCardCompleted]}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.upgradeName}>Serve Honey Mead</Text>
-                    <Text style={styles.upgradeCost}>{HONEY_MEAD_QUEST_ITEMS.map((item) => item.name).join(" · ")}</Text>
+                    <View style={styles.upgradeRequirements}>
+                      {HONEY_MEAD_QUEST_ITEMS.map((item) => <UpgradeRequirement key={item.id} label={item.name} have={countBagItem(item.id)} need={1} />)}
+                    </View>
                     <View style={styles.upgradeOwnedRow}><Text style={styles.upgradeOwnedInline}>Honey Mead · Unlimited ·</Text><CurrencyPrice totalCopper={11} textStyle={styles.upgradeOwnedInline} /></View>
                   </View>
                   <TouchableOpacity
-                    style={[styles.upgradeBuildBtn, postGuestState.honeyMeadServiceUnlocked && styles.upgradeBuildBtnDone]}
-                    disabled={upgradeBusy || postGuestState.honeyMeadServiceUnlocked}
+                    style={[styles.upgradeBuildBtn, postGuestState.honeyMeadServiceUnlocked && styles.upgradeBuildBtnDone, !postGuestState.honeyMeadServiceUnlocked && !hasQuestItems(HONEY_MEAD_QUEST_ITEMS) && styles.upgradeBuildBtnDisabled]}
+                    disabled={upgradeBusy || postGuestState.honeyMeadServiceUnlocked || !hasQuestItems(HONEY_MEAD_QUEST_ITEMS)}
                     onPress={() => { void handleTavernDrinkUpgrade("serve_honey_mead"); }}
                     activeOpacity={0.8}
                   >
@@ -5392,8 +5528,6 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
                 </View>
               )}
             </ScrollView>
-
-            {upgradeMessage && <Text style={styles.upgradeMessage}>{upgradeMessage}</Text>}
 
             <TouchableOpacity style={styles.closeBtn} onPress={closeRupertUpgrades} activeOpacity={0.8}>
               <Text style={styles.closeBtnText}>Close</Text>
@@ -5407,41 +5541,68 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
         <View style={styles.modalOverlay}>
           <View style={styles.recipePanel}>
             <View style={styles.recipeTitleRow}>
-              <Ionicons name="book-outline" size={20} color="#C4943A" />
-              <Text style={styles.panelTitle}> Recipes</Text>
+              {recipeCategory ? (
+                <TouchableOpacity style={styles.recipeBackButton} onPress={() => setRecipeCategory(null)} activeOpacity={0.75}>
+                  <Ionicons name="chevron-back" size={22} color="#C4943A" />
+                </TouchableOpacity>
+              ) : (
+                <Image source={ITEM_IMAGES.recipe_book} style={styles.recipeBookTitleImage} resizeMode="contain" resizeMethod="resize" />
+              )}
+              <Text style={styles.panelTitle}> {RECIPE_CATEGORIES.find((category) => category.id === recipeCategory)?.label ?? "Recipes"}</Text>
             </View>
             <View style={styles.divider} />
             <ScrollView style={styles.recipeList} contentContainerStyle={styles.recipeListContent}>
-              {COOKING_RECIPES.filter((recipe) => discoveredRecipeIds.includes(recipe.id)).map((recipe) => (
-                <View key={recipe.id} style={styles.recipeRow}>
-                  {ITEM_IMAGES[recipe.outputId] ? (
-                    <Image source={ITEM_IMAGES[recipe.outputId]} style={styles.recipeImage} resizeMode="contain" resizeMethod="resize" />
-                  ) : (
-                    <Ionicons name="restaurant-outline" size={30} color="#C4943A" />
-                  )}
-                  <View style={styles.recipeInfo}>
-                    <Text style={styles.recipeName}>{recipe.name}</Text>
-                    <Text style={styles.recipeTags}>Stage {recipe.stage} · {recipe.rarity} · {recipe.unlock}</Text>
-                    <Text style={styles.recipeIngredients}>
-                      {recipe.ingredients.map((item) => `${item.quantity}× ${ITEM_CATALOG[item.id]?.name ?? item.id}`).join(" + ")}
-                      {recipe.toolId ? ` · Tool: ${recipe.toolId === "oldpot" ? "Old Pot or better" : (ITEM_CATALOG[recipe.toolId]?.name ?? recipe.toolId)}` : ""}
-                    </Text>
-                    <View style={styles.recipeEffectsRow}>
-                      <CurrencyPrice totalCopper={recipe.sellPriceCopper} textStyle={styles.recipeEffects} />
-                      <Text style={styles.recipeEffects}>· +{recipe.staminaRecovery} Stamina{recipe.lifeRecovery > 0 ? ` · +${recipe.lifeRecovery} Life` : ""}</Text>
-                    </View>
-                    <Text style={styles.recipeTags}>{recipe.tags.join(" · ")}</Text>
-                    {recipe.buff && (
-                      <Text style={styles.recipeEffects}>{recipe.buff.name} · {recipe.buff.durationDays} day</Text>
-                    )}
-                  </View>
+              {!recipeCategory ? (
+                <View style={styles.recipeCategoryGrid}>
+                  {RECIPE_CATEGORIES.map((category) => {
+                    const allRecipes = COOKING_RECIPES.filter((recipe) => recipeCategoryForTool(recipe.toolId) === category.id);
+                    const discoveredCount = allRecipes.filter((recipe) => discoveredRecipeIds.includes(recipe.id)).length;
+                    return (
+                      <TouchableOpacity key={category.id} style={styles.recipeCategoryCard} onPress={() => setRecipeCategory(category.id)} activeOpacity={0.75}>
+                        <Image source={category.image} style={styles.recipeCategoryImage} resizeMode="contain" resizeMethod="resize" />
+                        <Text style={styles.recipeCategoryName}>{category.label}</Text>
+                        <Text style={styles.recipeCategoryCount}>{discoveredCount}/{allRecipes.length} discovered</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
-              ))}
-              {discoveredRecipeIds.length === 0 && (
-                <Text style={styles.recipeEmpty}>No recipes discovered yet.{"\n"}Try combining ingredients in the kitchen.</Text>
-              )}
+              ) : (() => {
+                const allRecipes = COOKING_RECIPES.filter((recipe) => recipeCategoryForTool(recipe.toolId) === recipeCategory);
+                const discoveredRecipes = allRecipes.filter((recipe) => discoveredRecipeIds.includes(recipe.id));
+                if (discoveredRecipes.length === 0) {
+                  return <Text style={styles.recipeEmpty}>{allRecipes.length === 0 ? "No recipes are currently available in this category." : "No recipes discovered in this category yet."}{"\n"}Try combining ingredients in the kitchen.</Text>;
+                }
+                return discoveredRecipes.map((recipe) => {
+                  const recipeNumber = allRecipes.findIndex((candidate) => candidate.id === recipe.id) + 1;
+                  return (
+                    <View key={recipe.id} style={styles.recipeRow}>
+                      {ITEM_IMAGES[recipe.outputId] ? (
+                        <Image source={ITEM_IMAGES[recipe.outputId]} style={styles.recipeImage} resizeMode="contain" resizeMethod="resize" />
+                      ) : (
+                        <Ionicons name="restaurant-outline" size={30} color="#C4943A" />
+                      )}
+                      <View style={styles.recipeInfo}>
+                        <Text style={styles.recipeName}>{recipeNumber}. {recipe.name}</Text>
+                        <Text style={styles.recipeTags}>Stage {recipe.stage} · {recipe.rarity} · {recipe.unlock}</Text>
+                        <Text style={styles.recipeIngredients}>
+                          {recipe.ingredients.map((item) => `${item.quantity}× ${ITEM_CATALOG[item.id]?.name ?? item.id}`).join(" + ")}
+                          {recipe.toolId ? ` · Tool: ${recipe.toolId === "oldpot" ? "Old Pot or better" : (ITEM_CATALOG[recipe.toolId]?.name ?? recipe.toolId)}` : ""}
+                        </Text>
+                        <View style={styles.recipeEffectsRow}>
+                          <CurrencyPrice totalCopper={recipe.sellPriceCopper} textStyle={styles.recipeEffects} />
+                          <Text style={styles.recipeEffects}>· +{recipe.staminaRecovery} Stamina{recipe.lifeRecovery > 0 ? ` · +${recipe.lifeRecovery} Life` : ""}</Text>
+                        </View>
+                        <Text style={styles.recipeTags}>{recipe.tags.join(" · ")}</Text>
+                        {recipe.buff && (
+                          <Text style={styles.recipeEffects}>{recipe.buff.name} · {recipe.buff.durationDays} day</Text>
+                        )}
+                      </View>
+                    </View>
+                  );
+                });
+              })()}
             </ScrollView>
-            <TouchableOpacity style={styles.closeBtn} onPress={() => setShowRecipes(false)} activeOpacity={0.8}>
+            <TouchableOpacity style={styles.closeBtn} onPress={() => { setShowRecipes(false); setRecipeCategory(null); }} activeOpacity={0.8}>
               <Text style={styles.closeBtnText}>Close</Text>
             </TouchableOpacity>
           </View>
@@ -5587,6 +5748,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
           </Animated.View>
         </View>
       )}
+      {upgradeMessage && <View pointerEvents="none" style={styles.upgradeFloatingWrap}><Text style={styles.upgradeFloatingText}>{upgradeMessage}</Text></View>}
 
       {/* ── Player thought bubble */}
       {playerBubble && (() => {
@@ -5650,20 +5812,21 @@ const styles = StyleSheet.create({
   // Header
   header: {
     flexDirection: "column",
-    paddingHorizontal: 12,
+    paddingLeft: 4,
+    paddingRight: 12,
     paddingBottom: 6,
     backgroundColor: "rgba(14, 7, 1, 0.84)",
     borderBottomWidth: 1,
     borderBottomColor: "rgba(196, 148, 58, 0.22)",
     zIndex: 2,
   },
-  headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
-  leftHeader: { flex: 1, gap: 5 },
+  headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 6 },
+  leftHeader: { flex: 1, gap: 4, zIndex: 50, elevation: 20 },
   statBarOuter: {
     flexDirection: "row", alignItems: "center",
     backgroundColor: "rgba(10,5,0,0.82)", borderRadius: 18,
     borderWidth: 1.5, borderColor: "rgba(130,90,20,0.50)",
-    paddingHorizontal: 10, paddingVertical: 5, gap: 7,
+    paddingHorizontal: 6, paddingVertical: 3, gap: 4,
     overflow: "visible",
   },
   statBarTrackWrap: { flex: 1, height: 9, position: "relative", overflow: "visible" },
@@ -5682,11 +5845,11 @@ const styles = StyleSheet.create({
   plusFloat: {
     position: "absolute", right: -8, top: 12,
     backgroundColor: "rgba(196,148,58,0.92)", borderRadius: 10,
-    paddingHorizontal: 7, paddingVertical: 2, zIndex: 10,
+    paddingHorizontal: 7, paddingVertical: 2, zIndex: 1000, elevation: 30,
   },
   plusFloatText: { color: "#FFF", fontSize: 12, fontFamily: "Oldenburg", fontWeight: "700" },
   locationName: { color: "#F0E8D5", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 1, textAlign: "center", marginTop: 4 },
-  rightHeaderColumn: { alignItems: "flex-end", alignSelf: "flex-start", gap: 4, marginLeft: 10, transform: [{ translateY: -2 }] },
+  rightHeaderColumn: { alignItems: "flex-end", alignSelf: "flex-start", gap: 4, marginLeft: 2, transform: [{ translateY: -2 }] },
   rightHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
   dayBadge: {
     width: 38, height: 38, borderRadius: 8,
@@ -5752,9 +5915,13 @@ const styles = StyleSheet.create({
     minHeight: 44, alignItems: "center", justifyContent: "center",
   },
   craftSlotTool: { borderColor: "rgba(130,95,45,0.55)", backgroundColor: "rgba(25,14,4,0.95)" },
+  toolSlotHovered: { borderColor: "#FFFFFF", borderWidth: 2, backgroundColor: "rgba(255,255,255,0.12)" },
+  baseHandTool: { width: "72%", height: "72%", opacity: 0.78 },
   craftResultSlotFrame: { flex: 1, aspectRatio: 1, minHeight: 44, alignSelf: "stretch" },
-  craftResultSlotFill: { flex: 1, width: "100%", minHeight: 44 },
+  craftResultSlotFill: { width: "100%", height: "100%", minHeight: 44 },
   craftSlotRecipe: { borderColor: "rgba(130,95,45,0.55)", backgroundColor: "rgba(25,14,4,0.95)" },
+  craftSlotRecipeBookPlaceholder: { borderColor: "rgba(25,14,4,0.95)" },
+  recipeBookSlotImage: { alignSelf: "center" },
   craftSlotCraft: { borderWidth: 2, borderColor: "#C4943A", backgroundColor: "rgba(30,17,4,0.97)" },
   craftSlotText: { color: "rgba(200,165,90,0.70)", fontSize: 10, fontFamily: "Oldenburg", textAlign: "center" },
   craftBoldText: { color: "#F5E6C8", fontSize: 13, fontFamily: "Oldenburg", fontWeight: "bold", letterSpacing: 0.5, textAlign: "center" },
@@ -6034,6 +6201,9 @@ const styles = StyleSheet.create({
   },
   upgradeName: { color: "#C4943A", fontSize: 14, fontFamily: "Oldenburg", marginBottom: 5 },
   upgradeCost: { color: "#F0E8D5", fontSize: 12, fontFamily: "Oldenburg" },
+  upgradeRequirements: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 },
+  upgradeRequirement: { color: "rgba(240,232,213,0.78)", fontSize: 12, fontFamily: "Oldenburg" },
+  upgradeRequirementMissing: { color: "#E0523F", fontWeight: "700" },
   upgradePrice: { alignSelf: "flex-start", marginTop: 2 },
   upgradeOwned: { color: "rgba(240,232,213,0.52)", fontSize: 10, fontFamily: "Oldenburg", marginTop: 5 },
   upgradeOwnedRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 4, marginTop: 5 },
@@ -6065,9 +6235,22 @@ const styles = StyleSheet.create({
     borderWidth: 1.5, borderColor: "rgba(196,148,58,0.38)", alignItems: "center",
     shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.6, shadowRadius: 16, elevation: 24,
   },
-  recipeTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "center" },
+  recipeTitleRow: { width: "100%", minHeight: 28, flexDirection: "row", alignItems: "center", justifyContent: "center" },
+  recipeBookTitleImage: { width: 36, height: 30 },
+  upgradeFloatingWrap: { ...StyleSheet.absoluteFill, zIndex: 2100, alignItems: "center", justifyContent: "center", paddingHorizontal: 28 },
+  upgradeFloatingText: { color: "#FFF1D2", fontFamily: "Oldenburg", fontSize: 12, textAlign: "center", paddingHorizontal: 18, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: "#C4943A", backgroundColor: "rgba(28,13,3,0.96)" },
+  recipeBackButton: { position: "absolute", left: 0, width: 40, height: 40, alignItems: "center", justifyContent: "center" },
   recipeList: { width: "100%", maxHeight: 430 },
   recipeListContent: { gap: 10, paddingVertical: 4 },
+  recipeCategoryGrid: { width: "100%", flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  recipeCategoryCard: {
+    width: "48%", minHeight: 142, alignItems: "center", justifyContent: "center", gap: 5,
+    padding: 10, borderRadius: 14, borderWidth: 1, borderColor: "rgba(196,148,58,0.32)",
+    backgroundColor: "rgba(48,27,7,0.68)",
+  },
+  recipeCategoryImage: { width: 76, height: 76 },
+  recipeCategoryName: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 12, textAlign: "center" },
+  recipeCategoryCount: { color: "rgba(196,148,58,0.78)", fontSize: 9, fontVariant: ["tabular-nums"] },
   recipeRow: {
     width: "100%", minHeight: 78, flexDirection: "row", alignItems: "center", gap: 12,
     padding: 10, borderRadius: 12, borderWidth: 1, borderColor: "rgba(196,148,58,0.28)",

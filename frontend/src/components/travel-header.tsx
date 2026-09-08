@@ -8,6 +8,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import CurrencyHud from "@/src/components/CurrencyHud";
 import StatusModal from "@/src/components/StatusModal";
+import QuestBookButton from "@/src/components/quest-book";
 import { DEFAULT_BAG, PLAYER_BAG_KEY, normalizePlayerBagData, type PlayerBagData } from "@/src/game/item-system";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
 import { PLAYER_AVATAR_KEY, getPlayerAvatarForStamina, normalizePlayerAvatarId, type PlayerAvatarId } from "@/src/game/player-avatar";
@@ -84,6 +85,7 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
               <Text style={styles.statBarText}>{life}/{stats.maximumLife}</Text>
             </View>
           </View>
+          <QuestBookButton size={42} onBagUpdated={setBag} />
           <View style={styles.rightHeaderColumn}>
             <View style={styles.rightHeader}>
               <View style={styles.dayBadge}><Text style={styles.dayText}>{DAYS[dayIdx]}</Text></View>
@@ -163,18 +165,19 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
 
 const styles = StyleSheet.create({
   header: {
-    paddingHorizontal: 12,
+    paddingLeft: 4,
+    paddingRight: 12,
     paddingBottom: 6,
     backgroundColor: "rgba(14,7,1,0.85)",
     borderBottomWidth: 1,
     borderBottomColor: "rgba(196,148,58,0.20)",
     zIndex: 4,
   },
-  headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
-  leftHeader: { flex: 1, gap: 5 },
+  headerTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 6 },
+  leftHeader: { flex: 1, gap: 4, zIndex: 20 },
   statBarOuter: {
     flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 18, borderWidth: 1.5,
-    borderColor: "rgba(130,90,20,0.50)", backgroundColor: "rgba(10,5,0,0.82)", paddingHorizontal: 10, paddingVertical: 5,
+    borderColor: "rgba(130,90,20,0.50)", backgroundColor: "rgba(10,5,0,0.82)", paddingHorizontal: 6, paddingVertical: 3,
   },
   statBarTrack: { flex: 1, height: 9, borderRadius: 5, backgroundColor: "#2A1800", overflow: "hidden" },
   staminaFill: { height: "100%", backgroundColor: "#C4943A", borderRadius: 5 },

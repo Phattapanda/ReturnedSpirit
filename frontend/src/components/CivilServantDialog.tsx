@@ -19,6 +19,7 @@ export default function CivilServantDialog({ visible, image, text, busy = false,
       visible
       characterSource={image}
       speakerName="Civil Servant"
+      onSkip={busy ? undefined : onContinue}
       onCharacterLayout={(layout) => onCharacterAnchorChange?.({
         x: layout.x + layout.width * 0.5,
         y: layout.y + layout.height * 0.42,
