@@ -15,12 +15,13 @@ import { ITEM_ATTRIBUTE, ITEM_CATALOG, PLAYER_BAG_KEY, normalizePlayerBagData, p
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
 import { setCoachmanEscortPhase } from "@/src/game/coachman-escort-system";
 import { unlockNextCityAfterEscort } from "@/src/game/travel-system";
-import { PLAYER_AVATAR_KEY, normalizePlayerAvatarId } from "@/src/game/player-avatar";
+import { PLAYER_AVATAR_KEY, normalizePlayerAvatarId, type PlayerAvatarId } from "@/src/game/player-avatar";
 import { COACHMAN_DIALOG_SCALE, DIALOG_CHARACTER_ASSETS, PLAYER_DIALOG_SCALE, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
 import SceneBackground from "@/src/components/SceneBackground";
 import { addKarmaPoints } from "@/src/game/progression";
 import RunEndingOverlay from "@/src/components/RunEndingOverlay";
-import { prepareNextRun } from "@/src/game/next-run";
+import type { NextRunBonuses } from "@/src/game/next-run";
+import { beginChosenNextRun } from "@/src/game/death-angel-system";
 
 const COACHMAN = DIALOG_CHARACTER_ASSETS.coachman;
 const WOLF = require("../assets/images/wild_wolf.png");
@@ -355,15 +356,19 @@ export default function CoachmanEscortScreen() {
     });
   }
 
-  async function startFollowingRun(takeBreak: boolean) {
+  async function startFollowingRun(bonuses: NextRunBonuses, avatarId: PlayerAvatarId) {
     if (runTransitionBusy) return;
     setRunTransitionBusy(true);
     try {
       const rawSlot = await AsyncStorage.getItem("@game:active_slot");
       const slotNumber = Math.max(1, Number.parseInt(rawSlot ?? "1", 10) || 1);
-      const next = await prepareNextRun(slotNumber);
-      if (takeBreak) router.replace("/");
-      else router.replace({ pathname: "/intro", params: { characterName: next.playerName, slotId: String(slotNumber) } });
+      await AsyncStorage.setItem(PLAYER_AVATAR_KEY, String(avatarId));
+      const result = await beginChosenNextRun(slotNumber, bonuses);
+      if (result !== "ok") {
+        setRunTransitionBusy(false);
+        return;
+      }
+      router.replace({ pathname: "/intro", params: { slotId: String(slotNumber) } });
     } finally {
       setRunTransitionBusy(false);
     }
@@ -433,7 +438,7 @@ export default function CoachmanEscortScreen() {
     </> : null}
     <Animated.View pointerEvents={phase === "journey" || phase === "post" || phase === "leaving" ? "auto" : "none"} style={[StyleSheet.absoluteFill, styles.black, { opacity: blackFade }]} />
     <StoryDialogOverlay visible={!!dialogLine} line={dialogLine} onContinue={() => { void advanceDialog(); }} onSkip={dialogIndex < activeLines.length - 1 ? skipDialogToLastLine : () => { void advanceDialog(); }} />
-    <RunEndingOverlay visible={isWalking && life <= 0} busy={runTransitionBusy} onNewRun={() => { void startFollowingRun(false); }} onTakeBreak={() => { void startFollowingRun(true); }} />
+    <RunEndingOverlay visible={isWalking && life <= 0} busy={runTransitionBusy} onStartNextRun={(bonuses, avatarId) => { void startFollowingRun(bonuses, avatarId); }} />
   </View>;
 }
 

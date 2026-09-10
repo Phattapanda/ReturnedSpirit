@@ -564,7 +564,7 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
   beef:        { name: "Red Meat",         description: "Common red meat used in everyday cooking.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   fish:        { name: "Fish Meat",        description: "Fresh fish meat used for cooking.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   tomato:      { name: "Tomato",           description: "A ripe tomato used for cooking.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
-  snowberry:   { name: "Snowberry",        description: "A pale winter berry reserved for future recipes.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  snowberry:   { name: "Snowberry",        description: "A pale winter berry.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   ember_chicken_meat: { name: "Ember Chicken Meat", description: "Rare monster meat radiating heat.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   ember_chicken_egg:  { name: "Ember Chicken Egg",  description: "A rare monster egg radiating heat.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   bucket:      { name: "Empty Bucket",     description: "A sturdy wooden bucket. It needs to be filled.", attributes: [ITEM_ATTRIBUTE.VESSEL] },

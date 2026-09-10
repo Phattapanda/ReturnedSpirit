@@ -19,6 +19,7 @@ import {
   setActiveGuest,
   subscribeFavorRewardDialog,
   type GuestId,
+  type GuestPreferenceDiscoveryResult,
   type GuestVisitView,
 } from "@/src/game/guest-system";
 import { ITEM_CATALOG, type MealTag } from "@/src/game/item-system";
@@ -34,6 +35,7 @@ type GuestCardProps = {
     guest: GuestVisitView,
     action: GuestServiceAction,
     source?: GuestServiceSourcePoint,
+    preferenceDiscovery?: GuestPreferenceDiscoveryResult,
   ) => boolean | void | Promise<boolean | void>;
   enabledService?: GuestServiceAction | readonly GuestServiceAction[] | null;
   sellPriceCopper?: number | null;
@@ -434,6 +436,7 @@ type DiningGuestAreaProps = {
     guest: GuestVisitView,
     action: GuestServiceAction,
     source?: GuestServiceSourcePoint,
+    preferenceDiscovery?: GuestPreferenceDiscoveryResult,
   ) => boolean | void | Promise<boolean | void>;
   onFavorRewardDialog?: (guest: GuestVisitView, text: string) => void;
 };
@@ -517,15 +520,17 @@ export default function DiningGuestArea({
     action: GuestServiceAction,
     source?: GuestServiceSourcePoint,
   ) {
-    const completed = await onService?.(guest, action, source);
+    let preferenceDiscovery: GuestPreferenceDiscoveryResult | undefined;
     if (action === "talk") {
       const discovery = await discoverGuestPreference(guest.profile.id);
+      preferenceDiscovery = discovery;
       if (discovery.outcome === "learned") {
         setGuests((current) => current.map((entry) => entry.profile.id === guest.profile.id
           ? { ...entry, learnedPreferenceFacts: discovery.learnedFactKeys }
           : entry));
       }
     }
+    const completed = await onService?.(guest, action, source, preferenceDiscovery);
     if (action === "exchange" && completed === true) {
       setGuests((current) => current.map((entry) => (
         entry.profile.id === guest.profile.id ? { ...entry, exchangeOffer: null } : entry

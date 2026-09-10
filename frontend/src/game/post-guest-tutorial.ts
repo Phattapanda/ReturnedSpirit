@@ -46,18 +46,17 @@ export const LATER_PLOT_STONE_COST = 8;
 export const LATER_PLOT_NAILS_COST = 4;
 export const PLOT_STANDARD_FERTILIZER_COST = 5;
 export const PLOT_PREMIUM_FERTILIZER_COST = 5;
-export const TABLE_CHAIRS_WOOD_COST = 15;
-export const TABLE_CHAIRS_NAILS_COST = 10;
-export const TABLE_CHAIRS_PAINT_COST = 1;
 export const GUEST_AREA_CLEAN_STEPS_REQUIRED = 5;
 export const GUEST_AREA_CLEAN_STAMINA_COST = 10;
+export const OUTSIDE_CLEAN_STEPS_REQUIRED = 10;
+export const OUTSIDE_CLEAN_STAMINA_COST = 15;
 
 const CURRENT_STAMINA_KEY = "@game:stamina";
 const STAMINA_SPENT_TODAY_KEY = "@game:stamina_spent_today";
 const GUEST_STATE_KEY = "@game:guest_state";
 
 export type PostGuestTutorialState = {
-  version: 6;
+  version: 7;
   farmerGiftClaimed: boolean;
   secondPlotThoughtSeen: boolean;
   upgradeIntroSeen: boolean;
@@ -67,6 +66,7 @@ export type PostGuestTutorialState = {
   plotYieldUpgradeLevels: Record<string, number>;
   guestAreaCleanSteps: number;
   guestAreaCompletedDaySerial: number | null;
+  outsideCleanSteps: number;
   tableAndChairsCompletedDaySerial: number | null;
   aleServiceUnlocked: boolean;
   aleServiceAvailableDaySerial: number | null;
@@ -75,7 +75,7 @@ export type PostGuestTutorialState = {
 };
 
 export const DEFAULT_POST_GUEST_TUTORIAL_STATE: PostGuestTutorialState = {
-  version: 6,
+  version: 7,
   farmerGiftClaimed: false,
   secondPlotThoughtSeen: false,
   upgradeIntroSeen: false,
@@ -85,6 +85,7 @@ export const DEFAULT_POST_GUEST_TUTORIAL_STATE: PostGuestTutorialState = {
   plotYieldUpgradeLevels: {},
   guestAreaCleanSteps: 0,
   guestAreaCompletedDaySerial: null,
+  outsideCleanSteps: 0,
   tableAndChairsCompletedDaySerial: null,
   aleServiceUnlocked: false,
   aleServiceAvailableDaySerial: null,
@@ -109,12 +110,19 @@ function normalizeState(raw: unknown): PostGuestTutorialState {
     Math.max(0, Math.floor(Number(candidate.guestAreaCleanSteps) || 0)),
   );
   const completedDaySerial = Number(candidate.guestAreaCompletedDaySerial);
+  const legacyOutsideCompletedDaySerial = Number(candidate.tableAndChairsCompletedDaySerial);
+  const legacyOutsideComplete = candidate.tableAndChairsCompletedDaySerial !== null &&
+    candidate.tableAndChairsCompletedDaySerial !== undefined &&
+    Number.isFinite(legacyOutsideCompletedDaySerial);
+  const outsideCleanSteps = legacyOutsideComplete
+    ? OUTSIDE_CLEAN_STEPS_REQUIRED
+    : Math.min(OUTSIDE_CLEAN_STEPS_REQUIRED, Math.max(0, Math.floor(Number(candidate.outsideCleanSteps) || 0)));
   const secondPlotUnlocked = candidate.secondPlotUnlocked === true;
   const thirdPlotUnlocked = secondPlotUnlocked && candidate.thirdPlotUnlocked === true;
   const aleServiceUnlocked = candidate.aleServiceUnlocked === true;
   const aleAvailableDaySerial = Number(candidate.aleServiceAvailableDaySerial);
   return {
-    version: 6,
+    version: 7,
     farmerGiftClaimed: candidate.farmerGiftClaimed === true,
     secondPlotThoughtSeen: candidate.secondPlotThoughtSeen === true,
     upgradeIntroSeen: candidate.upgradeIntroSeen === true,
@@ -131,10 +139,9 @@ function normalizeState(raw: unknown): PostGuestTutorialState {
     guestAreaCompletedDaySerial: cleanSteps >= GUEST_AREA_CLEAN_STEPS_REQUIRED && Number.isFinite(completedDaySerial)
       ? Math.max(0, Math.floor(completedDaySerial))
       : null,
-    tableAndChairsCompletedDaySerial: candidate.tableAndChairsCompletedDaySerial !== null &&
-      candidate.tableAndChairsCompletedDaySerial !== undefined &&
-      Number.isFinite(Number(candidate.tableAndChairsCompletedDaySerial))
-      ? Math.max(0, Math.floor(Number(candidate.tableAndChairsCompletedDaySerial)))
+    outsideCleanSteps,
+    tableAndChairsCompletedDaySerial: outsideCleanSteps >= OUTSIDE_CLEAN_STEPS_REQUIRED && legacyOutsideComplete
+      ? Math.max(0, Math.floor(legacyOutsideCompletedDaySerial))
       : null,
     aleServiceUnlocked,
     // Legacy saves already serving Ale have no activation day and remain available.
@@ -548,43 +555,51 @@ export async function purchasePlotYieldUpgrade(plotNumber: GardenPlotNumber): Pr
   return { ok: true, alreadyMaxed: false, level: nextLevel, state: nextState };
 }
 
-export type TableAndChairsPurchaseResult =
-  | { ok: true; alreadyComplete: boolean; state: PostGuestTutorialState; resources: SharedResources }
-  | { ok: false; reason: "not_available" | "insufficient_resources"; state: PostGuestTutorialState; resources: SharedResources };
+export type CleanOutsideTavernResult =
+  | { ok: true; alreadyComplete: boolean; completedNow: boolean; staminaCost: number; remainingStamina: number; state: PostGuestTutorialState }
+  | { ok: false; reason: "not_available" | "insufficient_stamina"; staminaCost: number; remainingStamina: number; state: PostGuestTutorialState };
 
-export async function purchaseTableAndChairs(): Promise<TableAndChairsPurchaseResult> {
+export function isOutsideTavernCleanComplete(state: PostGuestTutorialState): boolean {
+  return state.outsideCleanSteps >= OUTSIDE_CLEAN_STEPS_REQUIRED;
+}
+
+export async function cleanOutsideTavernOnce(): Promise<CleanOutsideTavernResult> {
   const state = await loadPostGuestTutorialState();
-  let resources = { ...SHARED_RESOURCE_DEFAULTS };
-  const [rawResources, rawGuestState] = await Promise.all([
-    AsyncStorage.getItem(SHARED_RESOURCES_KEY),
+  const [rawStamina, rawSpent, rawGuestState] = await Promise.all([
+    AsyncStorage.getItem(CURRENT_STAMINA_KEY),
+    AsyncStorage.getItem(STAMINA_SPENT_TODAY_KEY),
     AsyncStorage.getItem(GUEST_STATE_KEY),
   ]);
-  if (rawResources) {
-    try { resources = { ...resources, ...JSON.parse(rawResources) }; } catch { /* keep defaults */ }
+  const currentStamina = Math.max(0, Number.parseInt(rawStamina ?? "0", 10) || 0);
+  const staminaCost = OUTSIDE_CLEAN_STAMINA_COST;
+  if (isOutsideTavernCleanComplete(state)) {
+    return { ok: true, alreadyComplete: true, completedNow: false, staminaCost, remainingStamina: currentStamina, state };
   }
-  if (state.tableAndChairsCompletedDaySerial !== null) return { ok: true, alreadyComplete: true, state, resources };
   let calendarDaySerial = 0;
   if (rawGuestState) {
     try { calendarDaySerial = Math.max(0, Math.floor(Number(JSON.parse(rawGuestState).calendarDaySerial) || 0)); } catch { /* default */ }
   }
   if (!isGuestAreaComplete(state) || state.guestAreaCompletedDaySerial === null || calendarDaySerial <= state.guestAreaCompletedDaySerial) {
-    return { ok: false, reason: "not_available", state, resources };
+    return { ok: false, reason: "not_available", staminaCost, remainingStamina: currentStamina, state };
   }
-  if (resources.wood < TABLE_CHAIRS_WOOD_COST || resources.nails < TABLE_CHAIRS_NAILS_COST || resources.paint < TABLE_CHAIRS_PAINT_COST) {
-    return { ok: false, reason: "insufficient_resources", state, resources };
+  if (currentStamina < staminaCost) {
+    return { ok: false, reason: "insufficient_stamina", staminaCost, remainingStamina: currentStamina, state };
   }
-  const nextResources = {
-    ...resources,
-    wood: resources.wood - TABLE_CHAIRS_WOOD_COST,
-    nails: resources.nails - TABLE_CHAIRS_NAILS_COST,
-    paint: resources.paint - TABLE_CHAIRS_PAINT_COST,
+  const nextSteps = Math.min(OUTSIDE_CLEAN_STEPS_REQUIRED, state.outsideCleanSteps + 1);
+  const completedNow = nextSteps >= OUTSIDE_CLEAN_STEPS_REQUIRED;
+  const remainingStamina = currentStamina - staminaCost;
+  const spentToday = Math.max(0, Number.parseInt(rawSpent ?? "0", 10) || 0) + staminaCost;
+  const nextState: PostGuestTutorialState = {
+    ...state,
+    outsideCleanSteps: nextSteps,
+    tableAndChairsCompletedDaySerial: completedNow ? calendarDaySerial : null,
   };
-  const nextState = { ...state, tableAndChairsCompletedDaySerial: calendarDaySerial };
   await AsyncStorage.multiSet([
-    [SHARED_RESOURCES_KEY, JSON.stringify(nextResources)],
     [POST_GUEST_TUTORIAL_STATE_KEY, JSON.stringify(nextState)],
+    [CURRENT_STAMINA_KEY, String(remainingStamina)],
+    [STAMINA_SPENT_TODAY_KEY, String(spentToday)],
   ]);
-  return { ok: true, alreadyComplete: false, state: nextState, resources: nextResources };
+  return { ok: true, alreadyComplete: false, completedNow, staminaCost, remainingStamina, state: nextState };
 }
 
 export type CleanGuestAreaResult =

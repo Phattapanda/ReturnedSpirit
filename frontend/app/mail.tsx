@@ -1,5 +1,5 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Animated, PanResponder, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -13,6 +13,7 @@ import { guestTutorialHasReached, loadGuestTutorialIntroStep } from "@/src/game/
 import {
   DEFAULT_MAILBOX_STATE,
   claimMailboxMessage,
+  deleteMailboxMessage,
   loadMailboxState,
   mailboxRewardLabel,
   markMailboxMessageRead,
@@ -56,6 +57,50 @@ function senderIcon(kind: MailSenderKind): React.ComponentProps<typeof Ionicons>
   if (kind === "guild") return "shield-outline";
   if (kind === "adventurer") return "compass-outline";
   return "mail-outline";
+}
+
+function SwipeToDelete({ enabled, onDelete, children }: { enabled: boolean; onDelete: () => void; children: React.ReactNode }) {
+  const translateX = useRef(new Animated.Value(0)).current;
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pending = useRef(false);
+
+  const restore = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    pending.current = false;
+    Animated.spring(translateX, { toValue: 0, useNativeDriver: true, speed: 24, bounciness: 4 }).start();
+  }, [translateX]);
+
+  const beginDelete = useCallback(() => {
+    if (!enabled || pending.current) return;
+    pending.current = true;
+    Animated.spring(translateX, { toValue: -112, useNativeDriver: true, speed: 25, bounciness: 2 }).start();
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      Animated.timing(translateX, { toValue: -520, duration: 230, useNativeDriver: true }).start(onDelete);
+    }, 1400);
+  }, [enabled, onDelete, translateX]);
+
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  useEffect(() => { if (!enabled) restore(); }, [enabled, restore]);
+
+  const responder = useMemo(() => PanResponder.create({
+    onMoveShouldSetPanResponder: (_, gesture) => enabled && Math.abs(gesture.dx) > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+    onPanResponderMove: (_, gesture) => {
+      if (pending.current) translateX.setValue(Math.min(0, -112 + Math.max(0, gesture.dx)));
+      else translateX.setValue(Math.min(0, gesture.dx));
+    },
+    onPanResponderRelease: (_, gesture) => {
+      if (pending.current && gesture.dx > 34) { restore(); return; }
+      if (!pending.current && (gesture.dx < -62 || gesture.vx < -0.55)) { beginDelete(); return; }
+      if (!pending.current) restore();
+    },
+    onPanResponderTerminate: restore,
+  }), [beginDelete, enabled, restore, translateX]);
+
+  return <View style={styles.swipeClip}>
+    <Animated.View style={{ transform: [{ translateX }] }} {...responder.panHandlers}>{children}</Animated.View>
+  </View>;
 }
 
 export default function MailScreen() {
@@ -136,6 +181,19 @@ export default function MailScreen() {
     } finally {
       setBusy(false);
       claimLock.current = false;
+    }
+  }
+
+  async function deleteMessage(messageId: string) {
+    try {
+      const result = await deleteMailboxMessage(messageId);
+      setMailbox(result.state);
+      if (result.ok) {
+        setSelectedMessageId((current) => current === messageId ? null : current);
+        triggerHaptic("choice");
+      } else setFeedback("Only read and claimed messages can be deleted.");
+    } catch {
+      setFeedback("The message could not be deleted.");
     }
   }
 
@@ -224,10 +282,12 @@ export default function MailScreen() {
                     <Text style={styles.emptyTitle}>No mail yet.</Text>
                     <Text style={styles.emptyText}>Messages, quest letters, and commissioned packages will appear here.</Text>
                   </View>
-                ) : messages.map((message) => {
+                ) : <>
+                  {messages.map((message) => {
                   const selected = selectedMessageId === message.id;
                   return (
-                    <View key={message.id} style={[styles.messageCard, !message.read && styles.messageCardUnread]}>
+                    <SwipeToDelete key={message.id} enabled={message.read && (message.claimed || message.rewards.length === 0)} onDelete={() => { void deleteMessage(message.id); }}>
+                    <View style={[styles.messageCard, !message.read && styles.messageCardUnread]}>
                       <TouchableOpacity style={styles.messageHeader} onPress={() => openMessage(message.id)} activeOpacity={0.8}>
                         <View style={styles.senderIcon}>
                           <Ionicons name={senderIcon(message.senderKind)} size={22} color="#E7C77A" />
@@ -275,8 +335,11 @@ export default function MailScreen() {
                         </View>
                       )}
                     </View>
+                    </SwipeToDelete>
                   );
-                })}
+                  })}
+                  <Text style={styles.swipeHint}>Swipe left to delete</Text>
+                </>}
               </View>
             )}
 
@@ -372,6 +435,8 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(48,27,7,0.68)", overflow: "hidden",
   },
   messageCardUnread: { borderColor: "rgba(231,199,122,0.72)", backgroundColor: "rgba(68,39,9,0.80)" },
+  swipeClip: { borderRadius: 13, overflow: "hidden" },
+  swipeHint: { color: "rgba(240,232,213,0.48)", fontSize: 11, textAlign: "center", paddingTop: 4 },
   messageHeader: { minHeight: 68, flexDirection: "row", alignItems: "center", gap: 10, padding: 10 },
   senderIcon: {
     width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center",

@@ -31,6 +31,8 @@ import {
   calcSleepRecovery,
   canAfford,
   deductUpgradeCost,
+  roomStorageCapacity,
+  visibleRoomUpgrades,
   type RoomUpgrade,
 } from "@/src/game/room-config";
 import {
@@ -125,7 +127,7 @@ const IMG = {
 
 const DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
 const ROOM_STORAGE_COLUMNS = 5;
-const ROOM_STORAGE_SLOT_COUNT = 10;
+const ROOM_STORAGE_INITIAL_SLOT_COUNT = 10;
 
 function avatarSrc(avatarId: PlayerAvatarId, st: number) {
   return getPlayerAvatarForStamina(avatarId, st);
@@ -208,8 +210,8 @@ export default function DormitoryScreen() {
   const [roomUpgrades, setRoomUpgrades]         = useState<RoomUpgrade[]>(ROOM_UPGRADES_DEFAULT);
   const [sharedResources, setSharedResources]   = useState<SharedResources>(SHARED_RESOURCE_DEFAULTS);
   const [roomStorageUnlocked, setRoomStorageUnlocked] = useState(false);
-  const [roomStorage, setRoomStorage] = useState<(BagItem | null)[]>(Array(ROOM_STORAGE_SLOT_COUNT).fill(null));
-  const roomStorageRef = useRef<(BagItem | null)[]>(Array(ROOM_STORAGE_SLOT_COUNT).fill(null));
+  const [roomStorage, setRoomStorage] = useState<(BagItem | null)[]>(Array(ROOM_STORAGE_INITIAL_SLOT_COUNT).fill(null));
+  const roomStorageRef = useRef<(BagItem | null)[]>(Array(ROOM_STORAGE_INITIAL_SLOT_COUNT).fill(null));
   const storageTransferBusyRef = useRef(false);
 
   // ── Player thought bubble
@@ -430,20 +432,24 @@ export default function DormitoryScreen() {
           } catch { /* use default */ }
         }
         setRoomUpgrades(loadedUpgrades);
-        const storageUpg = loadedUpgrades.find(u => u.id === "room_storage_01");
-        if (storageUpg?.completed) setRoomStorageUnlocked(true);
+        const loadedStorageCapacity = roomStorageCapacity(loadedUpgrades);
+        setRoomStorageUnlocked(loadedStorageCapacity > 0);
 
         const rawStorage = await AsyncStorage.getItem(DSK.STORAGE);
         if (rawStorage) {
           try {
             const savedStorage = JSON.parse(rawStorage) as (BagItem | null)[];
             const normalizedStorage = Array.from(
-              { length: ROOM_STORAGE_SLOT_COUNT },
+              { length: Math.max(ROOM_STORAGE_INITIAL_SLOT_COUNT, loadedStorageCapacity) },
               (_, index) => normalizeBagItem(Array.isArray(savedStorage) ? savedStorage[index] ?? null : null),
             );
             roomStorageRef.current = normalizedStorage;
             setRoomStorage(normalizedStorage);
           } catch { /* use empty storage */ }
+        } else {
+          const emptyStorage = Array<BagItem | null>(Math.max(ROOM_STORAGE_INITIAL_SLOT_COUNT, loadedStorageCapacity)).fill(null);
+          roomStorageRef.current = emptyStorage;
+          setRoomStorage(emptyStorage);
         }
 
         // Shared resources
@@ -846,6 +852,10 @@ export default function DormitoryScreen() {
 
   async function handleUpgradeTap(upgrade: RoomUpgrade) {
     if (upgrade.completed || roomUpgradeBusyRef.current) return;
+    const previousStageIncomplete = roomUpgrades.some((entry) => (
+      entry.chain === upgrade.chain && entry.level < upgrade.level && !entry.completed
+    ));
+    if (previousStageIncomplete) return;
     if (!canAfford(upgrade, sharedResources)) {
       if (upgradeMsgTimer.current) clearTimeout(upgradeMsgTimer.current);
       setUpgradeMsg("Not enough resources.");
@@ -858,16 +868,26 @@ export default function DormitoryScreen() {
     const nextUpgrades = roomUpgrades.map((entry) => (
       entry.id === upgrade.id ? { ...entry, completed: true } : entry
     ));
+    const nextStorageCapacity = roomStorageCapacity(nextUpgrades);
+    const nextStorage = nextStorageCapacity > roomStorageRef.current.length
+      ? [...roomStorageRef.current, ...Array<BagItem | null>(nextStorageCapacity - roomStorageRef.current.length).fill(null)]
+      : roomStorageRef.current;
 
     roomUpgradeBusyRef.current = true;
     try {
-      await AsyncStorage.multiSet([
+      const updates: [string, string][] = [
         [DSK.UPGRADES, JSON.stringify(nextUpgrades)],
         [SHARED_RESOURCES_KEY, JSON.stringify(nextResources)],
-      ]);
+      ];
+      if (nextStorage !== roomStorageRef.current) updates.push([DSK.STORAGE, JSON.stringify(nextStorage)]);
+      await AsyncStorage.multiSet(updates);
       setRoomUpgrades(nextUpgrades);
       setSharedResources(nextResources);
-      if (upgrade.effects.unlockRoomStorage) setRoomStorageUnlocked(true);
+      if (upgrade.effects.unlockRoomStorage) {
+        roomStorageRef.current = nextStorage;
+        setRoomStorage(nextStorage);
+        setRoomStorageUnlocked(true);
+      }
       audioManager.playSoundEffect("upgrade-building", { maxDurationMs: 6000 });
       setUpgradeMsg(`${upgrade.displayName} complete.`);
     } catch {
@@ -1153,7 +1173,7 @@ export default function DormitoryScreen() {
               <Text style={styles.inlineStorageTitle}>Room Storage</Text>
             </View>
             <View style={styles.storageGrid}>
-              {Array.from({ length: ROOM_STORAGE_SLOT_COUNT / ROOM_STORAGE_COLUMNS }, (_, row) => (
+              {Array.from({ length: roomStorage.length / ROOM_STORAGE_COLUMNS }, (_, row) => (
                 <View key={row} style={styles.storageGridRow}>
                   {Array.from({ length: ROOM_STORAGE_COLUMNS }, (_, column) => {
                     const index = row * ROOM_STORAGE_COLUMNS + column;
@@ -1236,7 +1256,7 @@ export default function DormitoryScreen() {
               {roomUpgrades.length === 0 ? (
                 <Text style={styles.noUpgradesText}>No upgrades available.</Text>
               ) : (
-                roomUpgrades.map((upg) => (
+                visibleRoomUpgrades(roomUpgrades).map((upg) => (
                   <UpgradeRow
                     key={upg.id}
                     upgrade={upg}
@@ -1426,7 +1446,7 @@ function UpgradeRow({ upgrade, resources, onTap }: UpgradeRowProps) {
             <Text style={styles.upgradeEffect}>♥ +{upgrade.effects.sleepLifeRecovery} Life Recovery</Text>
           ) : null}
           {upgrade.effects.unlockRoomStorage ? (
-            <Text style={styles.upgradeEffect}>🗄 Unlocks Room Storage</Text>
+            <Text style={styles.upgradeEffect}>🗄 {upgrade.effects.unlockRoomStorage.rows} rows × {upgrade.effects.unlockRoomStorage.columns} slots</Text>
           ) : null}
         </View>
         {/* Costs */}
@@ -1448,9 +1468,9 @@ function UpgradeRow({ upgrade, resources, onTap }: UpgradeRowProps) {
         ) : null}
       </View>
       <TouchableOpacity
-        style={[styles.upgradeBuildButton, upgrade.completed && styles.upgradeBuildButtonCompleted]}
+        style={[styles.upgradeBuildButton, unavailable && styles.upgradeBuildButtonUnavailable, upgrade.completed && styles.upgradeBuildButtonCompleted]}
         onPress={onTap}
-        disabled={upgrade.completed}
+        disabled={upgrade.completed || !affordable}
         activeOpacity={0.8}
       >
         <Text style={styles.upgradeBuildButtonText}>{upgrade.completed ? "Completed" : "Build"}</Text>
@@ -1651,6 +1671,7 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
     backgroundColor: "rgba(126,89,26,0.78)", borderWidth: 1, borderColor: "#C4943A",
   },
+  upgradeBuildButtonUnavailable: { opacity: 0.42 },
   upgradeBuildButtonCompleted: { opacity: 0.62, backgroundColor: "rgba(196,148,58,0.10)" },
   upgradeBuildButtonText: { color: "#F5E6C8", fontSize: 12, fontFamily: "Oldenburg" },
 

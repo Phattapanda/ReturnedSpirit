@@ -19,7 +19,7 @@ import { ITEM_CATALOG, PLAYER_BAG_KEY, normalizePlayerBagData } from "@/src/game
 import { loadGuestState } from "@/src/game/guest-system";
 import { areRegularGuestsUnlockedForDay, loadPostGuestTutorialState } from "@/src/game/post-guest-tutorial";
 import { MERCHANT_STOCK, prepareMerchantShop, purchaseMerchantItem, type MerchantShopState, type MerchantStockId } from "@/src/game/merchant-shop";
-import { finalizeCoachmanEscortDecline, loadCoachmanEscortState, prepareCoachmanEscortDeparture, reconsiderCoachmanEscort } from "@/src/game/coachman-escort-system";
+import { finalizeCoachmanEscortDecline, hasCompletedCityRoadEncounter, loadCoachmanEscortState, prepareCoachmanEscortDeparture, reconsiderCoachmanEscort } from "@/src/game/coachman-escort-system";
 import { DIALOG_CHARACTER_ASSETS } from "@/src/assets/dialog-character-assets";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
 import { QUESTS, loadCityState, turnInQuest, type CityState, type QuestId } from "@/src/game/city-system";
@@ -210,7 +210,9 @@ export default function OutsideTavernScreen() {
   }
   async function travelToCity(mode: "coachman" | "walk") {
     if (!cityUnlocked) { showTravelLocked(); return; }
-    if (mode === "walk") {
+    const escortState = mode === "walk" ? await loadCoachmanEscortState() : null;
+    const requiresRoadBattle = mode === "walk" && escortState !== null && !hasCompletedCityRoadEncounter(escortState);
+    if (requiresRoadBattle) {
       const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
       const currentBag = normalizePlayerBagData(rawBag ? JSON.parse(rawBag) : {});
       if (!currentBag.unlocked || !currentBag.slots.some((slot) => slot === null)) {
@@ -221,7 +223,7 @@ export default function OutsideTavernScreen() {
     const paid = mode === "coachman" ? await payForCarriage(15) : (await spendWalkingStamina(30)).ok;
     if (!paid) { setMessage(mode === "coachman" ? "I need 15 Copper for the trip." : "I need 30 Stamina to walk to the city."); return; }
     audioManager.playSoundEffect("footstep", { maxDurationMs: 2200 });
-    if (mode === "walk") router.push({ pathname: "/coachman-escort", params: { mode: "walk" } });
+    if (requiresRoadBattle) router.push({ pathname: "/coachman-escort", params: { mode: "walk" } });
     else router.push({ pathname: "/next-city", params: { returnTo: "outside" } });
   }
   async function acceptCoachmanReoffer() {

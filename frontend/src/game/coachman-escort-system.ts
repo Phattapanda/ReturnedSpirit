@@ -44,12 +44,16 @@ function normalizeState(raw: unknown): CoachmanEscortState {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_COACHMAN_ESCORT_STATE };
   const candidate = raw as Partial<CoachmanEscortState>;
   const phases = new Set<CoachmanEscortPhase>(["locked", "rupert_warned", "offer_pending", "accepted", "declined", "declined_final", "journey", "combat", "post_combat", "city_arrival", "city_exploration", "complete"]);
+  const guildIntroductionSeen = candidate.guildIntroductionSeen === true;
+  const storedPhase = phases.has(candidate.phase as CoachmanEscortPhase) ? candidate.phase as CoachmanEscortPhase : "locked";
   return {
     version: 1,
-    phase: phases.has(candidate.phase as CoachmanEscortPhase) ? candidate.phase as CoachmanEscortPhase : "locked",
+    // Completing the Guild introduction is the terminal step of this tutorial.
+    // Keep old saves from being trapped if a later city walk overwrote the phase.
+    phase: guildIntroductionSeen ? "complete" : storedPhase,
     equipmentPending: candidate.equipmentPending === true,
     bonusCopperAccepted: candidate.bonusCopperAccepted === true,
-    guildIntroductionSeen: candidate.guildIntroductionSeen === true,
+    guildIntroductionSeen,
     walkingArrivalGuardSeen: candidate.walkingArrivalGuardSeen === true,
     declinedDaySerial: Number.isFinite(candidate.declinedDaySerial) ? Math.max(0, Math.floor(candidate.declinedDaySerial!)) : null,
   };
@@ -57,7 +61,17 @@ function normalizeState(raw: unknown): CoachmanEscortState {
 
 export async function loadCoachmanEscortState(): Promise<CoachmanEscortState> {
   const raw = await AsyncStorage.getItem(COACHMAN_ESCORT_KEY);
-  return normalizeState(raw ? JSON.parse(raw) : null);
+  const parsed = raw ? JSON.parse(raw) : null;
+  const normalized = normalizeState(parsed);
+  if (raw && (parsed as Partial<CoachmanEscortState>)?.phase !== normalized.phase) {
+    await AsyncStorage.setItem(COACHMAN_ESCORT_KEY, JSON.stringify(normalized));
+  }
+  return normalized;
+}
+
+/** Whether the one-time Wild Wolf encounter on the road to the city is over. */
+export function hasCompletedCityRoadEncounter(state: CoachmanEscortState): boolean {
+  return state.guildIntroductionSeen || ["post_combat", "city_arrival", "city_exploration", "complete"].includes(state.phase);
 }
 
 export async function saveCoachmanEscortState(state: CoachmanEscortState): Promise<CoachmanEscortState> {

@@ -3,7 +3,8 @@ import { Animated, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity,
 
 import { DIALOG_CHARACTER_ASSETS, RUPERT_DIALOG_SCALE } from "@/src/assets/dialog-character-assets";
 import StoryDialogOverlay, { type StoryDialogLine } from "@/src/components/story-dialog-overlay";
-import { QUESTS, loadCityState, type QuestId } from "@/src/game/city-system";
+import { MERCHANT_CONTRACTS, QUESTS, loadCityState, merchantContractDaysRemaining, type QuestId } from "@/src/game/city-system";
+import { loadGuestState } from "@/src/game/guest-system";
 import { loadCoachmanEscortState, type CoachmanEscortPhase } from "@/src/game/coachman-escort-system";
 import { isGuestAreaComplete, loadPostGuestTutorialState } from "@/src/game/post-guest-tutorial";
 import { loadQuestBookUnlocked, subscribeQuestBookUnlocked } from "@/src/game/questbook-system";
@@ -25,7 +26,7 @@ function coachmanObjective(phase: CoachmanEscortPhase) {
 }
 
 async function loadQuestBookEntries(): Promise<QuestBookEntry[]> {
-  const [city, escort, post, tavern, tithe, elapsedDays] = await Promise.all([loadCityState(), loadCoachmanEscortState(), loadPostGuestTutorialState(), loadTavernQuestState(), loadTitheState(), loadElapsedDays()]);
+  const [city, escort, post, tavern, tithe, elapsedDays, guestState] = await Promise.all([loadCityState(), loadCoachmanEscortState(), loadPostGuestTutorialState(), loadTavernQuestState(), loadTitheState(), loadElapsedDays(), loadGuestState()]);
   const entries: QuestBookEntry[] = [];
   (Object.keys(QUESTS) as QuestId[]).forEach((id) => {
     const state = city.quests[id];
@@ -33,7 +34,15 @@ async function loadQuestBookEntries(): Promise<QuestBookEntry[]> {
     const target = id === "wolves" || id === "feathers" ? 2 : 1;
     entries.push({ id: `guild-${id}`, source: "Adventurers’ Guild", title: QUESTS[id].title, detail: QUESTS[id].detail, tab: state.status === "completed" ? "complete" : "open", ready: state.status === "ready", progress: id === "wolves" && state.status !== "completed" ? `${Math.min(target, state.progress)}/${target}` : undefined });
   });
-  if (city.healingPotionContract !== "available") entries.push({ id: "merchant-healing-potions", source: "Merchant’s Guild", title: "Supply Contract: Healing Potion", detail: "Deliver 10 Low Quality Healing Potions.", tab: city.healingPotionContract === "completed" ? "complete" : "open" });
+  city.activeMerchantContracts.forEach((contract) => {
+    const definition = MERCHANT_CONTRACTS[contract.id];
+    entries.push({ id: `merchant-contract-${contract.id}-${contract.acceptedDay}`, source: "Merchant’s Guild", title: definition.title, detail: definition.detail, tab: "open", progress: `${merchantContractDaysRemaining(contract, guestState.calendarDaySerial)} days remaining` });
+  });
+  city.completedMerchantContracts.forEach((contract, index) => {
+    const definition = MERCHANT_CONTRACTS[contract.id];
+    entries.push({ id: `merchant-contract-complete-${contract.id}-${contract.completedDay}-${index}`, source: "Merchant’s Guild", title: definition.title, detail: definition.detail, tab: "complete" });
+  });
+  if (city.merchantGuildIntroductionSeen) entries.push({ id: "merchant-aptitude-test", source: "Merchant’s Guild", title: "Merchant Aptitude Test", detail: "Bring the Merchant Guild Receptionist a herbal pouch containing exactly eleven herbs.", tab: city.merchantRegistered ? "complete" : "open" });
   if (NPC_ESCORT_PHASES.has(escort.phase)) entries.push({ id: "npc-coachman-escort", source: "Coachman", ...coachmanObjective(escort.phase), tab: "open" });
   else if (escort.phase === "complete") entries.push({ id: "npc-coachman-escort", source: "Coachman", title: "Journey to the Next City", detail: "Arrived safely and registered at the Adventurers’ Guild.", tab: "complete" });
   if (tithe.deferredDebtCopper > 0 && tithe.phase === "idle") {

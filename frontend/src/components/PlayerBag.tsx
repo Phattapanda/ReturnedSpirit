@@ -138,6 +138,7 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   potion_stamina_low_grade: require("../../assets/images/potion_stamina_low_grade.png"),
   antidote: require("../../assets/images/antidote.png"),
   ingot_iron: require("../../assets/images/ingot_iron.png"),
+  ingot_steel: require("../../assets/images/ingot_steel.png"),
   ingot_copper: require("../../assets/images/ingot_copper.png"),
   ingot_silver: require("../../assets/images/ingot_silver.png"),
   ingot_gold: require("../../assets/images/ingot_gold.png"),
@@ -256,10 +257,11 @@ export default function PlayerBag({
       return;
     }
 
-    // Slot locations always get first refusal. A tap in Kitchen or Dining Hall
-    // means transfer, never consume/equip/discard.
+    // Slot locations always get first refusal. Kitchen and Room Storage accept
+    // Quest Items as ordinary stored items; their discard protection remains
+    // enforced by the dedicated discard paths below.
     if (context === "kitchen" || context === "dining" || context === "roomStorage") {
-      if (hasItemAttribute(item, ITEM_ATTRIBUTE.QUEST_ITEM)) {
+      if (context === "dining" && hasItemAttribute(item, ITEM_ATTRIBUTE.QUEST_ITEM)) {
         setInfoItem(item);
         setInfoSlotIndex(slotIdx);
         return;

@@ -60,6 +60,7 @@ import {
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
 import {
   DEFAULT_BAG,
+  ITEM_CATALOG,
   MEAL_TAG,
   PLAYER_BAG_KEY,
   getMealBaseSellPriceCopper,
@@ -79,6 +80,7 @@ import {
   setCurrentGuestExchangeOffer,
   type GuestId,
   type GuestMealReaction,
+  type GuestPreferenceDiscoveryResult,
   type GuestVisitView,
 } from "@/src/game/guest-system";
 import { completeGuestExchange } from "@/src/game/guest-exchange";
@@ -99,7 +101,8 @@ import {
   normalizePlayerAvatarId,
   type PlayerAvatarId,
 } from "@/src/game/player-avatar";
-import { prepareNextRun } from "@/src/game/next-run";
+import type { NextRunBonuses } from "@/src/game/next-run";
+import { beginChosenNextRun } from "@/src/game/death-angel-system";
 import {
   loadTitheState,
   resolveCurrentTithe,
@@ -821,6 +824,27 @@ export default function DiningScreen() {
     return '"The fields have kept me busy today."';
   }
 
+  function learnedPreferenceTalkLine(guest: GuestVisitView, discovery?: GuestPreferenceDiscoveryResult): string | null {
+    if (discovery?.outcome !== "learned") return null;
+    const fact = discovery.factKey;
+    if (fact === "favorite_dish") {
+      const itemId = guest.profile.favoriteDishId;
+      const dish = itemId ? ITEM_CATALOG[itemId]?.name ?? itemId.replace(/_/g, " ") : "this dish";
+      return `"My favorite dish is ${dish}."`;
+    }
+    if (fact === "least_favorite_dish") {
+      const itemId = guest.profile.leastFavoriteDishId;
+      const dish = itemId ? ITEM_CATALOG[itemId]?.name ?? itemId.replace(/_/g, " ") : "that dish";
+      return `"I really don't like ${dish}."`;
+    }
+    const separator = fact.indexOf(":");
+    const tag = fact.slice(separator + 1).replace(/_/g, " ").toLowerCase();
+    if (fact.startsWith("preferred_tag:")) {
+      return tag === MEAL_TAG.ALCOHOLIC ? '"I like alcoholic drinks."' : `"I like ${tag} meals."`;
+    }
+    return tag === MEAL_TAG.ALCOHOLIC ? '"I don\'t like alcoholic drinks."' : `"I don't like ${tag} meals."`;
+  }
+
   function departGuest(guestId: GuestId) {
     setDepartingGuestId(guestId);
     setTimeout(() => {
@@ -855,8 +879,10 @@ export default function DiningScreen() {
     guest: GuestVisitView,
     action: GuestServiceAction,
     source?: GuestServiceSourcePoint,
+    preferenceDiscovery?: GuestPreferenceDiscoveryResult,
   ): Promise<boolean | void> {
     if (serviceBusy) return;
+    const discoveredTalkLine = learnedPreferenceTalkLine(guest, preferenceDiscovery);
 
     if ((guest.profile.id === "merchant" || guest.profile.id === "traveler" || guest.profile.id === "city_guard") && guestTutorialHasReached(tutorialStep, "service_complete")) {
       const guestId = guest.profile.id;
@@ -867,11 +893,11 @@ export default function DiningScreen() {
         showStandaloneServiceDialog({
           speaker,
           portrait,
-          text: guestId === "merchant"
+          text: discoveredTalkLine ?? (guestId === "merchant"
             ? '"Bring me a good meal and I will make you a fair trade."'
             : guestId === "city_guard"
               ? '"A warm meal makes a long watch easier."'
-              : '"The road is long. A warm meal would be welcome."',
+              : '"The road is long. A warm meal would be welcome."'),
         });
         return;
       }
@@ -975,7 +1001,7 @@ export default function DiningScreen() {
         showStandaloneServiceDialog({
           speaker: "Local Boozer",
           portrait: "local_boozer",
-          text: '"Food is fine, but a proper drink is what brings me back to a tavern."',
+          text: discoveredTalkLine ?? '"Food is fine, but a proper drink is what brings me back to a tavern."',
         });
         return;
       }
@@ -1044,7 +1070,7 @@ export default function DiningScreen() {
 
     if (guest.profile.id === "coachman" && guestTutorialHasReached(tutorialStep, "service_complete")) {
       if (action === "talk") {
-        showStandaloneServiceDialog({ speaker: "Coachman", portrait: "coachman", text: coachmanTalkLine(guest.favor) });
+        showStandaloneServiceDialog({ speaker: "Coachman", portrait: "coachman", text: discoveredTalkLine ?? coachmanTalkLine(guest.favor) });
         return;
       }
 
@@ -1239,7 +1265,7 @@ export default function DiningScreen() {
     }
 
     if (guestTutorialHasReached(tutorialStep, "service_complete") && action === "talk") {
-      showStandaloneServiceDialog({ speaker: "Old Farmer", portrait: "old_farmer", text: farmerTalkLine(guest.favor) });
+      showStandaloneServiceDialog({ speaker: "Old Farmer", portrait: "old_farmer", text: discoveredTalkLine ?? farmerTalkLine(guest.favor) });
       return;
     }
 
@@ -1419,23 +1445,20 @@ export default function DiningScreen() {
     setTitheState(await loadTitheState());
   }
 
-  async function startFollowingRun(takeBreak: boolean) {
+  async function startFollowingRun(bonuses: NextRunBonuses, avatarId: PlayerAvatarId) {
     if (runTransitionBusy) return;
     setRunTransitionBusy(true);
     try {
       const rawSlot = await AsyncStorage.getItem(DSK.ACTIVE_SLOT);
       const slotNumber = Math.max(1, Number.parseInt(rawSlot ?? "1", 10) || 1);
-      const next = await prepareNextRun(slotNumber);
-      audioManager.stopGameplayMusic(1000);
-      if (takeBreak) {
-        if (router.canGoBack()) router.dismissAll();
-        else router.replace("/");
-      } else {
-        router.replace({
-          pathname: "/intro",
-          params: { characterName: next.playerName, slotId: String(slotNumber) },
-        });
+      await AsyncStorage.setItem(PLAYER_AVATAR_KEY, String(avatarId));
+      const result = await beginChosenNextRun(slotNumber, bonuses);
+      if (result !== "ok") {
+        setRunTransitionBusy(false);
+        return;
       }
+      audioManager.stopGameplayMusic(1000);
+      router.replace({ pathname: "/intro", params: { slotId: String(slotNumber) } });
     } catch (error) {
       if (__DEV__) console.error("[Dining] next-run transition failed:", error);
       setRunTransitionBusy(false);
@@ -1721,8 +1744,7 @@ const locationAction = guestDormitoryBlocked
       <RunEndingOverlay
         visible={titheState?.phase === "bad_ending"}
         busy={runTransitionBusy}
-        onNewRun={() => { void startFollowingRun(false); }}
-        onTakeBreak={() => { void startFollowingRun(true); }}
+        onStartNextRun={(bonuses, avatarId) => { void startFollowingRun(bonuses, avatarId); }}
       />
 
       {transferImage && (

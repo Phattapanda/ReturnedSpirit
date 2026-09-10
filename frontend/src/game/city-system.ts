@@ -29,6 +29,27 @@ export type SupporterId = "normal" | "healer" | "cleric" | "botanist";
 export type QuestId = "wolves" | "feathers" | "camp" | "healing";
 export type QuestStatus = "offered" | "accepted" | "ready" | "completed";
 export type TempleBlessingId = "endurance" | "fortune" | "protection";
+export type MerchantContractId = "herb_bag" | "carrot_bag" | "herb_soup" | "carrot_soup" | "onion_soup" | "onion_bag";
+
+export type MerchantContractDefinition = {
+  id: MerchantContractId;
+  title: string;
+  detail: string;
+  requirement: { itemId: string; quantity: number; containedItem?: string; containedQuantity?: number };
+  rewardCopper: number;
+  reputation: number;
+};
+
+export const MERCHANT_CONTRACTS: Record<MerchantContractId, MerchantContractDefinition> = {
+  herb_bag: { id: "herb_bag", title: "Herbal Pouch Supply", detail: "Deliver a Bag of Herbs containing 11 Herbs.", requirement: { itemId: "bag_herb", quantity: 1, containedItem: "herbs", containedQuantity: 11 }, rewardCopper: 55, reputation: 5 },
+  carrot_bag: { id: "carrot_bag", title: "Carrot Shipment Supply", detail: "Deliver a Bag of Carrots containing 15 Carrots.", requirement: { itemId: "bag_carrot", quantity: 1, containedItem: "carrot", containedQuantity: 15 }, rewardCopper: 100, reputation: 5 },
+  herb_soup: { id: "herb_soup", title: "Herb Soup Supply", detail: "Deliver 9 Herb Soups.", requirement: { itemId: "soup_herb", quantity: 9 }, rewardCopper: 150, reputation: 7 },
+  carrot_soup: { id: "carrot_soup", title: "Carrot Soup Supply", detail: "Deliver 5 Carrot Soups.", requirement: { itemId: "soup_carrot", quantity: 5 }, rewardCopper: 80, reputation: 5 },
+  onion_soup: { id: "onion_soup", title: "Onion Soup Supply", detail: "Deliver 5 Onion Soups.", requirement: { itemId: "soup_onion", quantity: 5 }, rewardCopper: 150, reputation: 10 },
+  onion_bag: { id: "onion_bag", title: "Onion Shipment Supply", detail: "Deliver a Bag of Onions containing 13 Onions.", requirement: { itemId: "bag_onion", quantity: 1, containedItem: "onion", containedQuantity: 13 }, rewardCopper: 180, reputation: 10 },
+};
+
+const MERCHANT_CONTRACT_IDS = Object.keys(MERCHANT_CONTRACTS) as MerchantContractId[];
 
 export type SupporterDefinition = {
   id: SupporterId; name: string; rows: number; columns: number; slots: number; description: string;
@@ -64,7 +85,14 @@ export type CityState = {
   }[];
   merchantReputation: number;
   merchantGuildIntroductionSeen: boolean;
-  healingPotionContract: "available" | "accepted" | "completed";
+  merchantRegistered: boolean;
+  pendingMerchantOrders: { id: string; dueDay: number; vegetable: "potato" | "carrot" | "onion"; quantity: number }[];
+  merchantContractOfferWeek: number;
+  merchantContractOfferIds: MerchantContractId[];
+  activeMerchantContracts: { id: MerchantContractId; acceptedDay: number; dueDay: number }[];
+  completedMerchantContracts: { id: MerchantContractId; completedDay: number }[];
+  merchantContractTierUnlocked: boolean;
+  merchantContractTierDialogSeen: boolean;
   blessing: { id: TempleBlessingId; status: "prepared" | "active" } | null;
 };
 
@@ -79,9 +107,21 @@ function foodStock(day: number): string[] {
   return core.filter((_, index) => index !== omitted || index < 4);
 }
 
-function normalizeCityState(raw: unknown, day: number): CityState {
+function merchantWeek(day: number, weekday: number): number {
+  return Math.floor((day - weekday) / 7);
+}
+
+function merchantContractOffers(week: number): MerchantContractId[] {
+  const start = ((week * 3) % MERCHANT_CONTRACT_IDS.length + MERCHANT_CONTRACT_IDS.length) % MERCHANT_CONTRACT_IDS.length;
+  return Array.from({ length: 3 }, (_, offset) => MERCHANT_CONTRACT_IDS[(start + offset) % MERCHANT_CONTRACT_IDS.length]);
+}
+
+function normalizeCityState(raw: unknown, day: number, weekday: number): CityState {
   const value = raw && typeof raw === "object" ? raw as Partial<CityState> : {};
   const savedQuests = value.quests ?? DEFAULT_QUESTS;
+  const currentMerchantWeek = merchantWeek(day, weekday);
+  const validContract = (id: unknown): id is MerchantContractId => typeof id === "string" && id in MERCHANT_CONTRACTS;
+  const normalizedMerchantReputation = Math.max(0, Math.floor(value.merchantReputation ?? 0));
   return {
     version: 1,
     foodStockDay: value.foodStockDay === day ? day : day,
@@ -95,9 +135,16 @@ function normalizeCityState(raw: unknown, day: number): CityState {
     }])) as CityState["quests"],
     questRollWeek: Math.floor(day / 7),
     pendingProcessing: Array.isArray(value.pendingProcessing) ? value.pendingProcessing : [],
-    merchantReputation: Math.max(0, Math.floor(value.merchantReputation ?? 0)),
+    merchantReputation: normalizedMerchantReputation,
     merchantGuildIntroductionSeen: value.merchantGuildIntroductionSeen === true,
-    healingPotionContract: value.healingPotionContract === "accepted" || value.healingPotionContract === "completed" ? value.healingPotionContract : "available",
+    merchantRegistered: value.merchantRegistered === true,
+    pendingMerchantOrders: Array.isArray(value.pendingMerchantOrders) ? value.pendingMerchantOrders.filter((entry) => entry && (entry.vegetable === "potato" || entry.vegetable === "carrot" || entry.vegetable === "onion")).map((entry) => ({ id: String(entry.id), dueDay: Math.max(0, Math.floor(Number(entry.dueDay) || 0)), vegetable: entry.vegetable, quantity: Math.max(1, Math.floor(Number(entry.quantity) || 1)) })) : [],
+    merchantContractOfferWeek: Number.isFinite(value.merchantContractOfferWeek) ? Math.floor(value.merchantContractOfferWeek!) : currentMerchantWeek,
+    merchantContractOfferIds: Array.isArray(value.merchantContractOfferIds) ? value.merchantContractOfferIds.filter(validContract).slice(0, 3) : merchantContractOffers(currentMerchantWeek),
+    activeMerchantContracts: Array.isArray(value.activeMerchantContracts) ? value.activeMerchantContracts.filter((entry) => entry && validContract(entry.id)).map((entry) => ({ id: entry.id, acceptedDay: Math.max(0, Math.floor(Number(entry.acceptedDay) || 0)), dueDay: Math.max(0, Math.floor(Number(entry.dueDay) || 0)) })) : [],
+    completedMerchantContracts: Array.isArray(value.completedMerchantContracts) ? value.completedMerchantContracts.filter((entry) => entry && validContract(entry.id)).map((entry) => ({ id: entry.id, completedDay: Math.max(0, Math.floor(Number(entry.completedDay) || 0)) })).slice(-30) : [],
+    merchantContractTierUnlocked: value.merchantContractTierUnlocked === true || value.merchantContractTierDialogSeen === true || normalizedMerchantReputation >= 51,
+    merchantContractTierDialogSeen: value.merchantContractTierDialogSeen === true,
     blessing: value.blessing && (value.blessing.id === "endurance" || value.blessing.id === "fortune" || value.blessing.id === "protection")
       ? { id: value.blessing.id, status: value.blessing.status === "active" ? "active" : "prepared" }
       : null,
@@ -105,9 +152,10 @@ function normalizeCityState(raw: unknown, day: number): CityState {
 }
 
 export async function loadCityState(): Promise<CityState> {
-  const day = (await loadGuestState()).calendarDaySerial;
+  const guestState = await loadGuestState();
+  const day = guestState.calendarDaySerial;
   const raw = await AsyncStorage.getItem(CITY_STATE_KEY);
-  const state = normalizeCityState(raw ? JSON.parse(raw) : null, day);
+  const state = normalizeCityState(raw ? JSON.parse(raw) : null, day, guestState.calendarWeekday);
   const previousWeek = raw ? Math.floor(Number((JSON.parse(raw) as Partial<CityState>).questRollWeek ?? 0)) : state.questRollWeek;
   if (state.questRollWeek !== previousWeek) {
     for (const id of Object.keys(QUESTS) as QuestId[]) if (state.quests[id].status === "offered") state.quests[id] = { status: "offered", progress: 0 };
@@ -131,6 +179,41 @@ export async function loadCityState(): Promise<CityState> {
     }
     state.pendingProcessing = state.pendingProcessing.filter((entry) => entry.dueDay > day);
   }
+  const dueOrders = state.pendingMerchantOrders.filter((entry) => entry.dueDay <= day);
+  for (const order of dueOrders) {
+    const bagId = `bag_${order.vegetable}`;
+    await deliverMailboxMessage({
+      id: `merchant-order-${order.id}`,
+      sender: "Merchants’ Guild",
+      senderKind: "guild",
+      subject: `${ITEM_CATALOG[order.vegetable]?.name ?? order.vegetable} Shipment Delivered`,
+      body: `Your order of ${order.quantity} ${ITEM_CATALOG[order.vegetable]?.name ?? order.vegetable} has arrived.`,
+      rewards: [{ type: "item", itemId: bagId, quantity: 1, containedItem: order.vegetable, containedQuantity: order.quantity }],
+    });
+  }
+  if (dueOrders.length) state.pendingMerchantOrders = state.pendingMerchantOrders.filter((entry) => entry.dueDay > day);
+
+  const expiredContracts = state.activeMerchantContracts.filter((entry) => entry.dueDay <= day);
+  if (expiredContracts.length) {
+    for (const contract of expiredContracts) {
+      await deliverMailboxMessage({
+        id: `merchant-contract-failed-${contract.id}-${contract.acceptedDay}`,
+        sender: "Merchants’ Guild",
+        senderKind: "guild",
+        subject: "Trade Contract Failed",
+        body: `The deadline for “${MERCHANT_CONTRACTS[contract.id].title}” has passed. The contract was cancelled and 10 Merchant Reputation was deducted.`,
+        rewards: [],
+      });
+    }
+    state.merchantReputation = Math.max(0, state.merchantReputation - expiredContracts.length * 10);
+    state.activeMerchantContracts = state.activeMerchantContracts.filter((entry) => entry.dueDay > day);
+  }
+  const currentMerchantWeek = merchantWeek(day, guestState.calendarWeekday);
+  if (state.merchantContractOfferWeek !== currentMerchantWeek) {
+    const activeIds = new Set(state.activeMerchantContracts.map((entry) => entry.id));
+    state.merchantContractOfferWeek = currentMerchantWeek;
+    state.merchantContractOfferIds = merchantContractOffers(currentMerchantWeek).filter((id) => !activeIds.has(id)).slice(0, 3);
+  }
   await AsyncStorage.setItem(CITY_STATE_KEY, JSON.stringify(state));
   return state;
 }
@@ -144,6 +227,35 @@ export async function markMerchantGuildIntroductionSeen(): Promise<CityState> {
   const state = await loadCityState();
   if (state.merchantGuildIntroductionSeen) return state;
   return saveCityState({ ...state, merchantGuildIntroductionSeen: true });
+}
+
+export async function markMerchantContractTierDialogSeen(): Promise<CityState> {
+  const state = await loadCityState();
+  if (state.merchantContractTierDialogSeen) return state;
+  return saveCityState({ ...state, merchantContractTierDialogSeen: true });
+}
+
+export function hasMerchantAptitudePouch(bag: PlayerBagData): boolean {
+  return bag.slots.some((item) => item?.id === "bag_herb"
+    && item.containedItem === "herbs"
+    && item.containedQuantity === 11);
+}
+
+export async function completeMerchantAptitudeTest(): Promise<CityActionResult> {
+  const [state, bag] = await Promise.all([loadCityState(), loadBag()]);
+  if (!state.merchantGuildIntroductionSeen) return { ok: false, message: "I have not received the aptitude test yet." };
+  if (state.merchantRegistered) return { ok: false, message: "I am already registered as a merchant." };
+  const pouchSlot = bag.slots.findIndex((item) => item?.id === "bag_herb"
+    && item.containedItem === "herbs"
+    && item.containedQuantity === 11);
+  if (pouchSlot < 0) return { ok: false, message: "I need a herbal pouch containing exactly eleven herbs." };
+  const nextBag = removeBagItem(bag, pouchSlot, 1);
+  const nextState = { ...state, merchantRegistered: true };
+  await AsyncStorage.multiSet([
+    [PLAYER_BAG_KEY, JSON.stringify(nextBag)],
+    [CITY_STATE_KEY, JSON.stringify(nextState)],
+  ]);
+  return { ok: true, message: "Aptitude test passed. I am now registered as a merchant." };
 }
 
 async function loadBag(): Promise<PlayerBagData> {
@@ -278,34 +390,69 @@ export function merchantPrice(basePrice: number, reputation: number): number {
 }
 
 export function merchantBulkQuantity(reputation: number): number {
-  return 20 + Math.min(20, Math.floor(Math.max(0, reputation) / 25) * 5);
+  return 10 + Math.min(20, Math.floor(Math.max(0, reputation) / 25) * 5);
 }
 
 export async function buyBulkShipment(vegetable: "potato" | "carrot" | "onion", basePrice: number): Promise<CityActionResult> {
-  const bag = await loadBag(); if (!bag.unlocked) return { ok: false, message: "I need my bag first." };
   const state = await loadCityState(); const price = merchantPrice(basePrice, state.merchantReputation);
   const quantity = merchantBulkQuantity(state.merchantReputation);
   const bagId = `bag_${vegetable}`; const entry = ITEM_CATALOG[bagId];
-  const shipment: BagItem = { id: bagId, itemType: bagId, name: entry?.name ?? `${vegetable} Bag`, quantity: 1, containedItem: vegetable, containedQuantity: quantity, attributes: entry?.attributes ? [...entry.attributes] : undefined };
-  const plan = planAddToBag(shipment, bag); if (!plan.canTransfer || plan.remainderQty) return { ok: false, message: "My bag has no room for the shipment." };
   const balance = await loadCurrencyCopper(); if (balance < price) return { ok: false, message: `I need ${formatCurrencyAmount(price)} for that shipment.` };
-  await AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify({ ...bag, slots: plan.updatedSlots })); await saveCurrencyCopper(balance - price);
-  return { ok: true, message: `A ${entry?.name ?? "vegetable bag"} containing ${quantity} ${ITEM_CATALOG[vegetable]?.name ?? vegetable} was added to my bag.` };
+  const order = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, dueDay: (await loadGuestState()).calendarDaySerial + 1, vegetable, quantity };
+  state.pendingMerchantOrders.push(order);
+  await AsyncStorage.multiSet([[CITY_STATE_KEY, JSON.stringify(state)], [CURRENCY_KEY, String(balance - price)]]);
+  notifyCurrencyChanged(balance - price);
+  audioEngine.playSoundEffect("losecoin", { maxDurationMs: 2200 });
+  return { ok: true, message: `Ordered ${quantity} ${ITEM_CATALOG[vegetable]?.name ?? vegetable}. The ${entry?.name ?? "shipment"} will arrive in the Courier’s Chest tomorrow.` };
 }
 
-export async function acceptHealingPotionContract(): Promise<CityActionResult> {
+export function merchantContractLimit(reputation: number, tierUnlocked = false): number { return tierUnlocked || reputation >= 51 ? 2 : 1; }
+export function merchantContractDuration(reputation: number, tierUnlocked = false): number { return tierUnlocked || reputation >= 51 ? 10 : 7; }
+export function merchantContractDaysRemaining(contract: CityState["activeMerchantContracts"][number], day: number): number { return Math.max(0, contract.dueDay - day); }
+
+function matchingContractSlot(bag: PlayerBagData, requirement: MerchantContractDefinition["requirement"]): number {
+  return bag.slots.findIndex((item) => item?.id === requirement.itemId
+    && (requirement.containedItem === undefined || item.containedItem === requirement.containedItem)
+    && (requirement.containedQuantity === undefined || item.containedQuantity === requirement.containedQuantity)
+    && item.quantity >= requirement.quantity);
+}
+
+export async function acceptMerchantContract(id: MerchantContractId): Promise<CityActionResult> {
   const state = await loadCityState();
-  if (state.healingPotionContract !== "available") return { ok: false, message: "That trade contract has already been accepted." };
-  state.healingPotionContract = "accepted"; await saveCityState(state);
-  return { ok: true, message: "Supply Contract: Healing Potion accepted." };
+  if (!state.merchantContractOfferIds.includes(id)) return { ok: false, message: "That contract is not currently offered." };
+  if (state.activeMerchantContracts.some((entry) => entry.id === id)) return { ok: false, message: "I have already accepted that contract." };
+  const limit = merchantContractLimit(state.merchantReputation, state.merchantContractTierUnlocked);
+  if (state.activeMerchantContracts.length >= limit) return { ok: false, message: `I may only accept ${limit} contract${limit === 1 ? "" : "s"} at a time.` };
+  const day = (await loadGuestState()).calendarDaySerial;
+  state.activeMerchantContracts.push({ id, acceptedDay: day, dueDay: day + merchantContractDuration(state.merchantReputation, state.merchantContractTierUnlocked) });
+  state.merchantContractOfferIds = state.merchantContractOfferIds.filter((entry) => entry !== id);
+  await saveCityState(state);
+  return { ok: true, message: `${MERCHANT_CONTRACTS[id].title} accepted.` };
 }
 
-export async function fulfillHealingPotionContract(): Promise<CityActionResult> {
-  const state = await loadCityState(); if (state.healingPotionContract !== "accepted") return { ok: false, message: "I have not accepted this contract." };
-  const bag = await loadBag(); if (itemCount(bag, "potion_healing_low_grade") < 10) return { ok: false, message: "I need 10 Low Quality Healing Potions." };
-  const nextBag = consumeItems(bag, "potion_healing_low_grade", 10); state.healingPotionContract = "completed"; state.merchantReputation += 10;
-  await AsyncStorage.multiSet([[PLAYER_BAG_KEY, JSON.stringify(nextBag)], [CITY_STATE_KEY, JSON.stringify(state)]]); await addCurrencyCopper(85);
-  return { ok: true, message: `Contract fulfilled: ${formatCurrencyAmount(85)} and 10 Merchant Reputation awarded.` };
+export async function fulfillMerchantContract(id: MerchantContractId): Promise<CityActionResult> {
+  const state = await loadCityState();
+  const active = state.activeMerchantContracts.find((entry) => entry.id === id);
+  if (!active) return { ok: false, message: "I have not accepted that contract." };
+  const definition = MERCHANT_CONTRACTS[id];
+  const bag = await loadBag();
+  let nextBag = bag;
+  if (definition.requirement.containedItem) {
+    const slot = matchingContractSlot(bag, definition.requirement);
+    if (slot < 0) return { ok: false, message: definition.detail };
+    nextBag = removeBagItem(bag, slot, definition.requirement.quantity);
+  } else {
+    if (itemCount(bag, definition.requirement.itemId) < definition.requirement.quantity) return { ok: false, message: definition.detail };
+    nextBag = consumeItems(bag, definition.requirement.itemId, definition.requirement.quantity);
+  }
+  state.activeMerchantContracts = state.activeMerchantContracts.filter((entry) => entry !== active);
+  state.completedMerchantContracts = [...state.completedMerchantContracts, { id, completedDay: (await loadGuestState()).calendarDaySerial }].slice(-30);
+  state.merchantReputation += definition.reputation;
+  if (state.merchantReputation >= 51) state.merchantContractTierUnlocked = true;
+  const balance = await loadCurrencyCopper();
+  await AsyncStorage.multiSet([[PLAYER_BAG_KEY, JSON.stringify(nextBag)], [CITY_STATE_KEY, JSON.stringify(state)], [CURRENCY_KEY, String(balance + definition.rewardCopper)]]);
+  notifyCurrencyChanged(balance + definition.rewardCopper);
+  return { ok: true, message: `Contract fulfilled: ${formatCurrencyAmount(definition.rewardCopper)} and ${definition.reputation} Merchant Reputation awarded.` };
 }
 
 export async function receiveTempleTreatment(): Promise<CityActionResult> {

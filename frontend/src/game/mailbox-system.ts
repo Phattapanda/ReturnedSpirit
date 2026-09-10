@@ -303,6 +303,17 @@ export async function markMailboxMessageRead(messageId: string): Promise<Mailbox
   });
 }
 
+export type DeleteMailResult = { ok: true; state: MailboxState } | { ok: false; reason: "not_found" | "not_ready"; state: MailboxState };
+
+/** Read and fully claimed mail may be removed from the Courier's Chest. */
+export async function deleteMailboxMessage(messageId: string): Promise<DeleteMailResult> {
+  const state = await loadMailboxState();
+  const message = state.messages.find((entry) => entry.id === messageId);
+  if (!message) return { ok: false, reason: "not_found", state };
+  if (!message.read || (!message.claimed && message.rewards.length > 0)) return { ok: false, reason: "not_ready", state };
+  return { ok: true, state: await saveMailboxState({ ...state, messages: state.messages.filter((entry) => entry.id !== messageId) }) };
+}
+
 function createRewardItem(itemId: string, quantity: number, containedItem?: string, containedQuantity?: number): BagItem {
   const catalog = ITEM_CATALOG[itemId];
   const maximumDurability = catalog?.maxDurability;
@@ -474,7 +485,12 @@ export async function redeemBonusCode(rawCode: string): Promise<RedeemBonusCodeR
 }
 
 export function mailboxRewardLabel(reward: MailReward): string {
-  if (reward.type === "item") return `${reward.quantity}× ${reward.item?.name ?? ITEM_CATALOG[reward.itemId]?.name ?? reward.itemId}`;
+  if (reward.type === "item") {
+    const label = `${reward.quantity}× ${reward.item?.name ?? ITEM_CATALOG[reward.itemId]?.name ?? reward.itemId}`;
+    return reward.containedItem && reward.containedQuantity
+      ? `${label} (${reward.containedQuantity} ${ITEM_CATALOG[reward.containedItem]?.name ?? reward.containedItem})`
+      : label;
+  }
   if (reward.type === "copper") return `${reward.amount} Copper`;
   if (reward.type === "silver") return `${reward.amount} Silver Coin${reward.amount === 1 ? "" : "s"}`;
   if (reward.type === "gold") return `${reward.amount} Gold Coin${reward.amount === 1 ? "" : "s"}`;

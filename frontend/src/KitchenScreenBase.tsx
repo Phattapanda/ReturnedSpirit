@@ -93,6 +93,8 @@ import {
   ALE_QUEST_ITEMS,
   GUEST_AREA_CLEAN_STAMINA_COST,
   GUEST_AREA_CLEAN_STEPS_REQUIRED,
+  OUTSIDE_CLEAN_STAMINA_COST,
+  OUTSIDE_CLEAN_STEPS_REQUIRED,
   HONEY_MEAD_QUEST_ITEMS,
   KITCHEN_TABLE_COLUMNS,
   KITCHEN_TABLE_UPGRADE_SILVER_COSTS,
@@ -103,14 +105,13 @@ import {
   PLOT_STANDARD_FERTILIZER_COST,
   SECOND_PLOT_STONE_COST,
   SECOND_PLOT_WOOD_COST,
-  TABLE_CHAIRS_NAILS_COST,
-  TABLE_CHAIRS_PAINT_COST,
-  TABLE_CHAIRS_WOOD_COST,
   cleanGuestAreaOnce,
+  cleanOutsideTavernOnce,
   isPlotUnlocked,
   grantFarmerCarrotSeedOnce,
   isAleServiceAvailable,
   isGuestAreaComplete,
+  isOutsideTavernCleanComplete,
   getKitchenTableRowCount,
   getKitchenTableSlotCount,
   loadPostGuestTutorialState,
@@ -118,7 +119,6 @@ import {
   markUpgradeIntroSeen,
   purchaseGardenPlotBuild,
   purchasePlotYieldUpgrade,
-  purchaseTableAndChairs,
   purchaseKitchenTableUpgrade,
   purchaseTavernDrinkUpgrade,
   type TavernDrinkUpgradeId,
@@ -371,6 +371,7 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   ore_silver: require("../assets/images/ore_silver.png"),
   ore_gold: require("../assets/images/ore_gold.png"),
   ingot_iron: require("../assets/images/ingot_iron.png"),
+  ingot_steel: require("../assets/images/ingot_steel.png"),
   ingot_copper: require("../assets/images/ingot_copper.png"),
   ingot_silver: require("../assets/images/ingot_silver.png"),
   ingot_gold: require("../assets/images/ingot_gold.png"),
@@ -676,6 +677,7 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
   // ── Game state
   const [staminaCurrent, setStaminaCurrent] = useState(20);
   const [staminaDisplay, setStaminaDisplay] = useState(20);
+  const staminaCurrentRef = useRef(20);
   const [lifeCurrent, setLifeCurrent] = useState(0);
   const [dayIdx, setDayIdx] = useState(0);
   const dayIdxRef = useRef(0);
@@ -1106,6 +1108,7 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
 
   // ── Stamina animation counter timer
   const staminaCountTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const normalConsumeUnlockTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasNavigatedToGardenRef = useRef(false);
   const hasNavigatedToDiningRef = useRef(false);
 
@@ -1127,6 +1130,38 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
   const gardenPulse  = useSharedValue(1);
   const diningPulse  = useSharedValue(1);
 
+  function updateStaminaCurrent(nextStamina: number) {
+    staminaCurrentRef.current = nextStamina;
+    setStaminaCurrent(nextStamina);
+  }
+
+  function animateStaminaCounter(startStamina: number, endStamina: number) {
+    if (staminaCountTimer.current) clearInterval(staminaCountTimer.current);
+    if (startStamina === endStamina) {
+      staminaCountTimer.current = null;
+      setStaminaDisplay(endStamina);
+      return;
+    }
+    const steps = 20;
+    const stepMs = STA_MS / steps;
+    let count = 0;
+    const timer = setInterval(() => {
+      count += 1;
+      setStaminaDisplay(Math.round(startStamina + ((endStamina - startStamina) * count) / steps));
+      if (count >= steps) {
+        clearInterval(timer);
+        if (staminaCountTimer.current === timer) staminaCountTimer.current = null;
+        setStaminaDisplay(endStamina);
+      }
+    }, stepMs);
+    staminaCountTimer.current = timer;
+  }
+
+  useEffect(() => () => {
+    if (staminaCountTimer.current) clearInterval(staminaCountTimer.current);
+    if (normalConsumeUnlockTimer.current) clearTimeout(normalConsumeUnlockTimer.current);
+  }, [clearInterval, clearTimeout]);
+
   // Room navigation supplies the current stamina synchronously. Apply it before
   // paint so a retained Kitchen never flashes the previous portrait expression.
   // AsyncStorage remains the source of truth for cold starts and save restores.
@@ -1139,7 +1174,7 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
   React.useLayoutEffect(() => {
     if (normalizedEntryStamina === undefined || lastAppliedEntryStaminaRef.current === normalizedEntryStamina) return;
     lastAppliedEntryStaminaRef.current = normalizedEntryStamina;
-    setStaminaCurrent(normalizedEntryStamina);
+    updateStaminaCurrent(normalizedEntryStamina);
     setStaminaDisplay(normalizedEntryStamina);
     staminaSV.value = normalizedEntryStamina;
   }, [normalizedEntryStamina, staminaSV]);
@@ -1155,7 +1190,7 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
         if (!active) return;
         if (rawStamina !== null && normalizedEntryStamina === undefined) {
           const stamina = Math.max(Number.parseInt(rawStamina, 10) || 0, 0);
-          setStaminaCurrent(stamina);
+          updateStaminaCurrent(stamina);
           setStaminaDisplay(stamina);
           staminaSV.value = stamina;
         }
@@ -1367,7 +1402,7 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
         if (done === "true") {
           const rawSta = await AsyncStorage.getItem(SK.STAMINA);
           const sta = rawSta ? Math.max(parseInt(rawSta, 10), 0) : 40;
-          setStaminaCurrent(sta);
+          updateStaminaCurrent(sta);
           setStaminaDisplay(sta);
           staminaSV.value = sta;
 
@@ -1642,23 +1677,28 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
     }
   }
 
-  async function handleTableAndChairsUpgrade() {
-    if (upgradeBusy || postGuestState.tableAndChairsCompletedDaySerial !== null) return;
+  async function handleOutsideTavernClean() {
+    if (upgradeBusy || isOutsideTavernCleanComplete(postGuestState)) return;
+    triggerHaptic("choice");
     setUpgradeBusy(true);
     setUpgradeMessage(null);
     try {
-      const result = await purchaseTableAndChairs();
+      const result = await cleanOutsideTavernOnce();
       setPostGuestState(result.state);
-      setSharedResources(result.resources);
+      updateStaminaCurrent(result.remainingStamina);
+      setStaminaDisplay(result.remainingStamina);
+      staminaSV.value = result.remainingStamina;
       if (!result.ok) {
         setUpgradeMessage(result.reason === "not_available"
           ? "This upgrade becomes available the day after the guest area is ready."
-          : "Need 15 Wood, 10 Nails and 1 Paint.");
+          : `Need ${result.staminaCost} Stamina to clean.`);
       } else if (result.alreadyComplete) {
         setUpgradeMessage("Already completed.");
-      } else {
-        setUpgradeMessage("New table and chairs complete. More guests can visit from tomorrow.");
+      } else if (result.completedNow) {
+        setUpgradeMessage("The outside of the tavern is clean. More guests can visit from tomorrow.");
         audioManager.playSoundEffect("upgrade-building", { maxDurationMs: 6000 });
+      } else {
+        setUpgradeMessage(`Cleaned ${result.state.outsideCleanSteps}/${OUTSIDE_CLEAN_STEPS_REQUIRED}.`);
       }
     } finally {
       setUpgradeBusy(false);
@@ -1730,7 +1770,7 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
       notifyLocationStatusChanged();
       setPostGuestState(result.state);
       void notifyTavernQuestPrerequisitesChanged();
-      setStaminaCurrent(result.remainingStamina);
+      updateStaminaCurrent(result.remainingStamina);
       setStaminaDisplay(result.remainingStamina);
       staminaSV.value = result.remainingStamina;
       if (!result.ok) {
@@ -1799,7 +1839,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
           const rawSta = await AsyncStorage.getItem(SK.STAMINA);
           if (rawSta) {
             const sta = Math.max(parseInt(rawSta, 10), 0);
-            setStaminaCurrent(sta);
+            updateStaminaCurrent(sta);
             setStaminaDisplay(sta);
             staminaSV.value = sta;
           }
@@ -2766,7 +2806,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     const newSta = applyStaminaRecovery("soup_herb", staminaCurrent, playerStats.maximumStamina);
     setStaminaGainDisplay(Math.max(0, newSta - staminaCurrent));
     // Update portrait immediately (tired → sad) before animation
-    setStaminaCurrent(newSta);
+    updateStaminaCurrent(newSta);
     setTutState("STAMINA_ANIMATING");
 
     // Animate stamina bar
@@ -2786,18 +2826,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     // Animate stamina display text counter
     const startSta = staminaCurrent;
     const endSta   = newSta;
-    const steps = 20;
-    const stepMs = STA_MS / steps;
-    let count = 0;
-    staminaCountTimer.current = setInterval(() => {
-      count++;
-      const val = Math.round(startSta + ((endSta - startSta) * count) / steps);
-      setStaminaDisplay(Math.min(val, endSta));
-      if (count >= steps) {
-        clearInterval(staminaCountTimer.current!);
-        setStaminaDisplay(endSta);
-      }
-    }, stepMs);
+    animateStaminaCounter(startSta, endSta);
   }
 
   function onStaminaDone(newSta: number) {
@@ -3519,7 +3548,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     const item = getCookingItemAtSlot(srcSlot);
     const consumable = item ? isConsumable(item) : false;
     if (!item || (!isEdible(item) && !consumable)) return;
-    if (!canConsumeForStamina(item, staminaCurrent, playerStats.maximumStamina)) {
+    if (!canConsumeForStamina(item, staminaCurrentRef.current, playerStats.maximumStamina)) {
       showPlayerBubble(consumable ? '"I don\'t need that right now."' : '"I\'m not hungry."');
       return;
     }
@@ -3570,11 +3599,15 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     soupVis.value = withTiming(0, { duration: CONSUME_MS }, (done) => {
       if (done) runOnJS(onNormalSoupConsumed)();
     });
+    // A new gesture can cancel the shared overlay animation. Never let that leave
+    // Kitchen input locked until the player changes rooms.
+    if (normalConsumeUnlockTimer.current) clearTimeout(normalConsumeUnlockTimer.current);
+    normalConsumeUnlockTimer.current = setTimeout(onNormalSoupConsumed, CONSUME_MS + 120);
 
-    const oldSta = staminaCurrent;
+    const oldSta = staminaCurrentRef.current;
     const newSta = applyStaminaRecovery(item, oldSta, playerStats.maximumStamina);
     setStaminaGainDisplay(Math.max(0, newSta - oldSta));
-    setStaminaCurrent(newSta);
+    updateStaminaCurrent(newSta);
     staminaSV.value = withTiming(newSta, { duration: STA_MS });
     AsyncStorage.setItem(SK.STAMINA, String(newSta)).catch(() => {});
 
@@ -3604,18 +3637,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         plusOp.value = withTiming(0, { duration: FLOAT_FADE_OUT_MS });
       }, FLOAT_MS - FLOAT_FADE_OUT_MS);
 
-      const steps = 20;
-      const stepMs = STA_MS / steps;
-      let count = 0;
-      staminaCountTimer.current = setInterval(() => {
-        count++;
-        const value = Math.round(oldSta + ((newSta - oldSta) * count) / steps);
-        setStaminaDisplay(Math.min(value, newSta));
-        if (count >= steps) {
-          clearInterval(staminaCountTimer.current!);
-          setStaminaDisplay(newSta);
-        }
-      }, stepMs);
+      animateStaminaCounter(oldSta, newSta);
     } else {
       setStaminaDisplay(newSta);
     }
@@ -3624,6 +3646,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   }
 
   function onNormalSoupConsumed() {
+    if (normalConsumeUnlockTimer.current) clearTimeout(normalConsumeUnlockTimer.current);
+    normalConsumeUnlockTimer.current = null;
     inputLocked.current = false;
     setSoupDragging(false);
   }
@@ -4231,7 +4255,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
 
     const newSta = applyStaminaRecovery("soup_herb", staminaCurrent, playerStats.maximumStamina);
     setStaminaGainDisplay(Math.max(0, newSta - staminaCurrent));
-    setStaminaCurrent(newSta);
+    updateStaminaCurrent(newSta);
     staminaSV.value = withTiming(newSta, { duration: STA_MS });
     plusY.value = 0; plusOp.value = 0;
     plusOp.value = withTiming(1, { duration: FLOAT_FADE_IN_MS });
@@ -4240,12 +4264,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     // counter
     const startSta = staminaCurrent;
     const endSta = newSta;
-    const steps = 20; const stepMs = STA_MS / steps; let count = 0;
-    staminaCountTimer.current = setInterval(() => {
-      count++;
-      setStaminaDisplay(Math.round(startSta + ((endSta - startSta) * count) / steps));
-      if (count >= steps) { clearInterval(staminaCountTimer.current!); setStaminaDisplay(endSta); }
-    }, stepMs);
+    animateStaminaCounter(startSta, endSta);
     AsyncStorage.setItem(SK.STAMINA, String(newSta)).catch(() => {});
   }
 
@@ -4562,6 +4581,9 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     getActiveStaminaBuffReduction(playerStats),
   );
   const canCleanGuestArea = !guestAreaComplete && staminaCurrent >= guestAreaCleanCost;
+  const outsideCleanComplete = isOutsideTavernCleanComplete(postGuestState);
+  const outsideCleanCost = OUTSIDE_CLEAN_STAMINA_COST;
+  const canCleanOutside = !outsideCleanComplete && staminaCurrent >= outsideCleanCost;
   const tableAndChairsAvailable = postGuestState.tableAndChairsCompletedDaySerial !== null || (
     guestAreaComplete &&
     postGuestState.guestAreaCompletedDaySerial !== null &&
@@ -5445,31 +5467,27 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
               {upgradeCategory === "tavern" && tableAndChairsAvailable && (
                 <View style={[
                   styles.upgradeCard,
-                  postGuestState.tableAndChairsCompletedDaySerial === null && (
-                    sharedResources.wood < TABLE_CHAIRS_WOOD_COST ||
-                    sharedResources.nails < TABLE_CHAIRS_NAILS_COST ||
-                    sharedResources.paint < TABLE_CHAIRS_PAINT_COST
-                  ) && styles.upgradeCardUnavailable,
-                  postGuestState.tableAndChairsCompletedDaySerial !== null && styles.upgradeCardCompleted,
+                  !outsideCleanComplete && !canCleanOutside && styles.upgradeCardUnavailable,
+                  outsideCleanComplete && styles.upgradeCardCompleted,
                 ]}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.upgradeName}>New table and chairs.</Text>
-                    <View style={styles.upgradeRequirements}>
-                      <UpgradeRequirement label="Wood" have={sharedResources.wood} need={TABLE_CHAIRS_WOOD_COST} />
-                      <UpgradeRequirement label="Nails" have={sharedResources.nails} need={TABLE_CHAIRS_NAILS_COST} />
-                      <UpgradeRequirement label="Paint" have={sharedResources.paint} need={TABLE_CHAIRS_PAINT_COST} />
+                  <View style={styles.guestAreaUpgradeContent}>
+                    <Text style={styles.upgradeName}>Clean Outside of the Tavern</Text>
+                    <View style={styles.guestAreaProgressRow}>
+                      {Array.from({ length: OUTSIDE_CLEAN_STEPS_REQUIRED }).map((_, index) => (
+                        <View key={index} style={[styles.guestAreaProgressStep, index < postGuestState.outsideCleanSteps && styles.guestAreaProgressStepFilled]} />
+                      ))}
                     </View>
+                    <Text style={styles.upgradeOwned}>{postGuestState.outsideCleanSteps}/{OUTSIDE_CLEAN_STEPS_REQUIRED} cleaned</Text>
                     <Text style={styles.upgradeOwned}>Attract more guests · Maximum guests +1</Text>
                   </View>
                   <TouchableOpacity
-                    style={[styles.upgradeBuildBtn, postGuestState.tableAndChairsCompletedDaySerial !== null && styles.upgradeBuildBtnDone, postGuestState.tableAndChairsCompletedDaySerial === null && (
-                      sharedResources.wood < TABLE_CHAIRS_WOOD_COST || sharedResources.nails < TABLE_CHAIRS_NAILS_COST || sharedResources.paint < TABLE_CHAIRS_PAINT_COST
-                    ) && styles.upgradeBuildBtnDisabled]}
-                    disabled={upgradeBusy || postGuestState.tableAndChairsCompletedDaySerial !== null || sharedResources.wood < TABLE_CHAIRS_WOOD_COST || sharedResources.nails < TABLE_CHAIRS_NAILS_COST || sharedResources.paint < TABLE_CHAIRS_PAINT_COST}
-                    onPress={() => { void handleTableAndChairsUpgrade(); }}
+                    style={[styles.upgradeBuildBtn, outsideCleanComplete && styles.upgradeBuildBtnDone, !outsideCleanComplete && !canCleanOutside && styles.upgradeBuildBtnDisabled]}
+                    disabled={upgradeBusy || outsideCleanComplete || !canCleanOutside}
+                    onPress={() => { void handleOutsideTavernClean(); }}
                     activeOpacity={0.8}
                   >
-                    <Text style={styles.upgradeBuildText}>{postGuestState.tableAndChairsCompletedDaySerial !== null ? "Complete" : upgradeBusy ? "..." : "Build"}</Text>
+                    <Text style={styles.upgradeBuildText}>{outsideCleanComplete ? "Complete" : upgradeBusy ? "..." : "Clean"}</Text>
+                    {!outsideCleanComplete && <View style={styles.upgradeStaminaCostRow}><Text style={styles.upgradeStaminaCost}>-{outsideCleanCost}</Text><Ionicons name="flash" size={12} color="#E8B84B" /></View>}
                   </TouchableOpacity>
                 </View>
               )}
@@ -5648,7 +5666,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
           staminaMaxSV.value = nextStats.maximumStamina;
         }}
         onStaminaUpdated={(nextStamina) => {
-          setStaminaCurrent(nextStamina);
+          updateStaminaCurrent(nextStamina);
           setStaminaDisplay(nextStamina);
           staminaSV.value = nextStamina;
         }}

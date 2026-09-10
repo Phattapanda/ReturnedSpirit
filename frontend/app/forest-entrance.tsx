@@ -19,7 +19,7 @@ import {
   FOREST_FLOOR_COUNT, FOREST_FORWARD_STAMINA_COST, FOREST_MONSTERS, FOREST_REST_FLOORS,
   FOREST_SEARCH_BASE_SUCCESS, FOREST_SEARCH_PERCEPTION_BONUS,
   ambushHiddenForestMonster, attackForestMonster, bandageAtForestRestArea, defendAgainstForestMonster, escapeForestCombat,
-  collectPendingForestCarcass, enterForestDungeon, forestAreaForFloor, goForwardInForest, hideFromForestMonster, leaveForestDungeon, letHiddenForestMonsterPass, searchForestArea,
+  collectPendingForestCarcass, dismissPendingForestLoot, enterForestDungeon, forestAreaForFloor, goForwardInForest, hideFromForestMonster, leaveForestDungeon, letHiddenForestMonsterPass, searchForestArea,
   type DungeonActionResult, type ForestDungeonState, type ForestMonsterId,
 } from "@/src/game/forest-dungeon-system";
 import { beginChosenNextRun, repeatForestFight } from "@/src/game/death-angel-system";
@@ -31,6 +31,7 @@ import { EMBER_ROOSTER_ENCOUNTER_SEEN_KEY } from "@/src/game/encounter-cinematic
 import { activeSupporter, discardSupporterItem, eatSupporterItem, loadSupporterBag, moveSupporterItemToPlayer, type SupporterId } from "@/src/game/city-system";
 import { ITEM_ATTRIBUTE, ITEM_CATALOG, hasItemAttribute, isConsumable, isEdible, type BagItem, type PlayerBagData } from "@/src/game/item-system";
 import { setGameplayBackBlocked } from "@/src/components/gameplay-back-guard";
+import { PLAYER_AVATAR_KEY, type PlayerAvatarId } from "@/src/game/player-avatar";
 
 const BACKGROUNDS: Record<ReturnType<typeof forestAreaForFloor>, ImageSourcePropType> = {
   "Forest Edge": require("../assets/images/forest_edge.png"),
@@ -412,12 +413,13 @@ export default function ForestEntranceScreen() {
     } finally { setBusy(false); }
   }
 
-  async function startNextRun(bonuses: NextRunBonuses) {
+  async function startNextRun(bonuses: NextRunBonuses, avatarId: PlayerAvatarId) {
     if (busy) return;
     setBusy(true); setDeathError(null);
     try {
       const rawSlot = await AsyncStorage.getItem("@game:active_slot");
       if (!rawSlot) { setDeathError("No active save slot was found."); return; }
+      await AsyncStorage.setItem(PLAYER_AVATAR_KEY, String(avatarId));
       const result = await beginChosenNextRun(Number.parseInt(rawSlot, 10), bonuses);
       if (result !== "ok") {
         setDeathError("There are not enough KP for these blessings.");
@@ -481,7 +483,10 @@ export default function ForestEntranceScreen() {
       <ActionButton label="Defend" subtitle="30% + Luck dodge" disabled={busy} onPress={() => { void perform(defendAgainstForestMonster); }} />
       <ActionButton label="Escape" subtitle="50% + Luck chance" danger disabled={busy} onPress={() => { void perform(escapeForestCombat); }} />
     </View>;
-    if (floor.carcassPending) return <ActionButton label="Collect Battle Loot" subtitle="Free space in either bag is required" disabled={busy} onPress={() => { void perform(collectPendingForestCarcass); }} />;
+    if (floor.carcassPending) return <View style={styles.combatGrid}>
+      <ActionButton label="Collect Battle Loot" subtitle="Free space in either bag is required" disabled={busy} onPress={() => { void perform(collectPendingForestCarcass); }} />
+      <ActionButton label="Dismiss" subtitle="Leave the remaining loot behind" danger disabled={busy} onPress={() => { void perform(dismissPendingForestLoot); }} />
+    </View>;
     if (bossCleared) return <ActionButton label="Leave Cleared Dungeon" subtitle="Return safely to the tavern" disabled={busy} onPress={() => { void leaveSafely(); }} />;
     return <>
       <ActionButton label="Search the area" subtitle={floor.searchAvailable && !floor.searched ? `${floor.searchCost} Stamina · ${FOREST_SEARCH_BASE_SUCCESS}% + ${FOREST_SEARCH_PERCEPTION_BONUS}% per Perception` : "Already searched"} disabled={busy || !floor.searchAvailable || floor.searched} onPress={() => { void perform(searchForestArea); }} />
@@ -505,7 +510,7 @@ export default function ForestEntranceScreen() {
       onSupporterPress={() => { void openSupporterBag(); }}
     />
     <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: 128, paddingBottom: insets.bottom + 22 }]} contentInsetAdjustmentBehavior="automatic" showsVerticalScrollIndicator={false}>
-      <View style={styles.monsterStage}>
+      {!isRestArea ? <View style={styles.monsterStage}>
         {monster && ((monsterState?.phase !== "defeated" && monsterState?.phase !== "avoided") || defeatedMonsterVisible) ? <View style={styles.monsterCard}>
           {monster.boss ? <Text style={styles.bossLabel}>BOSS</Text> : null}
           <View style={styles.monsterImageWrap}>
@@ -515,12 +520,17 @@ export default function ForestEntranceScreen() {
           <Text style={styles.monsterName}>{monster.name}</Text>
           <View style={styles.monsterLifeRow}><View style={styles.monsterLifeTrack}><View style={[styles.monsterLifeFill, { width: `${monsterLifePercent * 100}%` }]} /></View><Text style={styles.monsterLifeText}>{monsterState!.life}/{monsterState!.maximumLife} LP</Text></View>
         </View> : null}
-      </View>
-      <View style={styles.messageCard}><CombatMessage message={message} /></View>
-      <View style={styles.actionPanel}>{actionContent}</View>
+      </View> : null}
+      {isRestArea ? <>
+        <View style={[styles.actionPanel, styles.restAreaActionPanel]}>{actionContent}</View>
+        <View style={styles.messageCard}><CombatMessage message={message} /></View>
+      </> : <>
+        <View style={styles.messageCard}><CombatMessage message={message} /></View>
+        <View style={styles.actionPanel}>{actionContent}</View>
+      </>}
     </ScrollView>
     {lootFlights.length > 0 ? <LootFlightOverlay flights={lootFlights} width={screenWidth} height={screenHeight} headerHeight={headerHeight} /> : null}
-    <DeathAngelOverlay visible={currentLife <= 0} karmaPoints={karmaPoints} busy={busy} error={deathError} onRepeatFight={() => { void repeatFight(); }} onStartNextRun={(bonuses) => { void startNextRun(bonuses); }} />
+    <DeathAngelOverlay visible={currentLife <= 0} karmaPoints={karmaPoints} busy={busy} error={deathError} onRepeatFight={() => { void repeatFight(); }} onStartNextRun={(bonuses, avatarId) => { void startNextRun(bonuses, avatarId); }} />
     <Modal visible={contractVisible && !!supporter} transparent animationType="fade" onRequestClose={() => setContractVisible(false)}>
       <View style={styles.warningBackdrop}><View style={styles.supporterPanel}>
         {supporter ? <Image source={SUPPORTER_IMAGES[supporter.definition.id]} style={styles.contractPortrait} /> : null}
@@ -617,6 +627,7 @@ const styles = StyleSheet.create({
   damageReceived: { color: "#FF554D", fontWeight: "800" },
   damageDealt: { color: "#65D77A", fontWeight: "800" },
   actionPanel: { marginTop: "auto", gap: 8, borderRadius: 17, borderCurve: "continuous", borderWidth: 1.5, borderColor: "rgba(196,148,58,0.58)", backgroundColor: "rgba(18,9,2,0.94)", padding: 11 }, combatGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  restAreaActionPanel: { marginTop: 0 },
   actionButton: { minHeight: 54, flexGrow: 1, flexBasis: "46%", alignItems: "center", justifyContent: "center", gap: 3, borderRadius: 11, borderCurve: "continuous", borderWidth: 1, borderColor: "rgba(196,148,58,0.48)", backgroundColor: "rgba(65,39,10,0.86)", paddingHorizontal: 10, paddingVertical: 9 },
   dangerButton: { borderColor: "rgba(181,73,51,0.72)", backgroundColor: "rgba(98,28,18,0.78)" }, disabledButton: { opacity: 0.36 }, actionText: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 14, textAlign: "center" }, dangerText: { color: "#FFE0D8" }, actionSubtitle: { color: "rgba(240,232,213,0.58)", fontSize: 9, textAlign: "center" },
   deathCard: { alignItems: "center", gap: 12, paddingVertical: 20 }, deathTitle: { color: "#B91F16", fontSize: 38, fontWeight: "800", letterSpacing: 3 }, deathText: { color: "#F0E8D5", textAlign: "center", lineHeight: 20 },

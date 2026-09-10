@@ -434,7 +434,8 @@ export async function searchForestArea(): Promise<DungeonActionResult> {
   const location = SEARCH_LOCATIONS.find((entry) => entry.name === floor.searchLocation) ?? SEARCH_LOCATIONS[0];
   const searchLuck = hiredSupporter?.definition.id === "botanist" ? runtime.stats.luck * 1.15 : runtime.stats.luck;
   const botanistYield = hiredSupporter?.definition.id === "botanist" && Math.random() < 0.15 ? 1 : 0;
-  const findQuantity = 1 + botanistYield + Math.min(2, Math.floor(searchLuck / FOREST_SEARCH_LUCK_POINTS_PER_BONUS_ITEM));
+  const baseFindQuantity = location.itemId === "herbs" || location.itemId === "wild_berries" ? 2 : 1;
+  const findQuantity = baseFindQuantity + botanistYield + Math.min(2, Math.floor(searchLuck / FOREST_SEARCH_LUCK_POINTS_PER_BONUS_ITEM));
   let bag = runtime.bag;
   let message = `I searched the ${location.name}.`;
   if (eventRoll < 85 && location.copper) {
@@ -723,6 +724,19 @@ export async function collectPendingForestCarcass(): Promise<DungeonActionResult
     : `${collected.join(", ")} ${collected.length === 1 ? "was" : "were"} collected.`;
   await saveRuntime(state, runtime.life, runtime.stamina, bag);
   return { ok: remaining.length === 0, state, message, life: runtime.life, stamina: runtime.stamina, bag };
+}
+
+/** Leave uncollected battle loot behind so a full inventory cannot block progress. */
+export async function dismissPendingForestLoot(): Promise<DungeonActionResult> {
+  const state = await loadForestDungeonState();
+  const runtime = await loadRuntime();
+  const floor = currentFloorOf(state);
+  if (!floor.carcassPending) return { ok: false, state, message: "There is no battle loot to dismiss.", ...runtime };
+  floor.pendingLoot = [];
+  floor.carcassPending = false;
+  floor.message = "I leave the remaining battle loot behind.";
+  await saveRuntime(state, runtime.life, runtime.stamina, runtime.bag);
+  return { ok: true, state, message: floor.message, life: runtime.life, stamina: runtime.stamina, bag: runtime.bag };
 }
 
 export async function bandageAtForestRestArea(useHerb: boolean): Promise<DungeonActionResult> {
