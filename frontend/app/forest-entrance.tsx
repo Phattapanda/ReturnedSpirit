@@ -306,7 +306,7 @@ export default function ForestEntranceScreen() {
   async function playDefeatAnimation(flights: NonNullable<DungeonActionResult["lootFlights"]>) {
     setDefeatedMonsterVisible(true);
     setLootFlights(flights);
-    playSoundEffect("victory", { maxDurationMs: 8000 });
+    playSoundEffect(monster?.boss ? "victory-boss" : "victory", { maxDurationMs: 12000 });
     monsterOpacity.value = withSequence(
       withTiming(0.18, { duration: 300 }), withTiming(0.85, { duration: 260 }),
       withTiming(0, { duration: 430 }),

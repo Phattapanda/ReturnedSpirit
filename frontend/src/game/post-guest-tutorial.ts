@@ -57,7 +57,7 @@ const STAMINA_SPENT_TODAY_KEY = "@game:stamina_spent_today";
 const GUEST_STATE_KEY = "@game:guest_state";
 
 export type PostGuestTutorialState = {
-  version: 5;
+  version: 6;
   farmerGiftClaimed: boolean;
   secondPlotThoughtSeen: boolean;
   upgradeIntroSeen: boolean;
@@ -69,12 +69,13 @@ export type PostGuestTutorialState = {
   guestAreaCompletedDaySerial: number | null;
   tableAndChairsCompletedDaySerial: number | null;
   aleServiceUnlocked: boolean;
+  aleServiceAvailableDaySerial: number | null;
   honeyMeadServiceUnlocked: boolean;
   kitchenTableUpgradeLevel: number;
 };
 
 export const DEFAULT_POST_GUEST_TUTORIAL_STATE: PostGuestTutorialState = {
-  version: 5,
+  version: 6,
   farmerGiftClaimed: false,
   secondPlotThoughtSeen: false,
   upgradeIntroSeen: false,
@@ -86,6 +87,7 @@ export const DEFAULT_POST_GUEST_TUTORIAL_STATE: PostGuestTutorialState = {
   guestAreaCompletedDaySerial: null,
   tableAndChairsCompletedDaySerial: null,
   aleServiceUnlocked: false,
+  aleServiceAvailableDaySerial: null,
   honeyMeadServiceUnlocked: false,
   kitchenTableUpgradeLevel: 0,
 };
@@ -109,8 +111,10 @@ function normalizeState(raw: unknown): PostGuestTutorialState {
   const completedDaySerial = Number(candidate.guestAreaCompletedDaySerial);
   const secondPlotUnlocked = candidate.secondPlotUnlocked === true;
   const thirdPlotUnlocked = secondPlotUnlocked && candidate.thirdPlotUnlocked === true;
+  const aleServiceUnlocked = candidate.aleServiceUnlocked === true;
+  const aleAvailableDaySerial = Number(candidate.aleServiceAvailableDaySerial);
   return {
-    version: 5,
+    version: 6,
     farmerGiftClaimed: candidate.farmerGiftClaimed === true,
     secondPlotThoughtSeen: candidate.secondPlotThoughtSeen === true,
     upgradeIntroSeen: candidate.upgradeIntroSeen === true,
@@ -132,8 +136,12 @@ function normalizeState(raw: unknown): PostGuestTutorialState {
       Number.isFinite(Number(candidate.tableAndChairsCompletedDaySerial))
       ? Math.max(0, Math.floor(Number(candidate.tableAndChairsCompletedDaySerial)))
       : null,
-    aleServiceUnlocked: candidate.aleServiceUnlocked === true,
-    honeyMeadServiceUnlocked: candidate.aleServiceUnlocked === true && candidate.honeyMeadServiceUnlocked === true,
+    aleServiceUnlocked,
+    // Legacy saves already serving Ale have no activation day and remain available.
+    aleServiceAvailableDaySerial: aleServiceUnlocked
+      ? Number.isFinite(aleAvailableDaySerial) ? Math.max(0, Math.floor(aleAvailableDaySerial)) : 0
+      : null,
+    honeyMeadServiceUnlocked: aleServiceUnlocked && candidate.honeyMeadServiceUnlocked === true,
     kitchenTableUpgradeLevel: Math.max(0, Math.min(3, Math.floor(Number(candidate.kitchenTableUpgradeLevel) || 0))),
   };
 }
@@ -195,11 +203,17 @@ export type TavernBeverage = {
   alcoholic: boolean;
 };
 
-export function getTavernBeverage(state: PostGuestTutorialState): TavernBeverage {
+export function isAleServiceAvailable(state: PostGuestTutorialState, calendarDaySerial: number): boolean {
+  return state.aleServiceUnlocked &&
+    state.aleServiceAvailableDaySerial !== null &&
+    calendarDaySerial >= state.aleServiceAvailableDaySerial;
+}
+
+export function getTavernBeverage(state: PostGuestTutorialState, calendarDaySerial: number): TavernBeverage {
   if (state.honeyMeadServiceUnlocked) {
     return { id: "honey_mead", name: "Honey Mead", priceCopper: 11, alcoholic: true };
   }
-  if (state.aleServiceUnlocked) {
+  if (isAleServiceAvailable(state, calendarDaySerial)) {
     return { id: "standard_ale", name: "Standard Ale", priceCopper: 5, alcoholic: true };
   }
   return { id: "water", name: "Water", priceCopper: 1, alcoholic: false };
@@ -252,11 +266,19 @@ function consumeBagItems(playerBag: PlayerBagData, itemIds: readonly string[]): 
 }
 
 export async function purchaseTavernDrinkUpgrade(upgradeId: TavernDrinkUpgradeId): Promise<TavernDrinkUpgradeResult> {
-  const [state, tavernQuests] = await Promise.all([loadPostGuestTutorialState(), loadTavernQuestState()]);
-  const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
+  const [state, tavernQuests, rawBag, rawGuestState] = await Promise.all([
+    loadPostGuestTutorialState(),
+    loadTavernQuestState(),
+    AsyncStorage.getItem(PLAYER_BAG_KEY),
+    AsyncStorage.getItem(GUEST_STATE_KEY),
+  ]);
   let playerBag = { ...DEFAULT_BAG, slots: [...DEFAULT_BAG.slots] };
   if (rawBag) {
     try { playerBag = normalizePlayerBagData(JSON.parse(rawBag)); } catch { /* use default */ }
+  }
+  let calendarDaySerial = 0;
+  if (rawGuestState) {
+    try { calendarDaySerial = Math.max(0, Math.floor(Number(JSON.parse(rawGuestState).calendarDaySerial) || 0)); } catch { /* first day */ }
   }
 
   const alreadyUnlocked = upgradeId === "serve_ale" ? state.aleServiceUnlocked : state.honeyMeadServiceUnlocked;
@@ -264,7 +286,7 @@ export async function purchaseTavernDrinkUpgrade(upgradeId: TavernDrinkUpgradeId
 
   const prerequisiteMet = upgradeId === "serve_ale"
     ? isGuestAreaComplete(state) && tavernQuests.claimed.serve_water
-    : state.aleServiceUnlocked;
+    : isAleServiceAvailable(state, calendarDaySerial);
   if (!prerequisiteMet) {
     return { ok: false, reason: "prerequisite_locked", missingItems: [], state, playerBag };
   }
@@ -279,6 +301,9 @@ export async function purchaseTavernDrinkUpgrade(upgradeId: TavernDrinkUpgradeId
   const nextState: PostGuestTutorialState = {
     ...state,
     aleServiceUnlocked: upgradeId === "serve_ale" ? true : state.aleServiceUnlocked,
+    aleServiceAvailableDaySerial: upgradeId === "serve_ale"
+      ? calendarDaySerial + 1
+      : state.aleServiceAvailableDaySerial,
     honeyMeadServiceUnlocked: upgradeId === "serve_honey_mead" ? true : state.honeyMeadServiceUnlocked,
   };
   await AsyncStorage.multiSet([

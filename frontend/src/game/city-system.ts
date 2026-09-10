@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { audioEngine } from "@/src/audio/audioEngine";
 
 import {
   CURRENCY_KEY,
@@ -41,11 +42,12 @@ export const SUPPORTERS: Record<SupporterId, SupporterDefinition> = {
 };
 
 export const QUESTS = {
-  wolves: { id: "wolves", type: "Battle Quest", title: "Defeat 3 Wild Wolves", detail: "Defeat three Wild Wolves in the Forest Dungeon.", rewardCopper: 600, reputation: 10 },
-  feathers: { id: "feathers", type: "Collection Quest", title: "Collect 6 Ember Feathers", detail: "Bring six Ember Feathers to the Guild.", rewardCopper: 400, reputation: 6 },
-  camp: { id: "camp", type: "Investigation Quest", title: "Investigate the Hunter's Camp", detail: "Retrieve the researchers' documents from the abandoned camp in the Forest Dungeon.", rewardCopper: 200, reputation: 3 },
-  healing: { id: "healing", type: "Alchemy Quest", title: "Deliver 3 Low Quality Healing Potions", detail: "Bring three low-grade healing potions to the Guild.", rewardCopper: 150, reputation: 3 },
+  wolves: { id: "wolves", type: "Battle Quest", rank: "H", title: "Defeat 2 Feral Rabbits", detail: "Defeat two Feral Rabbits in the Forest Dungeon.", rewardCopper: 60, reputation: 7 },
+  feathers: { id: "feathers", type: "Collection Quest", rank: "H", title: "Collect 2× Mushrooms", detail: "Bring two Mushrooms to the Adventurers’ Guild.", rewardCopper: 40, reputation: 5 },
+  camp: { id: "camp", type: "Investigation Quest", rank: "H", title: "Retrieve the Researchers' Documents", detail: "Retrieve the researchers' documents from the abandoned camp in the Forest Dungeon.", rewardCopper: 75, reputation: 3 },
+  healing: { id: "healing", type: "Alchemy Quest", rank: "H", title: "Deliver 1 Low Quality Stamina Potion", detail: "Bring one Low Quality Stamina Potion to the Adventurers’ Guild.", rewardCopper: 60, reputation: 4 },
 } as const;
+const RANK_H_QUEST_KARMA_POINTS = 3;
 
 export type CityState = {
   version: 1;
@@ -166,10 +168,12 @@ export type GuildCarcassSelection = {
 export type BlacksmithRecipeId =
   | "smelt_iron"
   | "smelt_copper"
+  | "smelt_steel"
   | "smelt_silver"
   | "smelt_gold"
   | "upgrade_old_pot_coins"
   | "upgrade_old_pot_iron"
+  | "upgrade_cooking_pot_steel"
   | "upgrade_rusty_knife"
   | "upgrade_iron_knife";
 
@@ -184,6 +188,7 @@ export type BlacksmithRecipe = {
 export const BLACKSMITH_SMELTING_RECIPES: readonly BlacksmithRecipe[] = [
   { id: "smelt_iron", input: [{ itemId: "ore_iron", quantity: 3 }], outputItemId: "ingot_iron", outputQuantity: 1, priceCopper: 50 },
   { id: "smelt_copper", input: [{ itemId: "ore_copper", quantity: 3 }], outputItemId: "ingot_copper", outputQuantity: 1, priceCopper: 100 },
+  { id: "smelt_steel", input: [{ itemId: "ore_iron", quantity: 2 }, { itemId: "coal", quantity: 2 }], outputItemId: "ingot_steel", outputQuantity: 1, priceCopper: 150 },
   { id: "smelt_silver", input: [{ itemId: "ore_silver", quantity: 3 }], outputItemId: "ingot_silver", outputQuantity: 1, priceCopper: 200 },
   { id: "smelt_gold", input: [{ itemId: "ore_gold", quantity: 3 }], outputItemId: "ingot_gold", outputQuantity: 1, priceCopper: 400 },
 ];
@@ -191,6 +196,7 @@ export const BLACKSMITH_SMELTING_RECIPES: readonly BlacksmithRecipe[] = [
 export const BLACKSMITH_TOOL_UPGRADE_RECIPES: readonly BlacksmithRecipe[] = [
   { id: "upgrade_old_pot_coins", input: [{ itemId: "oldpot", quantity: 1 }], outputItemId: "cooking_pot", outputQuantity: 1, priceCopper: 300 },
   { id: "upgrade_old_pot_iron", input: [{ itemId: "oldpot", quantity: 1 }, { itemId: "ingot_iron", quantity: 2 }], outputItemId: "cooking_pot", outputQuantity: 1, priceCopper: 50 },
+  { id: "upgrade_cooking_pot_steel", input: [{ itemId: "cooking_pot", quantity: 1 }, { itemId: "ingot_steel", quantity: 3 }], outputItemId: "fine_cooking_pot", outputQuantity: 1, priceCopper: 400 },
   { id: "upgrade_rusty_knife", input: [{ itemId: "tool_rusty_butchering_knife", quantity: 1 }, { itemId: "ingot_iron", quantity: 2 }], outputItemId: "tool_iron_butchering_knife", outputQuantity: 1, priceCopper: 100 },
   { id: "upgrade_iron_knife", input: [{ itemId: "tool_iron_butchering_knife", quantity: 1 }, { itemId: "ingot_steel", quantity: 2 }], outputItemId: "tool_steel_butchering_knife", outputQuantity: 1, priceCopper: 300 },
 ];
@@ -238,6 +244,7 @@ export async function performBlacksmithRecipe(recipeId: BlacksmithRecipeId): Pro
     [CURRENCY_KEY, String(remainingCopper)],
   ]);
   notifyCurrencyChanged(remainingCopper);
+  if (recipe.priceCopper > 0) audioEngine.playSoundEffect("losecoin", { maxDurationMs: 2200 });
   return {
     ok: true,
     message: `${recipe.input.map((entry) => `${entry.quantity}× ${ITEM_CATALOG[entry.itemId]?.name ?? entry.itemId}`).join(" + ")} transformed into ${recipe.outputQuantity}× ${output.name}.`,
@@ -359,9 +366,18 @@ export async function repairCityItem(slot: number): Promise<CityActionResult> {
 export async function tanMaterial(source: "fur" | "wolf_pelt"): Promise<CityActionResult> {
   const bag = await loadBag(); const index = bag.slots.findIndex((item) => item?.id === source);
   if (index < 0) return { ok: false, message: `I do not have any ${source === "fur" ? "Fur" : "Wolf Pelt"}.` };
+  const priceCopper = 25;
+  const balance = await loadCurrencyCopper();
+  if (balance < priceCopper) return { ok: false, message: `I need ${formatCurrencyAmount(priceCopper)} for tanning.` };
   const removed = removeBagItem(bag, index, 1); const leather = createItem("leather"); leather.quantity = source === "fur" ? 1 : 2;
   const plan = planAddToBag(leather, removed); if (!plan.canTransfer || plan.remainderQty) return { ok: false, message: "My bag needs room for the Leather." };
-  await AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify({ ...removed, slots: plan.updatedSlots }));
+  const remainingCopper = balance - priceCopper;
+  await AsyncStorage.multiSet([
+    [PLAYER_BAG_KEY, JSON.stringify({ ...removed, slots: plan.updatedSlots })],
+    [CURRENCY_KEY, String(remainingCopper)],
+  ]);
+  notifyCurrencyChanged(remainingCopper);
+  audioEngine.playSoundEffect("losecoin", { maxDurationMs: 2200 });
   return { ok: true, message: `${source === "fur" ? "Fur" : "Wolf Pelt"} processed into ${leather.quantity}× Leather.` };
 }
 
@@ -468,7 +484,7 @@ export async function deliverSupporterBagAfterDungeonRun(): Promise<boolean> {
     sender: definition.name,
     senderKind: "adventurer",
     subject: "Supporter Bag Returned",
-    body: "Our dungeon run is over. I packed everything I carried during the expedition and sent it to your mailbox.",
+    body: "Our dungeon run is over. I packed everything I carried during the expedition and sent it to your Courier’s Chest.",
     rewards: carriedItems.map((item) => ({
       type: "item" as const,
       itemId: item.id,
@@ -520,14 +536,14 @@ function consumeItems(bag: PlayerBagData, id: string, quantity: number): PlayerB
 
 export async function turnInQuest(id: QuestId): Promise<CityActionResult> {
   const state = await loadCityState(); const quest = state.quests[id]; if (quest.status !== "accepted" && quest.status !== "ready") return { ok: false, message: "That quest is not ready to turn in." };
-  let bag = await loadBag(); let requirementMet = id === "wolves" ? quest.progress >= 3 : false;
-  const requirement = id === "feathers" ? ["ember_feather", 6] as const : id === "camp" ? ["quest_hunters_documents", 1] as const : id === "healing" ? ["potion_healing_low_grade", 3] as const : null;
+  let bag = await loadBag(); let requirementMet = id === "wolves" ? quest.progress >= 2 : false;
+  const requirement = id === "feathers" ? ["mushroom", 2] as const : id === "camp" ? ["quest_hunters_documents", 1] as const : id === "healing" ? ["potion_stamina_low_grade", 1] as const : null;
   if (requirement) { requirementMet = itemCount(bag, requirement[0]) >= requirement[1]; if (requirementMet) bag = consumeItems(bag, requirement[0], requirement[1]); }
   if (!requirementMet) return { ok: false, message: "The quest requirements are not complete yet." };
   const def = QUESTS[id]; state.guildReputation += def.reputation; state.quests[id] = { status: "completed", progress: quest.progress };
   await AsyncStorage.multiSet([[PLAYER_BAG_KEY, JSON.stringify(bag)], [CITY_STATE_KEY, JSON.stringify(state)]]);
-  await Promise.all([addCurrencyCopper(def.rewardCopper), addKarmaPoints(5)]);
-  return { ok: true, message: `Quest complete: ${formatCurrencyAmount(def.rewardCopper)}, ${def.reputation} Guild Reputation, and 5 KP awarded.` };
+  await Promise.all([addCurrencyCopper(def.rewardCopper), addKarmaPoints(RANK_H_QUEST_KARMA_POINTS)]);
+  return { ok: true, message: `Quest complete: ${formatCurrencyAmount(def.rewardCopper)} and ${def.reputation} Guild Reputation awarded.` };
 }
 
 export async function recordMonsterDefeat(monsterId: string): Promise<void> {
@@ -543,9 +559,9 @@ export async function recordMonsterDefeat(monsterId: string): Promise<void> {
     elder_ember_rooster: 15,
   };
   await addKarmaPoints(karmaReward[monsterId] ?? 3);
-  if (monsterId !== "wild_wolf") return;
+  if (monsterId !== "feral_rabbit") return;
   const state = await loadCityState(); const quest = state.quests.wolves;
-  if (quest.status !== "accepted") return; quest.progress = Math.min(3, quest.progress + 1); if (quest.progress >= 3) quest.status = "ready"; await saveCityState(state);
+  if (quest.status !== "accepted") return; quest.progress = Math.min(2, quest.progress + 1); if (quest.progress >= 2) quest.status = "ready"; await saveCityState(state);
 }
 
 export async function processGuildCarcasses(selections: readonly GuildCarcassSelection[]): Promise<CityActionResult> {
@@ -610,7 +626,7 @@ export async function processGuildCarcasses(selections: readonly GuildCarcassSel
   await saveCurrencyCopper(balance - totalFee);
   return {
     ok: true,
-    message: `${carcassCount} ${carcassCount === 1 ? "carcass" : "carcasses"} sent to the Guild Butcher for ${formatCurrencyAmount(totalFee)}. The result will arrive in tomorrow's Mailbox.`,
+    message: `${carcassCount} ${carcassCount === 1 ? "carcass" : "carcasses"} sent to the Guild Butcher for ${formatCurrencyAmount(totalFee)}. The result will arrive in the Courier’s Chest tomorrow.`,
   };
 }
 
@@ -648,7 +664,7 @@ export async function processTutorialWildWolf(): Promise<CityActionResult> {
     [CITY_STATE_KEY, JSON.stringify(state)],
   ]);
   await setCoachmanEscortPhase("complete");
-  return { ok: true, message: "The Guild accepted the carcass. The result will arrive in tomorrow's Mailbox." };
+  return { ok: true, message: "The Guild accepted the carcass. The result will arrive in the Courier’s Chest tomorrow." };
 }
 
 export function guildRank(reputation: number): string { return ["H", "G", "F", "E", "D", "C", "B", "A", "S", "L"][Math.min(9, Math.floor(reputation / 100))]; }

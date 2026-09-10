@@ -173,7 +173,7 @@ export function purchaseMerchantItem(stockId: MerchantStockId): Promise<Merchant
             slots: [...crateState.slots.slice(0, crateState.count * 6), ...Array(6).fill(null)],
           })],
         );
-        delivery = "garden";
+        delivery = "kitchen";
       } else if (stockId.startsWith("seed_") || stockId === "standard_fertilizer") {
         const inventory = normalizeGardenInventory(rawGardenInventory);
         const itemType = stockId.startsWith("seed_") ? "seed" : "fertilizer";
@@ -181,12 +181,12 @@ export function purchaseMerchantItem(stockId: MerchantStockId): Promise<Merchant
         if (existing) existing.quantity += 1;
         else inventory.push({ id: stockId, itemType, name: ITEM_CATALOG[stockId]?.name ?? stockId, quantity: 1 });
         extraPairs.push([GARDEN_INVENTORY_KEY, JSON.stringify(inventory)]);
-        delivery = "materials";
+        delivery = "garden";
       } else if (stockId === "nails" || stockId === "cloth" || stockId === "paint") {
         const resources = rawSharedResources ? JSON.parse(rawSharedResources) as Record<string, number> : {};
         resources[stockId] = Math.max(0, Number(resources[stockId]) || 0) + 1;
         extraPairs.push([SHARED_RESOURCES_KEY, JSON.stringify(resources)]);
-        delivery = "kitchen";
+        delivery = "materials";
       } else {
         const catalog = ITEM_CATALOG[stockId];
         const maximumDurability = catalog?.maxDurability;

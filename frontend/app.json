@@ -44,6 +44,7 @@
         {
           "hidden": true,
           "style": "light",
+          "backgroundColor": "#000000",
           "enforceContrast": false
         }
       ],

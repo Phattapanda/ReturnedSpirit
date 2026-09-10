@@ -30,7 +30,7 @@ async function loadQuestBookEntries(): Promise<QuestBookEntry[]> {
   (Object.keys(QUESTS) as QuestId[]).forEach((id) => {
     const state = city.quests[id];
     if (state.status === "offered") return;
-    const target = id === "wolves" ? 3 : id === "feathers" ? 6 : id === "camp" ? 1 : 3;
+    const target = id === "wolves" || id === "feathers" ? 2 : 1;
     entries.push({ id: `guild-${id}`, source: "Adventurers’ Guild", title: QUESTS[id].title, detail: QUESTS[id].detail, tab: state.status === "completed" ? "complete" : "open", ready: state.status === "ready", progress: id === "wolves" && state.status !== "completed" ? `${Math.min(target, state.progress)}/${target}` : undefined });
   });
   if (city.healingPotionContract !== "available") entries.push({ id: "merchant-healing-potions", source: "Merchant’s Guild", title: "Supply Contract: Healing Potion", detail: "Deliver 10 Low Quality Healing Potions.", tab: city.healingPotionContract === "completed" ? "complete" : "open" });

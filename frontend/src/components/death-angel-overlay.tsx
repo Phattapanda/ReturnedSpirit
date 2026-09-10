@@ -60,7 +60,7 @@ export default function DeathAngelOverlay({ visible, karmaPoints, busy = false, 
         <Option selected={bonuses.copper === 300} label="Start with 3 Silver Coins" cost="15 KP · 3 Silver Coins" onPress={() => setBonuses((current) => ({ ...current, copper: current.copper === 300 ? 0 : 300 }))} />
         <Option selected={!!bonuses.preserveFavor} label="Keep Guest Favor" cost="25 KP" onPress={() => toggle("preserveFavor")} />
         <Text style={styles.freeTitle}>Free recovered item package — choose one</Text>
-        {FREE_ITEMS.map((item) => <Option key={item.id} selected={bonuses.freeItem === item.id} label={item.label} cost="Delivered to the Mailbox by City Guard" onPress={() => setBonuses((current) => ({ ...current, freeItem: current.freeItem === item.id ? null : item.id }))} />)}
+        {FREE_ITEMS.map((item) => <Option key={item.id} selected={bonuses.freeItem === item.id} label={item.label} cost="Delivered to the Courier’s Chest by City Guard" onPress={() => setBonuses((current) => ({ ...current, freeItem: current.freeItem === item.id ? null : item.id }))} />)}
         <Text style={[styles.total, cost > karmaPoints && styles.totalInsufficient]}>Total: {cost} KP</Text>
         <TouchableOpacity style={[styles.confirmButton, (busy || cost > karmaPoints) && styles.disabled]} disabled={busy || cost > karmaPoints} onPress={() => onStartNextRun(bonuses)}>
           <Text style={styles.confirmText}>{busy ? "Preparing..." : "Start Next Run"}</Text>

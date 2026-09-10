@@ -81,7 +81,7 @@ export default function MailScreen() {
       if (!active) return;
       setUnlocked(guestTutorialHasReached(tutorialStep, "service_complete"));
       setMailbox(loadedMailbox);
-    }).catch(() => setFeedback("The mailbox could not be loaded."));
+    }).catch(() => setFeedback("The Courier’s Chest could not be loaded."));
     return () => { active = false; };
   }, []));
 
@@ -172,7 +172,7 @@ export default function MailScreen() {
     <View style={styles.root}>
       <View style={styles.backgroundGlow} pointerEvents="none" />
       <TravelHeader
-        locationName="Mailbox"
+        locationName="Courier’s Chest"
         showPortraitRow
         refreshKey={headerRefreshKey}
       />
@@ -187,8 +187,8 @@ export default function MailScreen() {
         {!unlocked ? (
           <View style={styles.lockedPanel}>
             <Ionicons name="lock-closed" size={36} color="#C4943A" />
-            <Text style={styles.lockedTitle}>Mailbox locked</Text>
-            <Text style={styles.lockedText}>The mailbox becomes available after the guest tutorial.</Text>
+            <Text style={styles.lockedTitle}>Courier’s Chest locked</Text>
+            <Text style={styles.lockedText}>The Courier’s Chest becomes available after the guest tutorial.</Text>
           </View>
         ) : (
           <>

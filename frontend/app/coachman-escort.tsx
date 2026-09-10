@@ -29,8 +29,19 @@ const PUNCH = require("../assets/images/punch.png");
 const CARCASS = require("../assets/images/monster_carcass.png");
 const BACKGROUND = require("../assets/images/battle_tutorial.png");
 const WOLF_MAX_LIFE = 18;
+const AVATAR3_BATTLE_TUTORIAL_SCALE_MULTIPLIER = 1.1;
 
 type Phase = "journey" | "combat" | "victory" | "post" | "leaving";
+
+function TutorialCombatMessage({ message }: { message: string }) {
+  const sentences = message.match(/[^.!?]+[.!?]?/g) ?? [message];
+  return <Text selectable style={styles.combatMessage}>{sentences.map((sentence, index) => {
+    const cleanSentence = sentence.trim();
+    const received = /Wild Wolf hits me for \d+ damage/i.test(cleanSentence);
+    const dealt = /I hit the Wild Wolf.*for \d+ damage|I strike the Wild Wolf critically for \d+ damage/i.test(cleanSentence);
+    return <Text key={`${index}-${cleanSentence}`} style={received ? styles.damageReceived : dealt ? styles.damageDealt : undefined}>{index > 0 ? " " : ""}{cleanSentence}</Text>;
+  })}</Text>;
+}
 
 function preBattleLines(playerName: string, playerPortrait: ImageSourcePropType, playerScale: number): StoryDialogLine[] {
   return [
@@ -79,7 +90,7 @@ export default function CoachmanEscortScreen() {
   const isWalking = params.mode === "walk";
   const wolfKarmaGrantedRef = useRef(false);
   const insets = useSafeAreaInsets();
-  const { width: screenWidth } = useWindowDimensions();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const { crossfadeTo, stopGameplayMusic, playSoundEffect } = useAudioManager();
   const [phase, setPhase] = useState<Phase>("journey");
   const [dialogIndex, setDialogIndex] = useState(0);
@@ -99,6 +110,8 @@ export default function CoachmanEscortScreen() {
   const [portraitBottom, setPortraitBottom] = useState(0);
   const [carcassPending, setCarcassPending] = useState(false);
   const [actionPanelHeight, setActionPanelHeight] = useState<number | null>(null);
+  const [combatMessageHeight, setCombatMessageHeight] = useState(58);
+  const [combatMessage, setCombatMessage] = useState("A Wild Wolf blocks the road.");
   const [attackEffect, setAttackEffect] = useState<ImageSourcePropType>(SLASH);
   const [runTransitionBusy, setRunTransitionBusy] = useState(false);
   const wolfOpacity = useRef(new Animated.Value(1)).current;
@@ -119,6 +132,11 @@ export default function CoachmanEscortScreen() {
   const preLines = useMemo(() => isWalking ? walkingPreBattleLines(playerName, playerPortrait, playerScale) : preBattleLines(playerName, playerPortrait, playerScale), [isWalking, playerName, playerPortrait, playerScale]);
   const postLines = useMemo(() => postBattleLines(playerName, playerPortrait, playerScale), [playerName, playerPortrait, playerScale]);
   const activeLines = phase === "journey" ? preLines : postLines;
+  const wideBattleLayout = screenWidth >= 400;
+
+  useEffect(() => {
+    setActionPanelHeight(null);
+  }, [wideBattleLayout]);
 
   useEffect(() => {
     void (async () => {
@@ -129,7 +147,8 @@ export default function CoachmanEscortScreen() {
       setLife(Math.max(1, Number.parseInt(rawLife[1] ?? String(loadedStats.maximumLife), 10) || loadedStats.maximumLife));
       const avatarId = normalizePlayerAvatarId(rawAvatar[1]);
       setPlayerPortrait(getPlayerDialogCharacter(avatarId, "normal", require("../assets/images/avatar1_normal.png")));
-      setPlayerScale(getPlayerDialogScale(avatarId));
+      const dialogScale = getPlayerDialogScale(avatarId);
+      setPlayerScale(avatarId === 3 ? dialogScale * AVATAR3_BATTLE_TUTORIAL_SCALE_MULTIPLIER : dialogScale);
       if (!isWalking) Animated.timing(blackFade, { toValue: 0, duration: 550, useNativeDriver: true }).start();
     })();
     return () => stopGameplayMusic(600);
@@ -155,6 +174,7 @@ export default function CoachmanEscortScreen() {
     if (dialogIndex < activeLines.length - 1) { setDialogIndex((index) => index + 1); return; }
     if (phase === "journey") {
       if (!isWalking) await setCoachmanEscortPhase("combat");
+      setCombatMessage("A Wild Wolf blocks the road.");
       setPhase("combat"); setDialogIndex(0);
       blackFade.setValue(1);
       Animated.timing(blackFade, { toValue: 0, duration: 600, useNativeDriver: true }).start();
@@ -198,7 +218,7 @@ export default function CoachmanEscortScreen() {
     );
   }
 
-  async function wolfAttacks(bag: PlayerBagData, defending = false) {
+  async function wolfAttacks(bag: PlayerBagData, defending = false, previousMessage = "") {
     const armor = getEquippedItem(bag, "armor");
     if (!armor && !isWalking) {
       setAwaitingArmor(true); setBusy(false);
@@ -214,6 +234,8 @@ export default function CoachmanEscortScreen() {
       const nextBag = damage > 0 && armor ? consumeArmorDurability(bag) : bag;
       await AsyncStorage.multiSet([["@game:life", String(nextLife)], [PLAYER_BAG_KEY, JSON.stringify(nextBag)]]);
       setLife(nextLife); setHeaderRefreshKey((value) => value + 1);
+      const attackMessage = `Wild Wolf hits me for ${damage} damage.`;
+      setCombatMessage(previousMessage ? `${previousMessage} ${attackMessage}` : attackMessage);
       playSoundEffect("combat-impact", { maxDurationMs: 3500 });
       redFlash.setValue(0.42);
       Animated.timing(redFlash, { toValue: 0, duration: 210, useNativeDriver: true }).start();
@@ -221,12 +243,16 @@ export default function CoachmanEscortScreen() {
         setAwaitingArmor(false); setBagAttention(false); setBusy(false);
         return;
       }
-    } else playSoundEffect("attack-miss", { maxDurationMs: 3000 });
+    } else {
+      const attackMessage = "I evade the Wild Wolf's attack.";
+      setCombatMessage(previousMessage ? `${previousMessage} ${attackMessage}` : attackMessage);
+      playSoundEffect("attack-miss", { maxDurationMs: 3000 });
+    }
     setTurn((value) => value + 1);
     setAwaitingArmor(false); setBagAttention(false); setBusy(false);
   }
 
-  async function playerAction() {
+  async function playerAction(target: "head" | "body") {
     if (busy || phase !== "combat") return;
     setBusy(true);
     let bag = await loadBag();
@@ -245,16 +271,20 @@ export default function CoachmanEscortScreen() {
       : Math.max(1, stats.strength);
     const damage = turn === 1 ? baseDamage * 2 : baseDamage;
     const nextWolfLife = Math.max(0, wolfLife - damage);
+    const attackMessage = turn === 1
+      ? `I strike the Wild Wolf critically for ${damage} damage.`
+      : `I hit the Wild Wolf's ${target} for ${damage} damage.`;
     if (weapon) bag = consumeWeaponDurability(bag);
     await AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(bag));
     setWolfLife(nextWolfLife); setHeaderRefreshKey((value) => value + 1);
+    setCombatMessage(attackMessage);
     playSoundEffect(weapon ? "sword-hit" : "combat-impact", { maxDurationMs: 3000 });
     setAttackEffect(weapon ? SLASH : PUNCH);
     slashOpacity.setValue(1);
     Animated.timing(slashOpacity, { toValue: 0, duration: 480, useNativeDriver: true }).start();
     flashWolf();
     if (nextWolfLife <= 0) { setBusy(false); setTimeout(() => { void finishWolf(bag); }, 280); return; }
-    setTimeout(() => { void wolfAttacks(bag); }, 520);
+    setTimeout(() => { void wolfAttacks(bag, false, attackMessage); }, 520);
   }
 
   async function defendAction() {
@@ -268,10 +298,14 @@ export default function CoachmanEscortScreen() {
       return;
     }
     setAwaitingArmor(false);
-    await wolfAttacks(bag, true);
+    await wolfAttacks(bag, true, "I brace myself for the Wild Wolf's attack.");
   }
 
-  function runBlocked() { showThought(isWalking ? "I can't outrun it." : "I can't leave him behind."); }
+  function runBlocked() {
+    const message = isWalking ? "I can't outrun the Wild Wolf." : "I can't leave the Coachman behind.";
+    setCombatMessage(message);
+    showThought(isWalking ? "I can't outrun it." : "I can't leave him behind.");
+  }
 
   async function addWolfCarcass(sourceBag?: PlayerBagData): Promise<boolean> {
     const bag = sourceBag ?? await loadBag();
@@ -288,6 +322,8 @@ export default function CoachmanEscortScreen() {
       wolfKarmaGrantedRef.current = true;
       await addKarmaPoints(3);
     }
+    setCombatMessage("I defeat the Wild Wolf.");
+    playSoundEffect("victory", { maxDurationMs: 8000 });
     setPhase("victory");
     Animated.timing(wolfOpacity, { toValue: 0, duration: 1000, useNativeDriver: true }).start(async () => {
       carcassOpacity.setValue(1);
@@ -334,6 +370,17 @@ export default function CoachmanEscortScreen() {
   }
 
   const dialogLine = phase === "journey" || phase === "post" ? activeLines[dialogIndex] ?? null : null;
+  const battleTop = portraitBottom || headerHeight + 120;
+  const availableBattleHeight = Math.max(300, screenHeight - battleTop);
+  const estimatedActionHeight = actionPanelHeight ?? (wideBattleLayout ? 82 : 146);
+  const battleBottomPadding = insets.bottom + 18;
+  const preferredBattleContentHeight = 310 + combatMessageHeight + 24 + estimatedActionHeight + battleBottomPadding;
+  const battleTopSpacing = Math.max(0, Math.min(132, availableBattleHeight - preferredBattleContentHeight));
+  const monsterAreaHeight = Math.max(
+    180,
+    Math.min(310, availableBattleHeight - battleTopSpacing - combatMessageHeight - estimatedActionHeight - battleBottomPadding - 24),
+  );
+  const wolfHeight = Math.max(142, Math.min(224, monsterAreaHeight - 72));
 
   return <View style={styles.root}>
     {phase === "combat" || phase === "victory" ? <>
@@ -342,25 +389,42 @@ export default function CoachmanEscortScreen() {
       <TravelHeader locationName="Road to the Next City" showPortraitRow onHeaderHeightChange={setHeaderHeight} onPortraitBottomChange={setPortraitBottom} refreshKey={headerRefreshKey} bagAttention={bagAttention} />
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 42 }]}
+        contentContainerStyle={[styles.content, { paddingTop: battleTopSpacing, paddingBottom: battleBottomPadding }]}
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.monsterArea}>
-          <Reanimated.View style={[styles.wolfAttackWrapper, wolfAttackStyle]}>
+        <View style={[styles.monsterArea, { height: monsterAreaHeight }]}>
+          <Reanimated.View style={[styles.wolfAttackWrapper, { height: wolfHeight }, wolfAttackStyle]}>
             <Animated.Image source={WOLF} style={[styles.wolf, { opacity: wolfOpacity }]} resizeMode="contain" />
           </Reanimated.View>
-          <Animated.Image source={attackEffect} style={[styles.slashEffect, { opacity: slashOpacity }]} resizeMode="contain" />
+          <Animated.Image source={attackEffect} style={[styles.slashEffect, { height: wolfHeight, opacity: slashOpacity }]} resizeMode="contain" />
           {phase === "victory" ? <Animated.Image source={CARCASS} style={[styles.carcass, { opacity: carcassOpacity, transform: carcassAnim.getTranslateTransform() }]} resizeMode="contain" /> : null}
           <View style={styles.lifeRow}><Text style={styles.monsterName}>Wild Wolf:</Text><View style={styles.lifeTrack}><View style={[styles.lifeFill, { width: `${wolfLife / WOLF_MAX_LIFE * 100}%` }]} /></View><Text style={styles.lifeText}>{wolfLife}/{WOLF_MAX_LIFE}</Text></View>
+        </View>
+        <View style={styles.combatMessageCard} onLayout={(event) => {
+          const measuredHeight = event.nativeEvent.layout.height;
+          if (measuredHeight > 0 && measuredHeight !== combatMessageHeight) setCombatMessageHeight(measuredHeight);
+        }}>
+          <TutorialCombatMessage message={combatMessage} />
         </View>
         <View style={[styles.actionArea, actionPanelHeight !== null && { height: actionPanelHeight }]}>
           {phase === "combat" ? <View style={styles.actionPanel} onLayout={(event) => {
             const measuredHeight = event.nativeEvent.layout.height;
             if (measuredHeight > 0 && measuredHeight !== actionPanelHeight) setActionPanelHeight(measuredHeight);
           }}>
-            <View style={styles.actionRow}><Action label="Attack Head" subtitle="45% · +50% damage" onPress={() => { void playerAction(); }} disabled={busy} /><Action label="Attack Body" subtitle="75% hit chance" onPress={() => { void playerAction(); }} disabled={busy} /></View>
-            <View style={styles.actionRow}><Action label="Defend" subtitle="Prepare for the attack" onPress={() => { void defendAction(); }} disabled={busy} /><Action label="Run" subtitle="Unavailable" onPress={runBlocked} disabled={busy} danger /></View>
+            {wideBattleLayout ? (
+              <View style={styles.actionRow}>
+                <Action label="Attack Head" subtitle="45% · +50% damage" onPress={() => { void playerAction("head"); }} disabled={busy} />
+                <Action label="Attack Body" subtitle="75% hit chance" onPress={() => { void playerAction("body"); }} disabled={busy} />
+                <Action label="Defend" subtitle="Prepare for the attack" onPress={() => { void defendAction(); }} disabled={busy} />
+                <Action label="Run" subtitle="Unavailable" onPress={runBlocked} disabled={busy} danger />
+              </View>
+            ) : (
+              <>
+                <View style={styles.actionRow}><Action label="Attack Head" subtitle="45% · +50% damage" onPress={() => { void playerAction("head"); }} disabled={busy} /><Action label="Attack Body" subtitle="75% hit chance" onPress={() => { void playerAction("body"); }} disabled={busy} /></View>
+                <View style={styles.actionRow}><Action label="Defend" subtitle="Prepare for the attack" onPress={() => { void defendAction(); }} disabled={busy} /><Action label="Run" subtitle="Unavailable" onPress={runBlocked} disabled={busy} danger /></View>
+              </>
+            )}
           </View> : carcassPending ? <TouchableOpacity style={styles.collectButton} onPress={() => { void collectPendingCarcass(); }}><Text style={styles.collectText}>Collect Monster Carcass</Text></TouchableOpacity> : null}
         </View>
       </ScrollView>
@@ -378,10 +442,14 @@ function Action({ label, subtitle, onPress, disabled, danger = false }: { label:
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#000" }, black: { zIndex: 600, backgroundColor: "#000" }, shade: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(0,0,0,0.24)" }, scroll: { flex: 1 }, content: { flexGrow: 1, justifyContent: "flex-start", gap: 12, paddingHorizontal: 14, paddingTop: 132 },
+  root: { flex: 1, backgroundColor: "#000" }, black: { zIndex: 600, backgroundColor: "#000" }, shade: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(0,0,0,0.24)" }, scroll: { flex: 1 }, content: { flexGrow: 1, justifyContent: "flex-start", gap: 12, paddingHorizontal: 14 },
   monsterArea: { height: 310, alignItems: "center", justifyContent: "flex-end", gap: 10 }, wolfAttackWrapper: { width: "72%", height: 224 }, wolf: { width: "100%", height: "100%", transform: [{ translateY: -8 }] }, carcass: { position: "absolute", bottom: 48, width: 120, height: 120 },
   slashEffect: { position: "absolute", top: 8, width: "68%", height: 220, zIndex: 20 },
   lifeRow: { width: "100%", flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 5 }, monsterName: { width: 82, color: "#FFF2D2", fontFamily: "Oldenburg", fontSize: 12 }, lifeTrack: { flex: 1, height: 13, borderRadius: 8, overflow: "hidden", borderWidth: 1, borderColor: "#E7C77A", backgroundColor: "rgba(32,5,2,0.88)" }, lifeFill: { height: "100%", backgroundColor: "#B52619" }, lifeText: { minWidth: 38, color: "#FFF2D2", fontFamily: "Oldenburg", fontSize: 11, fontVariant: ["tabular-nums"] },
+  combatMessageCard: { minHeight: 58, justifyContent: "center", borderRadius: 12, borderWidth: 1, borderColor: "rgba(196,148,58,0.48)", backgroundColor: "rgba(14,8,2,0.86)", padding: 10 },
+  combatMessage: { color: "#F0E8D5", fontSize: 12, lineHeight: 18, textAlign: "center" },
+  damageReceived: { color: "#FF554D", fontWeight: "800" },
+  damageDealt: { color: "#65D77A", fontWeight: "800" },
   actionArea: { minHeight: 146, justifyContent: "center" }, actionPanel: { gap: 8, borderRadius: 16, borderWidth: 1.5, borderColor: "rgba(196,148,58,0.58)", backgroundColor: "rgba(18,9,2,0.94)", padding: 10 }, actionRow: { flexDirection: "row", gap: 8 }, action: { flex: 1, minHeight: 58, alignItems: "center", justifyContent: "center", gap: 4, borderRadius: 11, borderWidth: 1, borderColor: "rgba(196,148,58,0.48)", backgroundColor: "rgba(65,39,10,0.9)", padding: 8 }, danger: { borderColor: "rgba(181,73,51,0.72)", backgroundColor: "rgba(98,28,18,0.82)" }, disabled: { opacity: 0.45 }, actionLabel: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 13 }, actionSubtitle: { color: "rgba(240,232,213,0.58)", fontSize: 9, textAlign: "center" },
   collectButton: { minHeight: 58, alignItems: "center", justifyContent: "center", borderRadius: 12, backgroundColor: "rgba(80,48,12,0.95)", borderWidth: 1, borderColor: "#C4943A" }, collectText: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 14 }, redFlash: { zIndex: 550, backgroundColor: "#D0180B" },
 });

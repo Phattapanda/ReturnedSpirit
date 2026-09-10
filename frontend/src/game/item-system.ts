@@ -134,6 +134,12 @@ export function normalizeBagItem(item: BagItem | null): BagItem | null {
   const itemType = normalizeItemId(item.itemType);
   const canonicalName = id === "white_meat" ? "White Meat" : id === "red_meat" ? "Red Meat" : item.name;
   const normalized = { ...item, id, itemType, name: canonicalName };
+  if (id === "tool_kitchen_knife") {
+    const unlimited = { ...normalized };
+    delete unlimited.durability;
+    delete unlimited.maxDurability;
+    return unlimited;
+  }
   const durability = getItemDurability(normalized);
   if (durability) {
     return {
@@ -656,9 +662,8 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
   },
   tool_kitchen_knife: {
     name: "Cooking Knife",
-    description: "A balanced cooking knife for precise preparation. Durability 50/50.",
+    description: "A permanent cooking tool for precise preparation.",
     attributes: [ITEM_ATTRIBUTE.TOOL],
-    maxDurability: 50,
   },
   torch: {
     name: "Torch",

@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { useAudioManager } from "@/src/audio/AudioProvider";
+import type { ThemeKey } from "@/src/audio/audioEngine";
 import CurrencyHud from "@/src/components/CurrencyHud";
 import CurrencyPrice from "@/src/components/currency-price";
 import SceneBackground from "@/src/components/SceneBackground";
@@ -27,6 +28,7 @@ import { loadCoachmanEscortState, markGuildIntroductionSeen, markWalkingArrivalG
 import { PLAYER_AVATAR_KEY, normalizePlayerAvatarId } from "@/src/game/player-avatar";
 import { unlockForestEntranceAfterRegistration } from "@/src/game/travel-system";
 import { loadTavernQuestState, markBrewQuestItemPurchased, type BrewQuestItemId, type TavernQuestState, DEFAULT_TAVERN_QUEST_STATE } from "@/src/game/tavern-quest-system";
+import { DEFAULT_MINSTREL_STATE, MINSTREL_SONGS, loadMinstrelState, markMinstrelIntroductionSeen, unlockMinstrelSong, type MinstrelSongId, type MinstrelState } from "@/src/game/minstrel-system";
 
 const MARKET_BACKGROUND = require("../assets/images/market.png");
 const ARTISAN_BACKGROUND = require("../assets/images/artisans_district.png");
@@ -52,7 +54,8 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   tool_iron_butchering_knife: require("../assets/images/tool_iron_butchering_knife.png"), tool_steel_butchering_knife: require("../assets/images/tool_steel_butchering_knife.png"),
   weapon_iron_dagger: require("../assets/images/weapon_iron_dagger.png"), weapon_iron_shortsword: require("../assets/images/weapon_iron_shortsword.png"),
   armor_leather_bracers: require("../assets/images/armor_leather_bracers.png"), armor_leather_armor: require("../assets/images/armor_leather_armor.png"),
-  oldpot: require("../assets/images/oldpot.png"), cooking_pot: require("../assets/images/cooking_pot.png"),
+  oldpot: require("../assets/images/oldpot.png"), cooking_pot: require("../assets/images/cooking_pot.png"), fine_cooking_pot: require("../assets/images/fine_cooking_pot.png"),
+  tool_kitchen_knife: require("../assets/images/cooking_knife.png"),
   ingot_iron: require("../assets/images/ingot_iron.png"), ingot_copper: require("../assets/images/ingot_copper.png"),
   ingot_silver: require("../assets/images/ingot_silver.png"), ingot_gold: require("../assets/images/ingot_gold.png"),
   ore_iron: require("../assets/images/ore_iron.png"), ore_copper: require("../assets/images/ore_copper.png"),
@@ -62,16 +65,25 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   dried_hop_cones: require("../assets/images/quest_item.png"), malted_barley: require("../assets/images/quest_item.png"), brewers_yeast: require("../assets/images/quest_item.png"),
 };
 
-type ViewId = "city" | "market" | "food" | "general" | "sell" | "fish" | "notice_board" | "artisan" | "blacksmith" | "blacksmith_buy" | "smelting" | "tool_upgrades" | "repair" | "tannery" | "guild" | "support" | "processing" | "quests" | "merchant" | "bulk" | "imports" | "contracts" | "temple" | "healing" | "blessings" | "holy_goods" | "alchemy_recipes" | "holy_sister" | "side_alley";
-const PARENT: Partial<Record<ViewId, ViewId>> = { market: "city", food: "market", general: "market", sell: "general", fish: "market", notice_board: "market", artisan: "city", blacksmith: "artisan", blacksmith_buy: "blacksmith", smelting: "blacksmith", tool_upgrades: "blacksmith", repair: "blacksmith", tannery: "artisan", guild: "city", support: "guild", processing: "guild", quests: "guild", merchant: "city", bulk: "merchant", imports: "merchant", contracts: "merchant", temple: "city", healing: "temple", blessings: "temple", holy_goods: "temple", alchemy_recipes: "temple", holy_sister: "temple", side_alley: "city" };
+type ViewId = "city" | "market" | "food" | "general" | "sell" | "fish" | "notice_board" | "minstrels" | "artisan" | "blacksmith" | "blacksmith_buy" | "smelting" | "tool_upgrades" | "repair" | "tannery" | "carpenter" | "guild" | "support" | "processing" | "quests" | "merchant" | "bulk" | "imports" | "contracts" | "temple" | "healing" | "blessings" | "holy_goods" | "alchemy_recipes" | "holy_sister" | "side_alley";
+const PARENT: Partial<Record<ViewId, ViewId>> = { market: "city", food: "market", general: "market", sell: "general", fish: "market", notice_board: "market", minstrels: "market", artisan: "city", blacksmith: "artisan", blacksmith_buy: "blacksmith", smelting: "blacksmith", tool_upgrades: "blacksmith", repair: "blacksmith", tannery: "artisan", carpenter: "artisan", guild: "city", support: "guild", processing: "guild", quests: "guild", merchant: "city", bulk: "merchant", imports: "merchant", contracts: "merchant", temple: "city", healing: "temple", blessings: "temple", holy_goods: "temple", alchemy_recipes: "temple", holy_sister: "temple", side_alley: "city" };
 const GENERAL = [{ id: "rope", price: 12 }, { id: "cloth", price: 22 }, { id: "empty_bottle", price: 12 }, { id: "torch", price: 30 }, { id: "bag3", price: 1000 }];
 const BLACKSMITH = [{ id: "tool_rusty_butchering_knife", price: 50 }, { id: "tool_iron_butchering_knife", price: 70 }, { id: "tool_kitchen_knife", price: 80 }, { id: "weapon_iron_dagger", price: 45 }, { id: "weapon_iron_shortsword", price: 60 }, { id: "armor_leather_bracers", price: 50 }, { id: "armor_leather_armor", price: 90 }, { id: "frying_pan", price: 100 }];
 const BULK_SHIPMENTS = [{ id: "potato" as const, price: 80 }, { id: "carrot" as const, price: 60 }, { id: "onion" as const, price: 100 }];
 const IMPORTS = [{ id: "snowberry", price: 35, reputation: 0 }, { id: "spices", price: 45, reputation: 10 }, { id: "wine", price: 60, reputation: 20 }, { id: "alchemical_ingredients", price: 70, reputation: 30 }, { id: "shard_mana", price: 100, reputation: 40 }];
 const HOLY_GOODS = [{ id: "holy_herb", price: 25 }, { id: "medicinal_herb", price: 22 }, { id: "blessed_water", price: 30 }, { id: "incense", price: 20 }, { id: "purified_salt", price: 18 }];
+const CARPENTER_SERVICES = [
+  { title: "Build Guest Room", description: "Adds a rentable guest room to the tavern." },
+  { title: "Upgrade Guest Room", description: "Improves comfort, rent and possible guest quality. Requires an existing guest room." },
+  { title: "Build Stable", description: "Unlocks animals." },
+  { title: "Expand Stable", description: "Increases stable spaces and capacity." },
+  { title: "Build Workshop", description: "Unlocks personal crafting and alchemy outside the tavern." },
+  { title: "Other Repairs", description: "Repairs damage caused by future events." },
+  { title: "Craft Furniture", description: "Improves Tavern Comfort or Decoration during future events." },
+] as const;
 
-function ItemIcon({ id }: { id: string }) {
-  return ITEM_IMAGES[id] ? <Image source={ITEM_IMAGES[id]} style={styles.itemImage} resizeMode="contain" /> : <Ionicons name={id.includes("armor") ? "shield-outline" : id.includes("weapon") || id.includes("knife") ? "hammer-outline" : id === "bag3" ? "bag-handle-outline" : "cube-outline"} size={30} color="#D6A33B" />;
+function ItemIcon({ id, size = 46 }: { id: string; size?: number }) {
+  return ITEM_IMAGES[id] ? <Image source={ITEM_IMAGES[id]} style={{ width: size, height: size }} resizeMode="contain" /> : <Ionicons name={id.includes("armor") ? "shield-outline" : id.includes("weapon") || id.includes("knife") ? "hammer-outline" : id === "bag3" ? "bag-handle-outline" : "cube-outline"} size={Math.round(size * 0.65)} color="#D6A33B" />;
 }
 
 function guildProcessingEstimate(monsterId: string): string {
@@ -101,7 +113,7 @@ function guildIntroductionLines(
   playerPortrait: ImageSourcePropType,
   playerScale: number,
 ): StoryDialogLine[] {
-  const receptionist = (text: string): StoryDialogLine => ({ speaker: "Receptionist", portrait: RECEPTIONIST, characterScale: 0.96, text });
+  const receptionist = (text: string): StoryDialogLine => ({ speaker: "Receptionist", portrait: RECEPTIONIST, characterScale: 0.91, text });
   const player = (text: string): StoryDialogLine => ({ speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, text });
   return [
     receptionist("Welcome to the Adventurer’s Guild. I don’t believe I’ve seen you here before."),
@@ -205,20 +217,29 @@ export default function NextCityScreen() {
   const [thought, setThought] = useState<string | null>(null);
   const [selectedCarcassKeys, setSelectedCarcassKeys] = useState<string[]>([]);
   const [tavernQuests, setTavernQuests] = useState<TavernQuestState>(DEFAULT_TAVERN_QUEST_STATE);
+  const [minstrelState, setMinstrelState] = useState<MinstrelState>(DEFAULT_MINSTREL_STATE);
+  const [minstrelDialogIndex, setMinstrelDialogIndex] = useState<number | null>(null);
+  const [activeMinstrelSong, setActiveMinstrelSong] = useState<MinstrelSongId | null>(null);
+  const [minstrelPlayback, setMinstrelPlayback] = useState<"playing" | "paused" | "stopped">("stopped");
+  const previousCityTheme = useRef<ThemeKey>(null);
+  const minstrelPurchasePending = useRef(false);
+  const stopMinstrelTrack = audio.stopMinstrelTrack;
   useEffect(() => () => { if (floatingMessageTimer.current) clearTimeout(floatingMessageTimer.current); }, []);
+  useEffect(() => () => { stopMinstrelTrack(); }, [stopMinstrelTrack]);
   function showFloatingMessage(text: string) {
     setFloatingMessage(text);
     if (floatingMessageTimer.current) clearTimeout(floatingMessageTimer.current);
     floatingMessageTimer.current = setTimeout(() => setFloatingMessage(null), 1000);
   }
   const refresh = useCallback(async () => {
-    const [state, rawBag, progression, escort, playerData, loadedTavernQuests] = await Promise.all([
+    const [state, rawBag, progression, escort, playerData, loadedTavernQuests, loadedMinstrels] = await Promise.all([
       loadCityState(),
       AsyncStorage.getItem(PLAYER_BAG_KEY),
       loadProgressionState(),
       loadCoachmanEscortState(),
       AsyncStorage.multiGet(["@game:player_name", PLAYER_AVATAR_KEY, "@game:stamina"]),
       loadTavernQuestState(),
+      loadMinstrelState(),
     ]);
     const avatarId = normalizePlayerAvatarId(playerData[1][1]);
     const stamina = Math.max(0, Number.parseInt(playerData[2][1] ?? "60", 10) || 0);
@@ -231,12 +252,24 @@ export default function NextCityScreen() {
     setPlayerDialogPortrait(getPlayerDialogCharacter(avatarId, getDialogExpressionForStamina(stamina), DIALOG_CHARACTER_ASSETS.avatar1.normal));
     setPlayerDialogScale(getPlayerDialogScale(avatarId));
     setTavernQuests(loadedTavernQuests);
+    setMinstrelState(loadedMinstrels);
     if (escort.phase === "city_arrival") setArrivalDialogIndex((current) => current ?? 0);
     if (params.arrival === "walk" && !escort.walkingArrivalGuardSeen) setCityGuardDialogIndex((current) => current ?? 0);
   }, [params.arrival, setArrivalDialogIndex, setCityGuardDialogIndex]);
   useFocusEffect(useCallback(() => { void refresh(); }, [refresh]));
   function open(next: ViewId) {
     if (next === "merchant" && !guildIntroductionSeen) return;
+    if (next === "minstrels") {
+      previousCityTheme.current = audio.currentThemeKey;
+      audio.stopGameplayMusic(0);
+      if (!minstrelState.introduced) setMinstrelDialogIndex(0);
+    } else if (view === "minstrels") {
+      audio.stopMinstrelTrack();
+      setActiveMinstrelSong(null);
+      setMinstrelPlayback("stopped");
+      if (previousCityTheme.current) audio.crossfadeTo(previousCityTheme.current, 650);
+      previousCityTheme.current = null;
+    }
     setMessage(null);
     setThought(null);
     setView(next);
@@ -335,8 +368,16 @@ export default function NextCityScreen() {
   const blacksmithRecipeRow = (recipe: BlacksmithRecipe) => {
     const input = recipe.input.map((entry) => `${entry.quantity}× ${ITEM_CATALOG[entry.itemId]?.name ?? entry.itemId}`).join(" + ");
     const owned = recipe.input.map((entry) => `${ITEM_CATALOG[entry.itemId]?.name ?? entry.itemId}: ${countInBag(entry.itemId)}/${entry.quantity}`).join(" · ");
-    return <View key={recipe.id} style={styles.smithRecipe}><View style={styles.smithRecipeMain}><View style={styles.iconBox}><ItemIcon id={recipe.outputItemId} /></View><View style={styles.stockText}><Text style={styles.stockName}>{input} → {recipe.outputQuantity}× {ITEM_CATALOG[recipe.outputItemId]?.name ?? recipe.outputItemId}</Text><Text style={styles.stockDescription}>In bag: {owned}</Text></View></View><TouchableOpacity disabled={busy} style={styles.smithActionButton} onPress={() => { void action(() => performBlacksmithRecipe(recipe.id)); }} activeOpacity={0.78}><Text style={styles.wideButtonText}>Transform ·</Text><CurrencyPrice totalCopper={recipe.priceCopper} textStyle={styles.wideButtonText} /></TouchableOpacity></View>;
+    return <View key={recipe.id} style={styles.smithRecipe}><View style={styles.smithRecipeMain}><View style={styles.iconBox}><ItemIcon id={recipe.outputItemId} /></View><View style={styles.stockText}><Text style={styles.stockName}>{input} → {recipe.outputQuantity}× {ITEM_CATALOG[recipe.outputItemId]?.name ?? recipe.outputItemId}</Text><Text style={styles.stockDescription}>In bag: {owned}</Text></View></View><TouchableOpacity disabled={busy} style={styles.smithActionButton} onPress={() => { void action(() => performBlacksmithRecipe(recipe.id)); }} activeOpacity={0.78}><Text style={styles.wideButtonText}>{recipe.priceCopper > 0 ? "Transform ·" : "Transform"}</Text>{recipe.priceCopper > 0 ? <CurrencyPrice totalCopper={recipe.priceCopper} textStyle={styles.wideButtonText} /> : null}</TouchableOpacity></View>;
   };
+  const tanneryRecipeRow = (source: "fur" | "wolf_pelt", leatherQuantity: 1 | 2) => <View key={source} style={styles.tanneryRecipe}>
+    <View style={styles.tanneryConversion}>
+      <View style={styles.tanneryItem}><View style={styles.tanneryIconBox}><ItemIcon id={source} size={62} /></View><Text style={styles.tanneryLabel}>{ITEM_CATALOG[source]?.name}</Text></View>
+      <Ionicons name="arrow-forward" size={28} color="#E4C882" />
+      <View style={styles.tanneryItem}><View style={styles.tanneryOutput}><Text style={styles.tanneryQuantity}>{leatherQuantity}×</Text><View style={styles.tanneryIconBox}><ItemIcon id="leather" size={62} /></View></View><Text style={styles.tanneryLabel}>Leather</Text></View>
+    </View>
+    <TouchableOpacity disabled={busy} style={[styles.smithActionButton, busy && styles.disabled]} onPress={() => { void action(() => tanMaterial(source)); }} activeOpacity={0.78}><Text style={styles.wideButtonText}>Process ·</Text><CurrencyPrice totalCopper={25} textStyle={styles.wideButtonText} /></TouchableOpacity>
+  </View>;
   const wallet = <View style={styles.walletCard}><Text style={styles.walletLabel}>Your Money</Text><CurrencyHud inline compact soundOnChange={false} /></View>;
   const arrivalLines: StoryDialogLine[] = [
     { speaker: "Coachman", portrait: DIALOG_CHARACTER_ASSETS.coachman, characterScale: COACHMAN_DIALOG_SCALE, text: "I’ll be on my way now. We’ll see each other at the tavern one of these days." },
@@ -355,6 +396,52 @@ export default function NextCityScreen() {
     { speaker: playerName, portrait: playerDialogPortrait, playerPortrait: true, characterScale: playerDialogScale, text: "A wild wolf attacked me on the way here. This is its carcass." },
     { speaker: "City Guard", portrait: DIALOG_CHARACTER_ASSETS.cityGuard, characterScale: 0.8, text: "A wild wolf on the paths? Take the carcass to the Adventurers' Guild and report the incident there." },
   ], [playerDialogPortrait, playerDialogScale, playerName]);
+  const minstrelIntroductionLines = useMemo<StoryDialogLine[]>(() => [
+    { text: "You are walking towards a group with musical instruments." },
+    { text: "A man who appears to be the leader of the group looks at you and speaks to you." },
+    { text: '“We have wandered across land and river and listened to music from various cultures. For a small fee, we can play something for you. Just don\'t ask us how we manage to produce such sounds with our ordinary medieval instruments.”' },
+  ], []);
+  function advanceMinstrelIntroduction() {
+    if (minstrelDialogIndex === null) return;
+    if (minstrelDialogIndex < minstrelIntroductionLines.length - 1) setMinstrelDialogIndex(minstrelDialogIndex + 1);
+  }
+  async function finishMinstrelIntroduction() {
+    const next = await markMinstrelIntroductionSeen();
+    setMinstrelState(next);
+    setMinstrelDialogIndex(null);
+  }
+  async function purchaseMinstrelSong(songId: MinstrelSongId) {
+    if (busy || minstrelPurchasePending.current) return;
+    minstrelPurchasePending.current = true;
+    setBusy(true);
+    try {
+      const result = await unlockMinstrelSong(songId);
+      setMinstrelState(result.state);
+      showFloatingMessage(result.message);
+    } finally {
+      minstrelPurchasePending.current = false;
+      setBusy(false);
+    }
+  }
+  function playMinstrelSong(songId: MinstrelSongId) {
+    const song = MINSTREL_SONGS.find((entry) => entry.id === songId);
+    if (!song) return;
+    const restart = activeMinstrelSong !== songId || minstrelPlayback !== "paused";
+    audio.playMinstrelTrack(song.audioKey, restart);
+    setActiveMinstrelSong(songId);
+    setMinstrelPlayback("playing");
+  }
+  function pauseMinstrelSong(songId: MinstrelSongId) {
+    if (activeMinstrelSong !== songId || minstrelPlayback !== "playing") return;
+    audio.pauseMinstrelTrack();
+    setMinstrelPlayback("paused");
+  }
+  function stopMinstrelSong(songId: MinstrelSongId) {
+    if (activeMinstrelSong !== songId) return;
+    audio.stopMinstrelTrack();
+    setActiveMinstrelSong(null);
+    setMinstrelPlayback("stopped");
+  }
   async function advanceArrivalDialog() {
     if (arrivalDialogIndex === 0) { setArrivalDialogIndex(1); return; }
     const next = await setCoachmanEscortPhase("city_exploration");
@@ -443,34 +530,57 @@ export default function NextCityScreen() {
   }
   const merchantReputation = city?.merchantReputation ?? 0;
   const adventurersGuildUnlocked = guildIntroductionSeen || escortPhase === "city_exploration" || escortPhase === "complete";
-  const artisanViews: ViewId[] = ["artisan", "blacksmith", "blacksmith_buy", "smelting", "tool_upgrades", "repair", "tannery"];
+  const artisanViews: ViewId[] = ["artisan", "blacksmith", "blacksmith_buy", "smelting", "tool_upgrades", "repair", "tannery", "carpenter"];
   const guildViews: ViewId[] = ["guild", "support", "processing", "quests"];
   const merchantViews: ViewId[] = ["merchant", "bulk", "imports", "contracts"];
   const templeViews: ViewId[] = ["temple", "healing", "blessings", "holy_goods", "alchemy_recipes", "holy_sister"];
   const background = artisanViews.includes(view) ? ARTISAN_BACKGROUND : guildViews.includes(view) ? ADVENTURERS_GUILD_BACKGROUND : merchantViews.includes(view) ? MERCHANT_GUILD_BACKGROUND : templeViews.includes(view) ? TEMPLE_BACKGROUND : MARKET_BACKGROUND;
 
   function content() {
-    if (view === "city") return <>{nav("The Market Square", "Food Stall, General Goods, Fishmonger & Town Notice Board", "market")}{nav("The Artisan District", "Blacksmith, Tannery & Craftsmen's Quarter", "artisan")}{nav("Adventurers' Guild", adventurersGuildUnlocked ? "Bounties, supporters and monster processing" : "Report a monster incident to gain access", adventurersGuildUnlocked ? "guild" : undefined, !adventurersGuildUnlocked)}{nav("Merchant's Guild", guildIntroductionSeen ? "Bulk orders, imports and trade contracts" : "Visit the Adventurers' Guild first", guildIntroductionSeen ? "merchant" : undefined, !guildIntroductionSeen)}{nav("Temple", "Temple of the Returning Light", "temple")}{nav("Side Alley", "A dark and unwelcoming passage", "side_alley")}</>;
+    if (view === "city") return <>{nav("The Market Square", "Food, general goods, notices & Minstrels", "market")}{nav("The Artisan District", "Blacksmith, Tannery & Craftsmen's Quarter", "artisan")}{nav("Adventurers' Guild", adventurersGuildUnlocked ? "Bounties, supporters and monster processing" : "Report a monster incident to gain access", adventurersGuildUnlocked ? "guild" : undefined, !adventurersGuildUnlocked)}{nav("Merchant's Guild", guildIntroductionSeen ? "Bulk orders, imports and trade contracts" : "Visit the Adventurers' Guild first", guildIntroductionSeen ? "merchant" : undefined, !guildIntroductionSeen)}{nav("Temple", "Temple of the Returning Light", "temple")}{nav("Side Alley", "A dark and unwelcoming passage", "side_alley")}</>;
     if (view === "market") {
       const generalGoodsOpen = bag.bagId === "bag2" || bag.bagId === "bag3";
-      return <><Text style={styles.sectionTitle}>The Market Square</Text>{nav("Food Stall", "A variety of ingredients from the countryside.", "food")}{nav("General Goods", generalGoodsOpen ? "Tools, supplies and bag expansions" : "Currently closed", generalGoodsOpen ? "general" : undefined, !generalGoodsOpen)}{nav("Fishmonger", "Fresh Fish Meat", "fish")}{nav("Town Notice Board", "Notices and announcements from around the city", "notice_board")}</>;
+      return <><Text style={styles.sectionTitle}>The Market Square</Text>{nav("Food Stall", "A variety of ingredients from the countryside.", "food")}{nav("General Goods", generalGoodsOpen ? "Tools, supplies and bag expansions" : "Currently closed", generalGoodsOpen ? "general" : undefined, !generalGoodsOpen)}{nav("Fishmonger", "Fresh Fish Meat", "fish")}{nav("Town Notice Board", "Notices and announcements from around the city", "notice_board")}{nav("Listening to the Minstrels", "Unlock songs and listen to music from distant cultures", "minstrels")}</>;
     }
     if (view === "food") return <><Text style={styles.sectionTitle}>Food Stall</Text><Text style={styles.note}>A variety of ingredients from the countryside. The selection changes slightly each day.</Text>{wallet}{city?.foodStock.map((id) => buyRow({ id, price: CITY_BUY_PRICES[id] ?? 10 }))}{tavernQuests.claimed.serve_water && !tavernQuests.purchasedBrewItems.dried_hop_cones ? brewQuestBuyRow("dried_hop_cones", 15) : null}</>;
     if (view === "general") return <><Text style={styles.sectionTitle}>General Goods</Text>{GENERAL.filter((item) => item.id !== "bag3" || bag.bagId !== "bag3").map(buyRow)}{tavernQuests.claimed.serve_water && !tavernQuests.purchasedBrewItems.malted_barley ? brewQuestBuyRow("malted_barley", 30) : null}{nav("Sell Goods", "The merchant pays 50% of base value, rounded up.", "sell")}</>;
     if (view === "sell") return <><Text style={styles.sectionTitle}>Sell Goods</Text><Text style={styles.note}>Tap an item to sell one. Equipped and quest items cannot be sold.</Text>{wallet}{bag.slots.map((item, slot) => item ? <TouchableOpacity key={slot} style={styles.simpleRow} disabled={busy} onPress={() => { void action(() => sellCityItem(slot)); }}><Text style={styles.simpleName}>{item.quantity}× {item.name}</Text><View style={styles.sellOffer}><Text style={styles.goldText}>Sell 1</Text><View style={styles.sellPrice}><CurrencyPrice totalCopper={citySellPrice(item.id)} /></View></View></TouchableOpacity> : null)}</>;
     if (view === "fish") return <><Text style={styles.sectionTitle}>Fishmonger</Text>{buyRow({ id: "fish", price: CITY_BUY_PRICES.fish ?? 18 })}<Text style={styles.note}>For now, Fish Meat must be bought here. Fishing can be added later.</Text></>;
     if (view === "notice_board") return <><Text style={styles.sectionTitle}>Town Notice Board</Text><Text selectable style={styles.note}>{"There's nothing interesting written there."}</Text></>;
-    if (view === "artisan") return <><Text style={styles.sectionTitle}>The Artisan District</Text>{nav("Blacksmith", "Buy and repair tools and equipment", "blacksmith")}{nav("Tannery", "Process monster pelts into Leather", "tannery")}{nav("Craftsmen's Quarter", "Utility recipes and materials — currently closed", undefined, true)}</>;
+    if (view === "minstrels") return <>
+      <Text style={styles.sectionTitle}>Listening to the Minstrels</Text>
+      <Text style={styles.note}>Unlock a song once, then listen whenever you visit the Minstrels.</Text>
+      {wallet}
+      {MINSTREL_SONGS.map((song) => {
+        const unlocked = minstrelState.unlockedSongIds.includes(song.id);
+        const active = activeMinstrelSong === song.id;
+        return <View key={song.id} style={[styles.minstrelSong, active && styles.minstrelSongActive]}>
+          <View style={styles.minstrelSongInfo}>
+            <Text style={styles.stockName}>{song.genre}</Text>
+            <Text style={styles.stockDescription}>{song.title}</Text>
+          </View>
+          {unlocked
+            ? <View style={styles.playerControls}>
+              <TouchableOpacity accessibilityLabel={`Play ${song.title}`} style={styles.playerButton} onPress={() => playMinstrelSong(song.id)}><Ionicons name="play" size={19} color="#FFF7E5" /></TouchableOpacity>
+              <TouchableOpacity accessibilityLabel={`Pause ${song.title}`} disabled={!active || minstrelPlayback !== "playing"} style={[styles.playerButton, (!active || minstrelPlayback !== "playing") && styles.disabled]} onPress={() => pauseMinstrelSong(song.id)}><Ionicons name="pause" size={19} color="#FFF7E5" /></TouchableOpacity>
+              <TouchableOpacity accessibilityLabel={`Stop ${song.title}`} disabled={!active} style={[styles.playerButton, !active && styles.disabled]} onPress={() => stopMinstrelSong(song.id)}><Ionicons name="stop" size={19} color="#FFF7E5" /></TouchableOpacity>
+            </View>
+            : <TouchableOpacity disabled={busy} style={[styles.priceButton, busy && styles.disabled]} onPress={() => { void purchaseMinstrelSong(song.id); }}><CurrencyPrice totalCopper={song.priceCopper} /></TouchableOpacity>}
+        </View>;
+      })}
+    </>;
+    if (view === "artisan") return <><Text style={styles.sectionTitle}>The Artisan District</Text>{nav("Blacksmith", "Buy and repair tools and equipment", "blacksmith")}{nav("Tannery", "Process monster pelts into Leather", "tannery")}{nav("Carpenter", "Construction and furnishing services — currently closed", "carpenter")}{nav("Craftsmen's Quarter", "Utility recipes and materials — currently closed", undefined, true)}</>;
     if (view === "blacksmith") return <><Text style={styles.sectionTitle}>Blacksmith</Text>{nav("Buy", "Tools, weapons and armor", "blacksmith_buy")}{nav("Ore Processing", "Refine three pieces of Ore into one Ingot", "smelting")}{nav("Tool Upgrades", "Improve cooking and butchering tools", "tool_upgrades")}{nav("Repair", <View style={styles.navPriceSubtitle}><Text style={styles.navSubtitle}>Restore tools and equipment for</Text><CurrencyPrice totalCopper={20} textStyle={styles.navSubtitle} /></View>, "repair")}</>;
     if (view === "blacksmith_buy") return <><Text style={styles.sectionTitle}>Blacksmith · Buy</Text>{wallet}{BLACKSMITH.map(buyRow)}</>;
     if (view === "smelting") return <><Text style={styles.sectionTitle}>Blacksmith · Ore Processing</Text><Text style={styles.note}>The Ore must be carried in your bag.</Text>{wallet}{BLACKSMITH_SMELTING_RECIPES.map(blacksmithRecipeRow)}</>;
     if (view === "tool_upgrades") return <><Text style={styles.sectionTitle}>Blacksmith · Tool Upgrades</Text><Text style={styles.note}>The tool and all required Ingots must be carried in your bag. Upgraded tools are returned at full Durability.</Text>{wallet}{BLACKSMITH_TOOL_UPGRADE_RECIPES.map(blacksmithRecipeRow)}</>;
     if (view === "repair") return <><Text style={styles.sectionTitle}>Repair</Text><View style={styles.notePriceRow}><Text style={styles.noteInline}>Every repair costs</Text><CurrencyPrice totalCopper={20} textStyle={styles.noteInline} /></View>{repairable.length ? repairable.map(({ item, slot }) => <TouchableOpacity key={slot} style={styles.simpleRow} onPress={() => { void action(() => repairCityItem(slot)); }}><View><Text style={styles.simpleName}>{item!.name}</Text><Text style={styles.small}>{item!.durability}/{item!.maxDurability} Durability</Text></View><CurrencyPrice totalCopper={20} textStyle={styles.goldText} /></TouchableOpacity>) : <Text style={styles.empty}>No damaged equipment in your bag.</Text>}</>;
-    if (view === "tannery") return <><Text style={styles.sectionTitle}>Tannery</Text><TouchableOpacity style={styles.recipe} onPress={() => { void action(() => tanMaterial("fur")); }}><Text style={styles.simpleName}>1× Fur → 1× Leather</Text></TouchableOpacity><TouchableOpacity style={styles.recipe} onPress={() => { void action(() => tanMaterial("wolf_pelt")); }}><Text style={styles.simpleName}>1× Wolf Pelt → 2× Leather</Text></TouchableOpacity><Text style={styles.note}>Leather will later be needed for bags and equipment.</Text></>;
+    if (view === "tannery") return <><Text style={styles.sectionTitle}>Tannery</Text><Text style={styles.note}>The material must be carried in your bag. Each conversion costs 25 Copper Coins.</Text>{wallet}{tanneryRecipeRow("fur", 1)}{tanneryRecipeRow("wolf_pelt", 2)}<Text style={styles.note}>Leather will later be needed for bags and equipment.</Text></>;
+    if (view === "carpenter") return <><Text style={styles.sectionTitle}>Carpenter</Text><Text style={styles.carpenterClosed}>Currently closed</Text>{CARPENTER_SERVICES.map((service) => <View key={service.title} style={styles.carpenterService}><View style={styles.carpenterLock}><Ionicons name="lock-closed" size={20} color="#8E7651" /></View><View style={styles.stockText}><Text style={styles.carpenterTitle}>{service.title}</Text><Text style={styles.carpenterDescription}>{service.description}</Text></View></View>)}</>;
     if (view === "guild") return <><Text style={styles.sectionTitle}>Adventurers’ Guild</Text>{city && <Text style={styles.rank}>Guild Rank {guildRank(city.guildReputation)} · {city.guildReputation} Reputation</Text>}{nav("The Expedition Hall", city?.supporter ? `${SUPPORTERS[city.supporter.id].name} · ${city.supporter.runsRemaining} runs remaining` : "Hire support for the next Dungeon Run", "support")}{nav("Monster Processing", "Send a carcass to the Guild Butcher", "processing")}{nav("Quest Board", "Accept quests and claim completed bounties", "quests")}</>;
     if (view === "support") return <><Text style={styles.sectionTitle}>The Expedition Hall</Text><View style={styles.notePriceRow}><CurrencyPrice totalCopper={100} textStyle={styles.noteInline} /><Text style={styles.noteInline}>per Dungeon Run. Choose up to three runs.</Text></View><View style={styles.stepper}><TouchableOpacity style={styles.stepButton} onPress={() => setRuns(Math.max(1, runs - 1))}><Text style={styles.stepText}>−</Text></TouchableOpacity><View style={styles.runCountRow}><Text style={styles.runCount}>{runs} Run{runs === 1 ? "" : "s"} ·</Text><CurrencyPrice totalCopper={runs * 100} textStyle={styles.runCount} /></View><TouchableOpacity style={styles.stepButton} onPress={() => setRuns(Math.min(3, runs + 1))}><Text style={styles.stepText}>+</Text></TouchableOpacity></View>{(Object.keys(SUPPORTERS) as SupporterId[]).map((id) => { const supporter = SUPPORTERS[id]; return <View key={id} style={styles.supporterRow}><Image source={SUPPORTER_IMAGES[id]} style={styles.supporterImage} /><View style={styles.stockText}><Text style={styles.stockName}>{supporter.name}</Text><Text style={styles.stockDescription}>{supporter.description}</Text></View><TouchableOpacity style={styles.hireButton} onPress={() => { void action(() => hireSupporter(id, runs)); }}><Text style={styles.hireText}>Hire</Text></TouchableOpacity></View>; })}</>;
-    if (view === "processing") return <><Text style={styles.sectionTitle}>Monster Processing</Text><Text style={styles.note}>Select every Monster Carcass you want the Guild Butcher to process.</Text>{wallet}{carriedCarcasses.length ? carriedCarcasses.map((carcass) => { const selected = selectedCarcassSet.has(carcass.key); return <TouchableOpacity key={carcass.key} style={[styles.processingChoice, selected && styles.selectedCard]} disabled={busy} onPress={() => toggleCarcass(carcass.key)} activeOpacity={0.78}><View style={styles.processingChoiceIcon}><ItemIcon id="monster_carcass" /></View><View style={styles.stockText}><Text style={styles.stockName}>{carcass.name}{carcass.stackQuantity > 1 ? ` · ${carcass.unitNumber}/${carcass.stackQuantity}` : ""}</Text><Text style={styles.stockDescription}>Estimated Result: {guildProcessingEstimate(carcass.monsterId)}</Text><View style={styles.processingUnitFee}><CurrencyPrice totalCopper={GUILD_PROCESSING_FEE_PER_CARCASS} /></View></View><View style={[styles.selectionCheck, selected && styles.selectionCheckSelected]}>{selected && <Ionicons name="checkmark" size={18} color="#FFF7E5" />}</View></TouchableOpacity>; }) : <Text style={styles.empty}>There are no processable Monster Carcasses in your bag.</Text>}<View style={styles.processingSummary}><View><Text style={styles.walletLabel}>Selected</Text><Text style={styles.processingCount}>{selectedCarcasses.length} {selectedCarcasses.length === 1 ? "Carcass" : "Carcasses"}</Text></View><View style={styles.processingTotal}><Text style={styles.walletLabel}>Processing Fee</Text><View style={styles.costLine}><CurrencyPrice totalCopper={processingTotal} textStyle={styles.processingCount} /></View></View></View><TouchableOpacity style={[styles.confirmProcessingButton, (selectedCarcasses.length === 0 || busy) && styles.disabled]} disabled={selectedCarcasses.length === 0 || busy} onPress={() => { void confirmCarcassProcessing(); }}><Ionicons name="checkmark-circle-outline" size={20} color="#FFF7E5" /><Text style={styles.wideButtonText}>Confirm</Text></TouchableOpacity><Text style={styles.note}>The results are delivered to your Mailbox on the following day. Rare materials are rolled independently.</Text></>;
-    if (view === "quests") return <><Text style={styles.sectionTitle}>Quest Board</Text><Text style={styles.note}>Accepted quests remain in your journal. Unaccepted quest categories are refreshed every Sunday.</Text>{(Object.keys(QUESTS) as QuestId[]).map((id) => { const def = QUESTS[id]; const status = city?.quests[id]; return <View key={id} style={styles.quest}><Text style={styles.questType}>{def.type}</Text><Text style={styles.stockName}>{def.title}</Text><Text style={styles.stockDescription}>{def.detail}</Text><View style={styles.rewardRow}><CurrencyPrice totalCopper={def.rewardCopper} textStyle={styles.reward} /><Text style={styles.reward}>· +{def.reputation} Guild Reputation · +5 KP</Text></View>{id === "wolves" && status && status.status !== "offered" && <Text style={styles.progress}>Progress: {Math.min(3, status.progress)}/3</Text>}<TouchableOpacity disabled={busy || status?.status === "completed"} style={[styles.wideButton, status?.status === "completed" && styles.disabled]} onPress={() => { void action(() => !status || status.status === "offered" ? acceptQuest(id) : turnInQuest(id)); }}><Text style={styles.wideButtonText}>{!status || status.status === "offered" ? "Accept Quest" : status.status === "completed" ? "Completed" : "Turn In"}</Text></TouchableOpacity></View>; })}</>;
+    if (view === "processing") return <><Text style={styles.sectionTitle}>Monster Processing</Text><Text style={styles.note}>Select every Monster Carcass you want the Guild Butcher to process.</Text>{wallet}{carriedCarcasses.length ? carriedCarcasses.map((carcass) => { const selected = selectedCarcassSet.has(carcass.key); return <TouchableOpacity key={carcass.key} style={[styles.processingChoice, selected && styles.selectedCard]} disabled={busy} onPress={() => toggleCarcass(carcass.key)} activeOpacity={0.78}><View style={styles.processingChoiceIcon}><ItemIcon id="monster_carcass" /></View><View style={styles.stockText}><Text style={styles.stockName}>{carcass.name}{carcass.stackQuantity > 1 ? ` · ${carcass.unitNumber}/${carcass.stackQuantity}` : ""}</Text><Text style={styles.stockDescription}>Estimated Result: {guildProcessingEstimate(carcass.monsterId)}</Text><View style={styles.processingUnitFee}><CurrencyPrice totalCopper={GUILD_PROCESSING_FEE_PER_CARCASS} /></View></View><View style={[styles.selectionCheck, selected && styles.selectionCheckSelected]}>{selected && <Ionicons name="checkmark" size={18} color="#FFF7E5" />}</View></TouchableOpacity>; }) : <Text style={styles.empty}>There are no processable Monster Carcasses in your bag.</Text>}<View style={styles.processingSummary}><View><Text style={styles.walletLabel}>Selected</Text><Text style={styles.processingCount}>{selectedCarcasses.length} {selectedCarcasses.length === 1 ? "Carcass" : "Carcasses"}</Text></View><View style={styles.processingTotal}><Text style={styles.walletLabel}>Processing Fee</Text><View style={styles.costLine}><CurrencyPrice totalCopper={processingTotal} textStyle={styles.processingCount} /></View></View></View><TouchableOpacity style={[styles.confirmProcessingButton, (selectedCarcasses.length === 0 || busy) && styles.disabled]} disabled={selectedCarcasses.length === 0 || busy} onPress={() => { void confirmCarcassProcessing(); }}><Ionicons name="checkmark-circle-outline" size={20} color="#FFF7E5" /><Text style={styles.wideButtonText}>Confirm</Text></TouchableOpacity><Text style={styles.note}>The results are delivered to your Courier’s Chest on the following day. Rare materials are rolled independently.</Text></>;
+    if (view === "quests") return <><Text style={styles.sectionTitle}>Quest Board</Text><Text style={styles.note}>Accepted quests remain in your journal. Unaccepted quest categories are refreshed every Sunday.</Text>{(Object.keys(QUESTS) as QuestId[]).map((id) => { const def = QUESTS[id]; const status = city?.quests[id]; return <View key={id} style={styles.quest}><Text style={styles.questType}>{def.type} · Rank {def.rank}</Text><Text style={styles.stockName}>{def.title}</Text><Text style={styles.stockDescription}>{def.detail}</Text><View style={styles.rewardRow}><CurrencyPrice totalCopper={def.rewardCopper} textStyle={styles.reward} /><Text style={styles.reward}>· +{def.reputation} Guild Reputation</Text></View>{id === "wolves" && status && status.status !== "offered" && <Text style={styles.progress}>Progress: {Math.min(2, status.progress)}/2</Text>}<TouchableOpacity disabled={busy || status?.status === "completed"} style={[styles.wideButton, status?.status === "completed" && styles.disabled]} onPress={() => { void action(() => !status || status.status === "offered" ? acceptQuest(id) : turnInQuest(id)); }}><Text style={styles.wideButtonText}>{!status || status.status === "offered" ? "Accept Quest" : status.status === "completed" ? "Completed" : "Turn In"}</Text></TouchableOpacity></View>; })}</>;
     if (view === "merchant") return <><Text style={styles.sectionTitle}>Merchant’s Guild</Text><View style={styles.merchantReceptionistRow}><Image source={MERCHANT_GUILD_RECEPTIONIST_PORTRAIT} style={styles.merchantReceptionistPortrait} resizeMode="contain" /><View style={styles.stockText}><Text style={styles.stockName}>Merchant Guild Receptionist</Text><Text style={styles.stockDescription}>Guild orders, imported goods and merchant reputation</Text></View></View><Text style={styles.rank}>Merchant Reputation · {merchantReputation}</Text>{nav("The Trade Hall", "Large purchases and special commercial services", "bulk")}{nav("Imported Goods", "Currently closed", undefined, true)}{nav("Trade Contracts", "Currently closed", undefined, true)}</>;
     if (view === "bulk") return <><Text style={styles.sectionTitle}>Bulk Orders</Text><Text style={styles.note}>Vegetables arrive in shipment bags. Merchant Reputation lowers prices and increases shipment size.</Text>{BULK_SHIPMENTS.map((shipment) => { const price = merchantPrice(shipment.price, merchantReputation); const quantity = merchantBulkQuantity(merchantReputation); return <View key={shipment.id} style={styles.stockRow}><View style={styles.iconBox}><ItemIcon id={shipment.id} /></View><View style={styles.stockText}><Text style={styles.stockName}>{ITEM_CATALOG[shipment.id]?.name} Shipment</Text><Text style={styles.stockDescription}>{quantity} {ITEM_CATALOG[shipment.id]?.name} · delivered in a {ITEM_CATALOG[`bag_${shipment.id}`]?.name}</Text></View><TouchableOpacity style={styles.priceButton} disabled={busy} onPress={() => { void action(() => buyBulkShipment(shipment.id, shipment.price)); }}><CurrencyPrice totalCopper={price} /></TouchableOpacity></View>; })}</>;
     if (view === "imports") return <><Text style={styles.sectionTitle}>Imported Goods</Text><Text style={styles.note}>Higher Merchant Reputation opens rarer trade routes.</Text>{tavernQuests.claimed.serve_water && !tavernQuests.purchasedBrewItems.brewers_yeast ? brewQuestBuyRow("brewers_yeast", 40) : null}{IMPORTS.map((item) => item.reputation <= merchantReputation ? buyRow({ id: item.id, price: merchantPrice(item.price, merchantReputation) }) : <View key={item.id} style={[styles.stockRow, styles.disabled]}><View style={styles.iconBox}><Ionicons name="lock-closed" size={25} color="#C4943A" /></View><View style={styles.stockText}><Text style={styles.stockName}>{ITEM_CATALOG[item.id]?.name}</Text><Text style={styles.stockDescription}>Requires {item.reputation} Merchant Reputation</Text></View></View>)}</>;
@@ -542,6 +652,15 @@ export default function NextCityScreen() {
         onContinue={() => { void advanceCityGuardDialog(); }}
         onSkip={() => { if (cityGuardDialogIndex === cityGuardLines.length - 1) void advanceCityGuardDialog(); else setCityGuardDialogIndex(cityGuardLines.length - 1); }}
       />
+      <StoryDialogOverlay
+        visible={minstrelDialogIndex !== null}
+        line={minstrelDialogIndex === null ? null : minstrelIntroductionLines[minstrelDialogIndex] ?? null}
+        choices={minstrelDialogIndex === minstrelIntroductionLines.length - 1
+          ? [{ label: "Check out what they offer.", onPress: () => { void finishMinstrelIntroduction(); } }]
+          : []}
+        onContinue={advanceMinstrelIntroduction}
+        onSkip={() => { if (minstrelDialogIndex === minstrelIntroductionLines.length - 1) void finishMinstrelIntroduction(); else setMinstrelDialogIndex(minstrelIntroductionLines.length - 1); }}
+      />
     </View>
   );
 }
@@ -551,6 +670,18 @@ const styles = StyleSheet.create({
   panel: { borderRadius: 18, borderCurve: "continuous", borderWidth: 1.5, borderColor: "rgba(196,148,58,0.58)", backgroundColor: "rgba(18,9,2,0.94)", padding: 13, gap: 9 }, prompt: { color: "#E4C882", fontFamily: "Oldenburg", fontSize: 15 }, sectionTitle: { color: "#FFF1CB", fontFamily: "Oldenburg", fontSize: 19, textAlign: "center", marginBottom: 3 }, nav: { minHeight: 64, borderRadius: 13, borderCurve: "continuous", borderWidth: 1, borderColor: "rgba(196,148,58,0.30)", backgroundColor: "rgba(48,27,7,0.78)", padding: 12, flexDirection: "row", alignItems: "center", gap: 10 }, navText: { flex: 1, gap: 4 }, navTitle: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 14 }, navSubtitle: { color: "rgba(240,232,213,0.64)", fontSize: 11, lineHeight: 15 }, navPriceSubtitle: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 4 }, disabled: { opacity: 0.42 },
   stockRow: { flexDirection: "row", alignItems: "center", gap: 8, padding: 8, borderRadius: 12, backgroundColor: "rgba(48,27,7,0.72)", borderWidth: 1, borderColor: "rgba(196,148,58,0.25)" }, iconBox: { width: 48, height: 48, alignItems: "center", justifyContent: "center" }, itemImage: { width: 46, height: 46 }, stockText: { flex: 1, gap: 3 }, stockName: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 12 }, stockDescription: { color: "rgba(240,232,213,0.67)", fontSize: 10, lineHeight: 14 }, priceButton: { minWidth: 58, minHeight: 42, paddingHorizontal: 7, borderRadius: 10, backgroundColor: "rgba(112,73,18,0.88)", borderWidth: 1, borderColor: "#C4943A", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4 }, price: { color: "#FFF", fontFamily: "Oldenburg", fontSize: 11, textAlign: "center" }, coin: { width: 17, height: 17 }, note: { color: "#D6C8A8", fontSize: 12, lineHeight: 18, padding: 6 }, noteInline: { color: "#D6C8A8", fontSize: 12, lineHeight: 18 }, notePriceRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 5, padding: 6 }, rewardRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 4, marginTop: 3 },
   smithRecipe: { gap: 8, padding: 10, borderRadius: 13, borderCurve: "continuous", backgroundColor: "rgba(48,27,7,0.78)", borderWidth: 1, borderColor: "rgba(196,148,58,0.32)" }, smithRecipeMain: { flexDirection: "row", alignItems: "center", gap: 8 }, smithActionButton: { minHeight: 42, borderRadius: 10, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, backgroundColor: "#79521D", borderWidth: 1, borderColor: "#C4943A", paddingHorizontal: 10 },
+  tanneryRecipe: { gap: 12, padding: 12, borderRadius: 13, borderCurve: "continuous", backgroundColor: "rgba(48,27,7,0.78)", borderWidth: 1, borderColor: "rgba(196,148,58,0.32)" },
+  tanneryConversion: { minHeight: 92, flexDirection: "row", alignItems: "center", justifyContent: "space-around", gap: 10 },
+  tanneryItem: { flex: 1, alignItems: "center", gap: 5 },
+  tanneryOutput: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4 },
+  tanneryIconBox: { width: 68, height: 68, alignItems: "center", justifyContent: "center" },
+  tanneryQuantity: { color: "#FFF1CB", fontFamily: "Oldenburg", fontSize: 17 },
+  tanneryLabel: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 15, textAlign: "center" },
+  carpenterClosed: { color: "#E4C882", fontFamily: "Oldenburg", fontSize: 14, textAlign: "center", paddingVertical: 5 },
+  carpenterService: { minHeight: 76, flexDirection: "row", alignItems: "center", gap: 11, padding: 12, borderRadius: 13, borderCurve: "continuous", backgroundColor: "rgba(37,23,10,0.72)", borderWidth: 1, borderColor: "rgba(142,118,81,0.35)" },
+  carpenterLock: { width: 38, height: 38, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(12,8,4,0.62)", borderWidth: 1, borderColor: "rgba(142,118,81,0.38)" },
+  carpenterTitle: { color: "#C7B99D", fontFamily: "Oldenburg", fontSize: 14 },
+  carpenterDescription: { color: "rgba(214,200,168,0.58)", fontSize: 11, lineHeight: 16 },
   walletCard: { minHeight: 48, paddingHorizontal: 13, paddingVertical: 9, borderRadius: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, backgroundColor: "rgba(10,5,1,0.82)", borderWidth: 1, borderColor: "rgba(196,148,58,0.38)" }, walletLabel: { color: "#E4C882", fontFamily: "Oldenburg", fontSize: 12 }, sellOffer: { minWidth: 58, alignItems: "center", gap: 5 }, sellPrice: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4 },
   simpleRow: { minHeight: 51, borderRadius: 11, backgroundColor: "rgba(48,27,7,0.72)", paddingHorizontal: 12, paddingVertical: 9, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }, simpleName: { flex: 1, color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 12 }, goldText: { color: "#E4C882", fontFamily: "Oldenburg", fontSize: 11 }, small: { color: "#BAA986", fontSize: 10, marginTop: 3 }, empty: { color: "#BAA986", textAlign: "center", padding: 18 }, recipe: { minHeight: 57, padding: 13, borderRadius: 12, justifyContent: "center", backgroundColor: "rgba(48,27,7,0.78)", borderWidth: 1, borderColor: "rgba(196,148,58,0.32)" }, rank: { color: "#E4C882", textAlign: "center", fontFamily: "Oldenburg", fontSize: 12, marginBottom: 4 },
   stepper: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 14, marginBottom: 3 }, stepButton: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(112,73,18,0.9)", borderWidth: 1, borderColor: "#C4943A" }, stepText: { color: "#FFF", fontSize: 22 }, runCountRow: { flexDirection: "row", alignItems: "center", gap: 4 }, runCount: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 12 }, supporterRow: { flexDirection: "row", gap: 9, alignItems: "center", padding: 8, borderRadius: 13, backgroundColor: "rgba(48,27,7,0.76)" }, supporterImage: { width: 66, height: 66, borderRadius: 11, borderWidth: 1, borderColor: "#C4943A" }, hireButton: { paddingHorizontal: 11, paddingVertical: 10, borderRadius: 9, backgroundColor: "#79521D" }, hireText: { color: "#FFF", fontFamily: "Oldenburg", fontSize: 11 }, processingCard: { gap: 9, padding: 13, borderRadius: 13, backgroundColor: "rgba(48,27,7,0.78)" }, wideButton: { minHeight: 42, borderRadius: 10, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, backgroundColor: "#79521D", borderWidth: 1, borderColor: "#C4943A", marginTop: 5 }, wideButtonText: { color: "#FFF7E5", fontFamily: "Oldenburg", fontSize: 11 }, quest: { gap: 5, padding: 12, borderRadius: 13, backgroundColor: "rgba(48,27,7,0.78)", borderWidth: 1, borderColor: "rgba(196,148,58,0.3)" }, questType: { color: "#C4943A", fontFamily: "Oldenburg", fontSize: 10, textTransform: "uppercase" }, reward: { color: "#E4C882", fontSize: 11 }, progress: { color: "#F5E6C8", fontSize: 11 }, message: { color: "#F5E6C8", textAlign: "center", backgroundColor: "rgba(54,28,6,0.95)", borderRadius: 11, padding: 11, fontSize: 12 },
@@ -559,6 +690,11 @@ const styles = StyleSheet.create({
   selectedCard: { borderColor: "#E4C882", backgroundColor: "rgba(92,67,20,0.88)" }, holySister: { width: "100%", height: 330, borderRadius: 14 }, dialogueCard: { padding: 14, borderRadius: 13, borderWidth: 1, borderColor: "rgba(228,200,130,0.5)", backgroundColor: "rgba(20,13,24,0.86)" }, dialogueText: { color: "#F5E6C8", fontSize: 13, lineHeight: 21, textAlign: "center", fontStyle: "italic" }, warningCard: { alignItems: "center", gap: 12, padding: 20, borderRadius: 14, borderWidth: 1, borderColor: "rgba(229,138,53,0.55)", backgroundColor: "rgba(42,17,8,0.9)" }, warningText: { color: "#FFD8B2", fontFamily: "Oldenburg", fontSize: 16, textAlign: "center" },
   merchantReceptionistRow: { flexDirection: "row", alignItems: "center", gap: 10, padding: 9, borderRadius: 13, backgroundColor: "rgba(48,27,7,0.72)", borderWidth: 1, borderColor: "rgba(196,148,58,0.25)" },
   merchantReceptionistPortrait: { width: 58, height: 58, borderRadius: 29, borderWidth: 1, borderColor: "#C4943A" },
+  minstrelSong: { minHeight: 70, flexDirection: "row", alignItems: "center", gap: 10, padding: 10, borderRadius: 12, borderCurve: "continuous", backgroundColor: "rgba(48,27,7,0.72)", borderWidth: 1, borderColor: "rgba(196,148,58,0.25)" },
+  minstrelSongActive: { borderColor: "#E4C882", backgroundColor: "rgba(83,48,10,0.88)" },
+  minstrelSongInfo: { flex: 1, gap: 4 },
+  playerControls: { flexDirection: "row", alignItems: "center", gap: 6 },
+  playerButton: { width: 38, height: 38, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(112,73,18,0.9)", borderWidth: 1, borderColor: "#C4943A" },
   floatingMessageWrap: { ...StyleSheet.absoluteFill, zIndex: 5000, alignItems: "center", justifyContent: "center", paddingHorizontal: 28 },
   floatingMessage: { color: "#FFF4DC", fontFamily: "Oldenburg", fontSize: 14, textAlign: "center", backgroundColor: "rgba(18,9,2,0.95)", borderWidth: 1, borderColor: "#C4943A", borderRadius: 12, paddingHorizontal: 18, paddingVertical: 12 },
 });

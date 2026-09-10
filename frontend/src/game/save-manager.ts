@@ -49,6 +49,7 @@ import { KITCHEN_SMALL_CRATE_KEY } from "@/src/game/kitchen-small-crate";
 import { FOREST_DUNGEON_KEY, FOREST_FIGHT_SNAPSHOT_KEY } from "@/src/game/forest-dungeon-system";
 import { COACHMAN_ESCORT_KEY } from "@/src/game/coachman-escort-system";
 import { EMBER_ROOSTER_ENCOUNTER_SEEN_KEY } from "@/src/game/encounter-cinematics";
+import { DEFAULT_MINSTREL_STATE, MINSTREL_STATE_KEY } from "@/src/game/minstrel-system";
 import {
   DEFAULT_TITHE_STATE,
   ELAPSED_DAYS_KEY,
@@ -87,6 +88,7 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   TRAVEL_STATE_KEY,
   MERCHANT_SHOP_KEY,
   MAILBOX_STATE_KEY,
+  MINSTREL_STATE_KEY,
   // Kitchen tutorial flags
   "@tutorial:kitchen_done",
   "@kitchen:has_seen_post_garden_dialog",
@@ -172,6 +174,7 @@ export async function createSnapshot(
         [TRAVEL_STATE_KEY, JSON.stringify(DEFAULT_TRAVEL_STATE)],
         [DISCOVERED_RECIPES_KEY, JSON.stringify([])],
         [MAILBOX_STATE_KEY, JSON.stringify(DEFAULT_MAILBOX_STATE)],
+        [MINSTREL_STATE_KEY, JSON.stringify(DEFAULT_MINSTREL_STATE)],
       ]);
     }
 

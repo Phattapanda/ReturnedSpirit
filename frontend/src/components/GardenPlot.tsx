@@ -86,6 +86,7 @@ export type GardenPlotProps = {
   onLockedAction?: () => void;
   actionCosts?: { water: number; pullWeeds: number; fertilize: number };
   selectedFertilizerId?: string;
+  fertilizerAvailable?: boolean;
 };
 
 type GardenInventoryItem = {
@@ -192,6 +193,7 @@ export default function GardenPlot(props: GardenPlotProps) {
     onLockedAction,
     actionCosts = { water: 2, pullWeeds: 5, fertilize: 3 },
     selectedFertilizerId = "standard_fertilizer",
+    fertilizerAvailable = true,
   } = props;
 
   const { refreshGarden, showPlayerThought } = useGardenRuntime();
@@ -458,6 +460,7 @@ export default function GardenPlot(props: GardenPlotProps) {
   const waterLocked = harvestLocked && !isEmpty && !effectiveData.withered;
   const weedsLocked = harvestLocked && !isEmpty;
   const fertilizeLocked = harvestLocked && !isEmpty && !effectiveData.withered;
+  const fertilizeUnavailable = !fertilizeDisabled && !fertilizerAvailable;
   const harvestDisabled = !effectiveInteractive;
   const harvestNotReady = !effectiveData.readyToHarvest;
 
@@ -521,7 +524,19 @@ export default function GardenPlot(props: GardenPlotProps) {
         <View style={styles.actionsRow}>
           <ActionBtn img={ACTION_IMG.watering} label="Water" cost={isEmpty ? "" : `-${actionCosts.water}`} done={effectiveData.wateredToday} disabled={waterDisabled} locked={!waterDisabled && waterLocked} onPress={waterLocked ? lockedAction : effectiveWater} />
           <ActionBtn img={ACTION_IMG.pullweeds} label="Weeds" cost={isEmpty ? "" : `-${actionCosts.pullWeeds}`} done={effectiveData.weedsPulledToday && !effectiveData.withered} disabled={weedsDisabled} locked={!weedsDisabled && weedsLocked} onPress={weedsLocked ? lockedAction : effectiveWeeds} />
-          <ActionBtn img={fertilizerImage} label="Fertilize" cost={isEmpty ? "" : `-${actionCosts.fertilize}`} done={effectiveData.fertilizedToday} disabled={fertilizeDisabled} locked={!fertilizeDisabled && fertilizeLocked} onPress={fertilizeLocked ? lockedAction : effectiveFertilize} />
+          <ActionBtn
+            img={fertilizerImage}
+            label="Fertilize"
+            cost={isEmpty ? "" : `-${actionCosts.fertilize}`}
+            done={effectiveData.fertilizedToday}
+            disabled={fertilizeDisabled}
+            locked={!fertilizeDisabled && (fertilizeLocked || fertilizeUnavailable)}
+            onPress={fertilizeUnavailable
+              ? () => showPlayerThought('"No fertilizer available."')
+              : fertilizeLocked
+                ? lockedAction
+                : effectiveFertilize}
+          />
           <ActionBtn img={ACTION_IMG.harvest} label="Harvest" cost="" done={false} disabled={harvestDisabled} locked={harvestNotReady && effectiveInteractive} onPress={effectiveHarvest} isHarvest />
         </View>
       </View>

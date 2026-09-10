@@ -1963,6 +1963,9 @@ setExploreUnlocked(exploreAvailable);
   const waterCost      = calcEffectiveStaminaCost(2, playerStats.endurance, temporaryStaminaReduction);
   const pullWeedsCost  = calcEffectiveStaminaCost(5, playerStats.endurance, temporaryStaminaReduction);
   const selectedFertilizerConfig = getGardenFertilizerConfig(selectedFertilizer);
+  const selectedFertilizerAvailable = inventory.some(
+    (item) => item.itemType === "fertilizer" && item.id === selectedFertilizer && item.quantity > 0,
+  );
   const fertilizeCost = calcEffectiveStaminaCost(
     selectedFertilizerConfig?.staminaCost ?? 3,
     playerStats.endurance,
@@ -2187,6 +2190,7 @@ setExploreUnlocked(exploreAvailable);
             data={plotData}
             interactive={plotInteractive}
             selectedFertilizerId={selectedFertilizer}
+            fertilizerAvailable={selectedFertilizerAvailable}
             actionCosts={{ water: waterCost, pullWeeds: pullWeedsCost, fertilize: fertilizeCost }}
             onWater={handleWater}
             onPullWeeds={handlePullWeeds}
@@ -2217,6 +2221,7 @@ setExploreUnlocked(exploreAvailable);
                 data={data}
                 interactive={false}
                 selectedFertilizerId={selectedFertilizer}
+                fertilizerAvailable={selectedFertilizerAvailable}
                 onWater={() => {}}
                 onPullWeeds={() => {}}
                 onFertilize={() => {}}
@@ -2770,7 +2775,7 @@ const styles = StyleSheet.create({
   // Location bar
   locationBar: {
     flexDirection: "row", gap: 5, paddingVertical: 8, paddingHorizontal: 8,
-    backgroundColor: "rgba(10,5,1,0.93)",
+    backgroundColor: "#000000",
     borderTopWidth: 1, borderTopColor: "rgba(196,148,58,0.20)", zIndex: 2,
   },
   locBtn: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 6, borderRadius: 10, borderWidth: 1, minHeight: 54 },

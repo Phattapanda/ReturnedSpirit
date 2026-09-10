@@ -12,7 +12,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { audioEngine, getMusicTheme } from './audioEngine';
-import type { ThemeKey, LocationKey, TimeOfDayKey, AudioEngineState } from './audioEngine';
+import type { ThemeKey, LocationKey, TimeOfDayKey, AudioEngineState, MinstrelTrackKey } from './audioEngine';
 
 // ─── Context shape ────────────────────────────────────────────────────────────
 
@@ -28,6 +28,9 @@ export type AudioManagerContextValue = {
   stopGameplayMusic: (durationMs?: number) => void;
   playSoundEffect: (key: string, options?: { maxDurationMs?: number; loop?: boolean }) => void;
   stopSoundEffect: (key: string) => void;
+  playMinstrelTrack: (key: MinstrelTrackKey, restart?: boolean) => void;
+  pauseMinstrelTrack: () => void;
+  stopMinstrelTrack: () => void;
   setMusicVolume: (value: number) => void;
   setSfxVolume: (value: number) => void;
   duckMusic: (level: number, durationMs?: number) => void;
@@ -94,6 +97,13 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     audioEngine.stopSoundEffect(key);
   }, []);
 
+  const playMinstrelTrack = useCallback((key: MinstrelTrackKey, restart?: boolean) => {
+    audioEngine.playMinstrelTrack(key, restart);
+  }, []);
+
+  const pauseMinstrelTrack = useCallback(() => { audioEngine.pauseMinstrelTrack(); }, []);
+  const stopMinstrelTrack = useCallback(() => { audioEngine.stopMinstrelTrack(); }, []);
+
   const setMusicVolume = useCallback((value: number) => {
     audioEngine.setMusicVolume(value);
   }, []);
@@ -119,6 +129,9 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     stopGameplayMusic,
     playSoundEffect,
     stopSoundEffect,
+    playMinstrelTrack,
+    pauseMinstrelTrack,
+    stopMinstrelTrack,
     setMusicVolume,
     setSfxVolume,
     duckMusic,
@@ -133,6 +146,9 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     stopGameplayMusic,
     playSoundEffect,
     stopSoundEffect,
+    playMinstrelTrack,
+    pauseMinstrelTrack,
+    stopMinstrelTrack,
     setMusicVolume,
     setSfxVolume,
     duckMusic,

@@ -109,6 +109,7 @@ import {
   cleanGuestAreaOnce,
   isPlotUnlocked,
   grantFarmerCarrotSeedOnce,
+  isAleServiceAvailable,
   isGuestAreaComplete,
   getKitchenTableRowCount,
   getKitchenTableSlotCount,
@@ -253,6 +254,16 @@ function highlightedTextParts(text: string, phrases: readonly string[] = []) {
     const highlighted = filtered.some((phrase) => phrase.toLocaleLowerCase() === part.toLocaleLowerCase());
     return <Text key={`${index}-${part}`} style={highlighted ? styles.dialogHighlight : undefined}>{part}</Text>;
   });
+}
+
+function mergeLogbookEntries(current: LogEntry[], stored: LogEntry[]): LogEntry[] {
+  const merged = new Map<string, LogEntry>();
+  [...current, ...stored].forEach((entry) => {
+    if (!merged.has(entry.id)) merged.set(entry.id, entry);
+  });
+  return [...merged.values()]
+    .sort((left, right) => left.seq - right.seq)
+    .map((entry, seq) => ({ ...entry, seq }));
 }
 
 // ─── Location data ────────────────────────────────────────────────────────────
@@ -833,6 +844,7 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
   const [logbook, setLogbook] = useState<LogEntry[]>([]);
   const [showLogbook, setShowLogbook] = useState(false);
   const logbookScrollRef = useRef<ScrollView>(null);
+  const logbookWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   function openEscortDialog(mode: NonNullable<typeof escortDialogMode>, lines: StoryDialogLine[]) {
     setEscortDialogMode(mode);
@@ -1076,7 +1088,7 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
   // ── Name input
   const [nameInputOpen, setNameInputOpen] = useState(false);
   const [nameInputVal, setNameInputVal] = useState("");
-  const [keyboardH, setKeyboardH] = useState(0);
+  const [iosKeyboardHeight, setIosKeyboardHeight] = useState(0);
 
   // ── Tooltip
   const [tooltipVisible, setTooltipVisible] = useState(false);
@@ -1268,14 +1280,12 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ts]);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Keyboard tracking — push name-input dialog above keyboard
-  // ─────────────────────────────────────────────────────────────────────────
+  // iOS overlays the keyboard, while Android already resizes the visible app
+  // window. Applying this offset on Android would move the dialog twice.
   useEffect(() => {
-    const showEvt = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvt = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const showSub = Keyboard.addListener(showEvt, (e) => setKeyboardH(e.endCoordinates.height));
-    const hideSub = Keyboard.addListener(hideEvt, () => setKeyboardH(0));
+    if (Platform.OS !== "ios") return;
+    const showSub = Keyboard.addListener("keyboardWillShow", (event) => setIosKeyboardHeight(event.endCoordinates.height));
+    const hideSub = Keyboard.addListener("keyboardWillHide", () => setIosKeyboardHeight(0));
     return () => { showSub.remove(); hideSub.remove(); };
   }, []);
 
@@ -1287,7 +1297,9 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
       try {
         // Load logbook
         const lb = await loadLogbook();
-        setLogbook(lb);
+        // Tutorial bubbles can start while this asynchronous read is in flight.
+        // Merge instead of replacing so their newly added entries survive.
+        setLogbook((current) => mergeLogbookEntries(current, lb));
 
         // Load soup demo seen flag
         const demoSeen = await AsyncStorage.getItem(SK.SOUP_DEMO_SEEN);
@@ -1673,7 +1685,9 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
         setUpgradeMessage("Already unlocked.");
       } else {
         const drinkName = upgradeId === "serve_ale" ? "Standard Ale" : "Honey Mead";
-        setUpgradeMessage(`${drinkName} is now served in the Dining Hall.`);
+        setUpgradeMessage(upgradeId === "serve_ale"
+          ? "Standard Ale will be served in the Dining Hall from tomorrow."
+          : `${drinkName} is now served in the Dining Hall.`);
         audioManager.playSoundEffect("upgrade-building", { maxDurationMs: 6000 });
       }
     } finally {
@@ -2111,7 +2125,10 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       if (prev.some(e => e.id === id)) return prev; // already logged
       const entry: LogEntry = { id, speaker, text, day, location: "kitchen", seq: prev.length };
       const updated = [...prev, entry];
-      AsyncStorage.setItem(LOGBOOK_KEY, JSON.stringify(updated)).catch(() => {});
+      logbookWriteQueueRef.current = logbookWriteQueueRef.current
+        .catch(() => undefined)
+        .then(() => AsyncStorage.setItem(LOGBOOK_KEY, JSON.stringify(updated)))
+        .catch(() => undefined);
       return updated;
     });
   }
@@ -4538,6 +4555,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     );
   }
   const guestAreaComplete = isGuestAreaComplete(postGuestState);
+  const aleServiceAvailable = isAleServiceAvailable(postGuestState, guestCalendarDaySerial);
   const guestAreaCleanCost = calcEffectiveStaminaCost(
     GUEST_AREA_CLEAN_STAMINA_COST,
     playerStats.endurance,
@@ -4813,7 +4831,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                     disabled={!!craftResult}
                   >
                     {craftResult ? (
-                      <View style={{ width: "100%", height: "100%", alignItems: "center", justifyContent: "center" }}>
+                      <View style={styles.craftResultContent}>
                         {!previewDiscovered ? (
                           <Ionicons name="help" size={30} color="#E7C77A" />
                         ) : ITEM_IMAGES[craftResult.id] ? (
@@ -4822,7 +4840,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                         {previewDiscovered && craftResult.quantity > 1 && <Text style={styles.tableItemQty}>{craftResult.quantity}</Text>}
                       </View>
                     ) : (
-                      <Image source={ITEM_IMAGES.recipe_book} style={[styles.recipeBookSlotImage, { width: recipeSlotSize * 0.78 + 13, height: recipeSlotSize * 0.78 + 13 }]} resizeMode="contain" resizeMethod="resize" />
+                      <Image source={ITEM_IMAGES.recipe_book} style={[styles.recipeBookSlotImage, { width: recipeSlotSize * 0.78 + 23, height: recipeSlotSize * 0.78 + 23 }]} resizeMode="contain" resizeMethod="resize" />
                     )}
                   </TouchableOpacity>
                 </View>
@@ -5118,7 +5136,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
           playerCharacter={kitchenDialogPlayerSpeaking}
           characterScale={kitchenDialogPlayerSpeaking ? getPlayerDialogScale(playerAvatarId) : RUPERT_DIALOG_SCALE}
           speakerName={kitchenDialogSpeaker}
-          bottomOffset={ts === "NAME_INPUT" && keyboardH > 0 ? keyboardH : 0}
+          bottomOffset={ts === "NAME_INPUT" ? iosKeyboardHeight : 0}
           onSkip={dlgActive ? (dlgIdx < dlgLines.length - 1 ? skipDialogToLastLine : advanceDialog) : undefined}
           actions={ts === "NAME_INPUT" && nameInputOpen ? (
             <View style={styles.nameDialogActions}>
@@ -5206,7 +5224,11 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
               { icon: "play" as const,          label: "Resume",    action: () => setShowMenu(false) },
               { icon: "book-outline" as const,   label: "Logbook",   action: () => {
                 setShowMenu(false);
-                loadLogbook().then(setLogbook).catch(() => {});
+                // Never replace freshly logged tutorial lines with a storage read
+                // that began before their queued write finished.
+                loadLogbook().then((stored) => {
+                  setLogbook((current) => mergeLogbookEntries(current, stored));
+                }).catch(() => {});
                 setShowLogbook(true);
               } },
               { icon: "save-outline" as const,   label: "Save",      action: handleManualSave },
@@ -5495,7 +5517,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
                     <View style={styles.upgradeRequirements}>
                       {ALE_QUEST_ITEMS.map((item) => <UpgradeRequirement key={item.id} label={item.name} have={countBagItem(item.id)} need={1} />)}
                     </View>
-                    <View style={styles.upgradeOwnedRow}><Text style={styles.upgradeOwnedInline}>Standard Ale · Unlimited ·</Text><CurrencyPrice totalCopper={5} textStyle={styles.upgradeOwnedInline} /></View>
+                    <View style={styles.upgradeOwnedRow}><Text style={styles.upgradeOwnedInline}>{postGuestState.aleServiceUnlocked && !aleServiceAvailable ? "Standard Ale · Available tomorrow ·" : "Standard Ale · Unlimited ·"}</Text><CurrencyPrice totalCopper={5} textStyle={styles.upgradeOwnedInline} /></View>
                   </View>
                   <TouchableOpacity
                     style={[styles.upgradeBuildBtn, postGuestState.aleServiceUnlocked && styles.upgradeBuildBtnDone, !postGuestState.aleServiceUnlocked && !hasQuestItems(ALE_QUEST_ITEMS) && styles.upgradeBuildBtnDisabled]}
@@ -5503,12 +5525,12 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
                     onPress={() => { void handleTavernDrinkUpgrade("serve_ale"); }}
                     activeOpacity={0.8}
                   >
-                    <Text style={styles.upgradeBuildText}>{postGuestState.aleServiceUnlocked ? "Unlocked" : upgradeBusy ? "..." : "Unlock"}</Text>
+                    <Text style={styles.upgradeBuildText}>{postGuestState.aleServiceUnlocked ? aleServiceAvailable ? "Unlocked" : "Tomorrow" : upgradeBusy ? "..." : "Unlock"}</Text>
                   </TouchableOpacity>
                 </View>
               )}
 
-              {upgradeCategory === "tavern" && postGuestState.aleServiceUnlocked && (
+              {upgradeCategory === "tavern" && aleServiceAvailable && (
                 <View style={[styles.upgradeCard, !postGuestState.honeyMeadServiceUnlocked && !hasQuestItems(HONEY_MEAD_QUEST_ITEMS) && styles.upgradeCardUnavailable, postGuestState.honeyMeadServiceUnlocked && styles.upgradeCardCompleted]}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.upgradeName}>Serve Honey Mead</Text>
@@ -5918,10 +5940,13 @@ const styles = StyleSheet.create({
   toolSlotHovered: { borderColor: "#FFFFFF", borderWidth: 2, backgroundColor: "rgba(255,255,255,0.12)" },
   baseHandTool: { width: "72%", height: "72%", opacity: 0.78 },
   craftResultSlotFrame: { flex: 1, aspectRatio: 1, minHeight: 44, alignSelf: "stretch" },
-  craftResultSlotFill: { width: "100%", height: "100%", minHeight: 44 },
+  // Preserve the square's layout position and extend only the visible lower edge.
+  craftResultSlotFill: { position: "absolute", top: 0, left: 0, right: 0, bottom: -2, minHeight: 44 },
+  craftResultContent: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center", transform: [{ translateY: -1 }] },
   craftSlotRecipe: { borderColor: "rgba(130,95,45,0.55)", backgroundColor: "rgba(25,14,4,0.95)" },
   craftSlotRecipeBookPlaceholder: { borderColor: "rgba(25,14,4,0.95)" },
-  recipeBookSlotImage: { alignSelf: "center" },
+  // Keep the enlarged book low in the slot, with the requested 2 px upward adjustment.
+  recipeBookSlotImage: { alignSelf: "center", transform: [{ translateY: 2 }] },
   craftSlotCraft: { borderWidth: 2, borderColor: "#C4943A", backgroundColor: "rgba(30,17,4,0.97)" },
   craftSlotText: { color: "rgba(200,165,90,0.70)", fontSize: 10, fontFamily: "Oldenburg", textAlign: "center" },
   craftBoldText: { color: "#F5E6C8", fontSize: 13, fontFamily: "Oldenburg", fontWeight: "bold", letterSpacing: 0.5, textAlign: "center" },
@@ -5955,7 +5980,7 @@ const styles = StyleSheet.create({
   // Location bar
   locationBar: {
     flexDirection: "row", gap: 5, paddingVertical: 8, paddingHorizontal: 8,
-    backgroundColor: "rgba(10,5,1,0.93)",
+    backgroundColor: "#000000",
     borderTopWidth: 1, borderTopColor: "rgba(196,148,58,0.20)", zIndex: 2,
   },
   locBtn: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 6, borderRadius: 10, borderWidth: 1, minHeight: 54 },

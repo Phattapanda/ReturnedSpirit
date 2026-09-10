@@ -317,7 +317,7 @@ export default function DiningScreen() {
   const [serviceBusy, setServiceBusy] = useState(false);
   const [departingGuestId, setDepartingGuestId] = useState<GuestId | null>(null);
   const [hiddenGuestIds, setHiddenGuestIds] = useState<GuestId[]>([]);
-  const [tavernBeverage, setTavernBeverage] = useState<TavernBeverage>(() => getTavernBeverage(DEFAULT_POST_GUEST_TUTORIAL_STATE));
+  const [tavernBeverage, setTavernBeverage] = useState<TavernBeverage>(() => getTavernBeverage(DEFAULT_POST_GUEST_TUTORIAL_STATE, 0));
 
   const [transferImage, setTransferImage] = useState<ImageSourcePropType | null>(null);
   const transferX = useRef(new RNAnimated.Value(0)).current;
@@ -368,6 +368,7 @@ export default function DiningScreen() {
         const loadedTravel = await loadTravelState();
         const loadedExploreNavigation = await loadExploreNavigationUnlocked();
         const loadedPostGuestState = await loadPostGuestTutorialState();
+        const loadedGuestState = await loadGuestState();
         const resolvedName = rawName?.trim() || "Adventurer";
 
         if (!active) return;
@@ -381,7 +382,7 @@ export default function DiningScreen() {
         setMealState(loadedMeals);
         setTitheState(loadedTithe);
         setExploreUnlocked(loadedExploreNavigation);
-        setTavernBeverage(getTavernBeverage(loadedPostGuestState));
+        setTavernBeverage(getTavernBeverage(loadedPostGuestState, loadedGuestState.calendarDaySerial));
         if (loadedTithe.phase === "in_dining") setCivilDialogStage("introduction");
         let loadedBag = DEFAULT_BAG;
         if (rawBag) {
@@ -708,11 +709,12 @@ export default function DiningScreen() {
       let active = true;
       Promise.all([
         loadPostGuestTutorialState(),
+        loadGuestState(),
         loadGuestTutorialIntroStep(),
         AsyncStorage.getItem(PLAYER_BAG_KEY),
-      ]).then(([state, step, rawBag]) => {
+      ]).then(([state, guestState, step, rawBag]) => {
         if (!active) return;
-        setTavernBeverage(getTavernBeverage(state));
+        setTavernBeverage(getTavernBeverage(state, guestState.calendarDaySerial));
         if (!rawBag) {
           setRupertMealInstructionVisible(false);
           return;
@@ -1947,7 +1949,7 @@ const styles = StyleSheet.create({
     gap: 5,
     paddingVertical: 8,
     paddingHorizontal: 8,
-    backgroundColor: "rgba(10,5,1,0.93)",
+    backgroundColor: "#000000",
     borderTopWidth: 1,
     borderTopColor: "rgba(196,148,58,0.20)",
     zIndex: 2,

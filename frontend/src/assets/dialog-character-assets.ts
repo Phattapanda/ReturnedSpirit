@@ -3,11 +3,11 @@ import type { PlayerAvatarId } from "@/src/game/player-avatar";
 
 export type DialogExpression = "normal" | "laugh" | "sad" | "sick" | "tired";
 export const PLAYER_DIALOG_SCALE = 0.8;
-export const AVATAR2_DIALOG_SCALE = 0.8;
+export const AVATAR2_DIALOG_SCALE = 0.72;
 export const AVATAR3_DIALOG_SCALE = 0.8;
 export const INTRO_PLAYER_DIALOG_SCALE = 0.8;
 export const RUPERT_DIALOG_SCALE = 0.95;
-export const OLD_FARMER_DIALOG_SCALE = 0.8;
+export const OLD_FARMER_DIALOG_SCALE = 0.72;
 export const COACHMAN_DIALOG_SCALE = 0.8;
 
 export const MERCHANT_GUILD_RECEPTIONIST_ASSETS = {

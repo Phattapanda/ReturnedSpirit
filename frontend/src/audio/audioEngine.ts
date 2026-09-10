@@ -22,6 +22,8 @@ export type ThemeKey = 'main-menu' | 'main-menu-feathered-banner' | 'main-menu-m
   | 'battle-over50' | 'battle-under50' | 'rest-area' | 'boss-battle' | null;
 export type LocationKey = 'main-menu' | 'kitchen' | 'garden' | 'dining' | 'dormitory' | null;
 export type TimeOfDayKey = 'morning' | 'evening';
+export type MinstrelTrackKey = 'minstrel-classical' | 'minstrel-rock' | 'minstrel-pop' | 'minstrel-rave'
+  | 'minstrel-metal' | 'minstrel-kpop' | 'minstrel-alpine' | 'minstrel-techno' | 'minstrel-country' | 'minstrel-hiphop';
 
 // ─── Audio asset map ──────────────────────────────────────────────────────────
 
@@ -75,7 +77,21 @@ const SFX_SOURCES: Record<string, number> = {
   'attack-miss':        require('../../assets/audio/attack_miss.mp3'),
   action:               require('../../assets/audio/action.mp3'),
   victory:              require('../../assets/audio/victory.wav'),
+  'victory-boss':       require('../../assets/audio/victory_boss.wav'),
   losecoin:             require('../../assets/audio/losecoin.wav'),
+};
+
+const MINSTREL_SOURCES: Record<MinstrelTrackKey, number> = {
+  'minstrel-classical': require('../../assets/audio/minstrel_feathered_banner_classical.mp3'),
+  'minstrel-rock': require('../../assets/audio/minstrel_marketgate_riot_rock.mp3'),
+  'minstrel-pop': require('../../assets/audio/minstrel_stonegate_dance_pop.mp3'),
+  'minstrel-rave': require('../../assets/audio/minstrel_hey_ho_beneath_the_castle.mp3'),
+  'minstrel-metal': require('../../assets/audio/minstrel_hold_the_line.mp3'),
+  'minstrel-kpop': require('../../assets/audio/minstrel_age_of_stone.mp3'),
+  'minstrel-alpine': require('../../assets/audio/minstrel_over_the_hill_we_go.mp3'),
+  'minstrel-techno': require('../../assets/audio/minstrel_ride_the_wheel.mp3'),
+  'minstrel-country': require('../../assets/audio/minstrel_the_road_we_own.mp3'),
+  'minstrel-hiphop': require('../../assets/audio/minstrel_timber_and_stone.mp3'),
 };
 
 const MAIN_MENU_THEMES = [
@@ -146,6 +162,9 @@ class AudioEngine {
 
   // SFX players
   private sfxPlayers = new Map<string, SFXHandle>();
+  private minstrelPlayer: AudioPlayer | null = null;
+  private minstrelTrackKey: MinstrelTrackKey | null = null;
+  private minstrelStartTimer: ReturnType<typeof setTimeout> | null = null;
 
   // State
   private audioUnlocked = false;
@@ -446,6 +465,7 @@ class AudioEngine {
       const p = this.getChannel(this.activeChannel);
       if (p) try { p.volume = this.effectiveMusicVol(); } catch {}
     }
+    if (this.minstrelPlayer) try { this.minstrelPlayer.volume = this.musicVolume; } catch {}
     this.notifyListeners();
   }
 
@@ -552,6 +572,69 @@ class AudioEngine {
     }
   }
 
+  playMinstrelTrack(key: MinstrelTrackKey, restart = false): void {
+    if (!this.audioUnlocked) return;
+    if (this.minstrelPlayer && this.minstrelTrackKey === key) {
+      if (this.minstrelStartTimer) clearTimeout(this.minstrelStartTimer);
+      this.minstrelStartTimer = null;
+      this.startMinstrelWhenLoaded(this.minstrelPlayer, key, restart, 0);
+      return;
+    }
+    this.stopMinstrelTrack();
+    try {
+      const player = createAudioPlayer(MINSTREL_SOURCES[key]);
+      player.volume = this.musicVolume;
+      player.loop = false;
+      this.minstrelPlayer = player;
+      this.minstrelTrackKey = key;
+      this.startMinstrelWhenLoaded(player, key, true, 0);
+    } catch (e) {
+      if (__DEV__) console.warn('[AudioEngine] Failed to create minstrel player:', key, e);
+    }
+  }
+
+  private startMinstrelWhenLoaded(player: AudioPlayer, key: MinstrelTrackKey, restart: boolean, attempt: number): void {
+    if (this.minstrelPlayer !== player || this.minstrelTrackKey !== key) return;
+    if (player.isLoaded) {
+      try {
+        player.volume = this.musicVolume;
+        if (restart) player.seekTo(0);
+        player.play();
+      } catch {}
+      return;
+    }
+    if (attempt >= 100) {
+      if (__DEV__) console.warn('[AudioEngine] Load timeout for', key);
+      this.stopMinstrelTrack();
+      return;
+    }
+    this.minstrelStartTimer = setTimeout(() => {
+      this.minstrelStartTimer = null;
+      this.startMinstrelWhenLoaded(player, key, restart, attempt + 1);
+    }, 100);
+  }
+
+  pauseMinstrelTrack(): void {
+    if (this.minstrelStartTimer) {
+      clearTimeout(this.minstrelStartTimer);
+      this.minstrelStartTimer = null;
+    }
+    if (this.minstrelPlayer) try { this.minstrelPlayer.pause(); } catch {}
+  }
+
+  stopMinstrelTrack(): void {
+    if (this.minstrelStartTimer) {
+      clearTimeout(this.minstrelStartTimer);
+      this.minstrelStartTimer = null;
+    }
+    if (this.minstrelPlayer) {
+      try { this.minstrelPlayer.pause(); } catch {}
+      try { this.minstrelPlayer.remove(); } catch {}
+    }
+    this.minstrelPlayer = null;
+    this.minstrelTrackKey = null;
+  }
+
   /** Release short-lived native players when the app leaves the foreground. */
   suspendTransientAudio(): void {
     if (this.duckIntervalId !== null) {
@@ -560,6 +643,7 @@ class AudioEngine {
     }
     this.duckLevel = 1;
     for (const key of [...this.sfxPlayers.keys()]) this.stopSoundEffect(key);
+    this.pauseMinstrelTrack();
     if (this.activeChannel) {
       const player = this.getChannel(this.activeChannel);
       if (player) try { player.volume = this.effectiveMusicVol(); } catch {}
@@ -573,7 +657,7 @@ class AudioEngine {
 
 // ─── Singleton (hot-reload safe) ──────────────────────────────────────────────
 
-const _GLOBAL_KEY = '__audioEngineV1__';
+const _GLOBAL_KEY = '__audioEngineV2__';
 const _globalRef = globalThis as unknown as Record<string, unknown>;
 if (!_globalRef[_GLOBAL_KEY]) {
   _globalRef[_GLOBAL_KEY] = new AudioEngine();
