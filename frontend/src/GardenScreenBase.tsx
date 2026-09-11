@@ -289,7 +289,7 @@ export default function GardenScreen() {
     clearManagedInterval: clearInterval,
   } = useManagedTimers();
   const router = useRouter();
-  const { merchantPresent, receptionistPresent, sleepReady } = useLocationStatusBadges();
+  const { mailboxUnread, merchantPresent, receptionistPresent, sleepReady } = useLocationStatusBadges();
   const insets = useSafeAreaInsets();
   const { width: W, height: H } = useWindowDimensions();
   const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(DEFAULT_PLAYER_AVATAR_ID);
@@ -2336,6 +2336,7 @@ return (
       resizeMethod="resize"
     />
     {loc.id === "dormitory" && sleepReady && <LocationStatusBadge kind="sleep" />}
+    {loc.id === "mail" && mailboxUnread && <LocationStatusBadge kind="mail" />}
     {loc.id === "explore" && (receptionistPresent ? <LocationStatusBadge kind="receptionist" /> : merchantPresent ? <LocationStatusBadge kind="merchant" /> : null)}
   </TouchableOpacity>
 );

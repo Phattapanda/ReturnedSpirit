@@ -76,6 +76,11 @@ export type CityState = {
   foodStock: string[];
   supporter: { id: SupporterId; runsRemaining: number; announcedRunSerial: number | null } | null;
   guildReputation: number;
+  adventurerRankIndex: number;
+  adventurerPromotionDialogSeen: boolean;
+  adventurerPromotionActive: boolean;
+  adventurerPromotionProgress: number;
+  adventurerPromotionCompleted: boolean;
   quests: Record<QuestId, { status: QuestStatus; progress: number }>;
   questRollWeek: number;
   pendingProcessing: {
@@ -130,6 +135,11 @@ function normalizeCityState(raw: unknown, day: number, weekday: number): CitySta
       ? { id: value.supporter.id, runsRemaining: Math.max(0, Math.min(3, Math.floor(value.supporter.runsRemaining))), announcedRunSerial: value.supporter.announcedRunSerial ?? null }
       : null,
     guildReputation: Math.max(0, Math.floor(value.guildReputation ?? 0)),
+    adventurerRankIndex: Math.max(0, Math.min(9, Math.floor(value.adventurerRankIndex ?? (value.adventurerPromotionCompleted ? 1 : 0)))),
+    adventurerPromotionDialogSeen: value.adventurerPromotionDialogSeen === true,
+    adventurerPromotionActive: value.adventurerPromotionActive === true,
+    adventurerPromotionProgress: Math.max(0, Math.min(5, Math.floor(value.adventurerPromotionProgress ?? 0))),
+    adventurerPromotionCompleted: value.adventurerPromotionCompleted === true,
     quests: Object.fromEntries((Object.keys(QUESTS) as QuestId[]).map((id) => [id, {
       status: savedQuests[id]?.status ?? "offered", progress: Math.max(0, Math.floor(savedQuests[id]?.progress ?? 0)),
     }])) as CityState["quests"],
@@ -176,6 +186,16 @@ export async function loadCityState(): Promise<CityState> {
         body: `The Guild Butcher has finished processing your ${definition?.carcassName ?? (wolf ? "Forest Wolf Carcass" : "Ember Chicken Carcass")}.`,
         rewards,
       });
+      if (entry.id.startsWith("tutorial-wolf-")) {
+        await deliverMailboxMessage({
+          id: `adventurer-welcome-${entry.id}`,
+          sender: "Adventurers' Guild",
+          senderKind: "guild",
+          subject: "Welcome to the Adventurers' Guild",
+          body: "As a welcome gift, and because the Adventurers' Guild wants to increase the survival rate of new adventurers, we are giving you three Return Bells. It's best to exercise caution.",
+          rewards: [{ type: "item", itemId: "return_bell", quantity: 3 }],
+        });
+      }
     }
     state.pendingProcessing = state.pendingProcessing.filter((entry) => entry.dueDay > day);
   }
@@ -233,6 +253,36 @@ export async function markMerchantContractTierDialogSeen(): Promise<CityState> {
   const state = await loadCityState();
   if (state.merchantContractTierDialogSeen) return state;
   return saveCityState({ ...state, merchantContractTierDialogSeen: true });
+}
+
+export function adventurerRank(state: Pick<CityState, "adventurerRankIndex">): string {
+  return ["H", "G", "F", "E", "D", "C", "B", "A", "S", "L"][Math.max(0, Math.min(9, state.adventurerRankIndex))];
+}
+
+export function adventurerPromotionAvailable(state: CityState): boolean {
+  return state.adventurerRankIndex === 0
+    && state.guildReputation >= 50
+    && !state.adventurerPromotionDialogSeen;
+}
+
+export async function beginAdventurerPromotionExam(): Promise<CityState> {
+  const state = await loadCityState();
+  if (state.adventurerRankIndex !== 0 || state.guildReputation < 50) return state;
+  state.adventurerPromotionDialogSeen = true;
+  state.adventurerPromotionActive = true;
+  return saveCityState(state);
+}
+
+export async function completeAdventurerPromotionExam(): Promise<CityActionResult> {
+  const state = await loadCityState();
+  if (!state.adventurerPromotionActive || state.adventurerPromotionProgress < 5) {
+    return { ok: false, message: "The Promotion Examination is not complete yet." };
+  }
+  state.adventurerRankIndex = Math.max(1, state.adventurerRankIndex);
+  state.adventurerPromotionActive = false;
+  state.adventurerPromotionCompleted = true;
+  await saveCityState(state);
+  return { ok: true, message: "Promotion Examination passed. Adventurer Rank G reached." };
 }
 
 export function hasMerchantAptitudePouch(bag: PlayerBagData): boolean {
@@ -706,9 +756,22 @@ export async function recordMonsterDefeat(monsterId: string): Promise<void> {
     elder_ember_rooster: 15,
   };
   await addKarmaPoints(karmaReward[monsterId] ?? 3);
-  if (monsterId !== "feral_rabbit") return;
-  const state = await loadCityState(); const quest = state.quests.wolves;
-  if (quest.status !== "accepted") return; quest.progress = Math.min(2, quest.progress + 1); if (quest.progress >= 2) quest.status = "ready"; await saveCityState(state);
+  if (monsterId !== "feral_rabbit" && monsterId !== "ember_rooster") return;
+  const state = await loadCityState();
+  let changed = false;
+  if (monsterId === "feral_rabbit") {
+    const quest = state.quests.wolves;
+    if (quest.status === "accepted") {
+      quest.progress = Math.min(2, quest.progress + 1);
+      if (quest.progress >= 2) quest.status = "ready";
+      changed = true;
+    }
+  }
+  if (monsterId === "ember_rooster" && state.adventurerPromotionActive) {
+    state.adventurerPromotionProgress = Math.min(5, state.adventurerPromotionProgress + 1);
+    changed = true;
+  }
+  if (changed) await saveCityState(state);
 }
 
 export async function processGuildCarcasses(selections: readonly GuildCarcassSelection[]): Promise<CityActionResult> {
@@ -814,4 +877,4 @@ export async function processTutorialWildWolf(): Promise<CityActionResult> {
   return { ok: true, message: "The Guild accepted the carcass. The result will arrive in the Courier’s Chest tomorrow." };
 }
 
-export function guildRank(reputation: number): string { return ["H", "G", "F", "E", "D", "C", "B", "A", "S", "L"][Math.min(9, Math.floor(reputation / 100))]; }
+export function guildRank(reputation: number): string { return ["H", "G", "F", "E", "D", "C", "B", "A", "S", "L"][Math.min(9, Math.floor(Math.max(0, reputation) / 50))]; }

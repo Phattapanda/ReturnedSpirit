@@ -9,7 +9,7 @@ import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import CurrencyHud from "@/src/components/CurrencyHud";
 import StatusModal from "@/src/components/StatusModal";
 import QuestBookButton from "@/src/components/quest-book";
-import { DEFAULT_BAG, PLAYER_BAG_KEY, normalizePlayerBagData, type PlayerBagData } from "@/src/game/item-system";
+import { DEFAULT_BAG, PLAYER_BAG_KEY, normalizePlayerBagData, type BagItem, type PlayerBagData } from "@/src/game/item-system";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
 import { PLAYER_AVATAR_KEY, getPlayerAvatarForStamina, normalizePlayerAvatarId, type PlayerAvatarId } from "@/src/game/player-avatar";
 import { activeTempleBlessing } from "@/src/game/city-system";
@@ -25,9 +25,13 @@ type Props = {
   bagAttention?: boolean;
   supporterImage?: ImageSourcePropType;
   onSupporterPress?: () => void;
+  onBagUpdated?: (bag: PlayerBagData) => void;
+  onStatsUpdated?: (stats: PlayerStats) => void;
+  externalUseItemIds?: readonly string[];
+  onUseItem?: (slotIdx: number, item: BagItem) => void | Promise<void>;
 };
 
-export default function TravelHeader({ locationName, showPortraitRow = false, onHeaderHeightChange, onPortraitBottomChange, refreshKey = 0, bagAttention = false, supporterImage, onSupporterPress }: Props) {
+export default function TravelHeader({ locationName, showPortraitRow = false, onHeaderHeightChange, onPortraitBottomChange, refreshKey = 0, bagAttention = false, supporterImage, onSupporterPress, onBagUpdated, onStatsUpdated, externalUseItemIds, onUseItem }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [stamina, setStamina] = useState(0);
@@ -52,15 +56,20 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
       if (!active) return;
       const loadedStats = rawStats[1] ? normalizePlayerStats(JSON.parse(rawStats[1])) : DEFAULT_PLAYER_STATS;
       setStats(loadedStats);
+      onStatsUpdated?.(loadedStats);
       setTempleBlessing(blessing);
       setStamina(Math.max(0, Number.parseInt(rawStamina[1] ?? "0", 10) || 0));
       setLife(Math.max(0, Number.parseInt(rawLife[1] ?? "0", 10) || 0));
       setDayIdx(Math.max(0, Number.parseInt(rawDay[1] ?? "0", 10) || 0) % 7);
       setAvatarId(normalizePlayerAvatarId(rawAvatar[1]));
-      if (rawBag[1]) setBag(normalizePlayerBagData(JSON.parse(rawBag[1])));
+      if (rawBag[1]) {
+        const loadedBag = normalizePlayerBagData(JSON.parse(rawBag[1]));
+        setBag(loadedBag);
+        onBagUpdated?.(loadedBag);
+      }
     })().catch(() => {});
     return () => { active = false; };
-  }, [refreshKey]));
+  }, [onBagUpdated, onStatsUpdated, refreshKey]));
 
   const effectiveMaximumStamina = stats.maximumStamina + (templeBlessing === "endurance" ? 50 : 0);
   const staminaPct = Math.max(0, Math.min(1, stamina / Math.max(1, effectiveMaximumStamina)));
@@ -85,7 +94,7 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
               <Text style={styles.statBarText}>{life}/{stats.maximumLife}</Text>
             </View>
           </View>
-          <QuestBookButton size={42} onBagUpdated={setBag} />
+          <QuestBookButton size={42} onBagUpdated={(nextBag) => { setBag(nextBag); onBagUpdated?.(nextBag); }} />
           <View style={styles.rightHeaderColumn}>
             <View style={styles.rightHeader}>
               <View style={styles.dayBadge}><Text style={styles.dayText}>{DAYS[dayIdx]}</Text></View>
@@ -122,10 +131,15 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
         dayIdx={dayIdx}
         onClose={() => setBagOpen(false)}
         onTransferItem={() => {}}
-        onBagUpdated={setBag}
-        onStatsUpdated={setStats}
+        onBagUpdated={(nextBag) => { setBag(nextBag); onBagUpdated?.(nextBag); }}
+        onStatsUpdated={(nextStats) => { setStats(nextStats); onStatsUpdated?.(nextStats); }}
         onStaminaUpdated={setStamina}
         onLifeUpdated={setLife}
+        externalUseItemIds={externalUseItemIds}
+        onUseItem={async (slotIdx, item) => {
+          setBagOpen(false);
+          await onUseItem?.(slotIdx, item);
+        }}
       />
       <StatusModal
         visible={statusOpen}
@@ -135,6 +149,7 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
         onClose={() => setStatusOpen(false)}
         onStatsUpdated={(nextStats, nextLife) => {
           setStats(nextStats);
+          onStatsUpdated?.(nextStats);
           void AsyncStorage.setItem(PLAYER_STATS_KEY, JSON.stringify(nextStats));
           if (nextLife !== null) {
             setLife(nextLife);

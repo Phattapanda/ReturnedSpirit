@@ -34,6 +34,19 @@ async function loadQuestBookEntries(): Promise<QuestBookEntry[]> {
     const target = id === "wolves" || id === "feathers" ? 2 : 1;
     entries.push({ id: `guild-${id}`, source: "Adventurers’ Guild", title: QUESTS[id].title, detail: QUESTS[id].detail, tab: state.status === "completed" ? "complete" : "open", ready: state.status === "ready", progress: id === "wolves" && state.status !== "completed" ? `${Math.min(target, state.progress)}/${target}` : undefined });
   });
+  if (city.adventurerPromotionActive || city.adventurerPromotionCompleted) {
+    const complete = city.adventurerPromotionCompleted;
+    const ready = !complete && city.adventurerPromotionProgress >= 5;
+    entries.push({
+      id: "adventurer-promotion-rank-g",
+      source: "Adventurers’ Guild",
+      title: "Promotion Examination · Rank G",
+      detail: ready ? "Return to the Receptionist to complete the promotion." : "Defeat 5 Ember Roosters.",
+      tab: complete ? "complete" : "open",
+      ready,
+      progress: complete ? undefined : `${city.adventurerPromotionProgress}/5`,
+    });
+  }
   city.activeMerchantContracts.forEach((contract) => {
     const definition = MERCHANT_CONTRACTS[contract.id];
     entries.push({ id: `merchant-contract-${contract.id}-${contract.acceptedDay}`, source: "Merchant’s Guild", title: definition.title, detail: definition.detail, tab: "open", progress: `${merchantContractDaysRemaining(contract, guestState.calendarDaySerial)} days remaining` });
@@ -86,7 +99,7 @@ export default function QuestBookButton({ size = 38, disabled = false, onBagUpda
   const rewardX = useRef(new Animated.Value(0)).current, rewardY = useRef(new Animated.Value(0)).current, rewardScale = useRef(new Animated.Value(1)).current, rewardOpacity = useRef(new Animated.Value(0)).current;
   async function refresh() { setEntries(await loadQuestBookEntries()); }
   useEffect(() => { let active = true; void Promise.all([loadQuestBookUnlocked(), loadQuestBookEntries(), repairLegacyCleanQuestReward()]).then(([value, initialEntries, repairedBag]) => { if (active) { setUnlocked(value); setEntries(initialEntries); if (repairedBag) onBagUpdated?.(repairedBag); } }); const a = subscribeQuestBookUnlocked((value) => { if (active) setUnlocked(value); }); const b = subscribeTavernQuests(() => { if (active) void refresh(); }); return () => { active = false; a(); b(); }; }, [onBagUpdated]);
-  const hasReadyQuest = entries.some((entry) => entry.tab === "open" && entry.ready && entry.tavernQuestId);
+  const hasReadyQuest = entries.some((entry) => entry.tab === "open" && entry.ready);
   const visibleEntries = useMemo(() => entries.filter((entry) => entry.tab === tab), [entries, tab]);
   async function openQuestBook() { if (disabled) return; setVisible(true); setLoading(true); setTab("open"); try { await refresh(); } finally { setLoading(false); } }
   function showFloating(text: string) { setFloatingMessage(text); setTimeout(() => setFloatingMessage(null), 1000); }

@@ -531,11 +531,47 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
     mealTags: [MEAL_TAG.HEALTHY, MEAL_TAG.HEARTY, MEAL_TAG.WARM, MEAL_TAG.HERBS],
     staminaRecovery: 40, lifeRecovery: 25, baseSellPriceCopper: 48,
   },
+  pan_fried_eggs: {
+    name: "Fried Eggs", description: "Two fried eggs seasoned with herbs. Restores 30 Stamina and 10 Life.",
+    attributes: [ITEM_ATTRIBUTE.EDIBLE], mealTags: [MEAL_TAG.VEGETARIAN, MEAL_TAG.HEALTHY, MEAL_TAG.WARM],
+    staminaRecovery: 30, lifeRecovery: 10, baseSellPriceCopper: 28,
+  },
+  pan_fishermans_fry: {
+    name: "Fisherman's Fry", description: "Pan-fried fish with tomato and herbs. Restores 35 Stamina and 20 Life.",
+    attributes: [ITEM_ATTRIBUTE.EDIBLE], mealTags: [MEAL_TAG.HEALTHY, MEAL_TAG.HEARTY, MEAL_TAG.WARM, MEAL_TAG.HERBS],
+    staminaRecovery: 35, lifeRecovery: 20, baseSellPriceCopper: 42,
+  },
+  pan_meat_and_carrots: {
+    name: "Meat and Carrots", description: "White meat fried with carrots and herbs. Restores 35 Stamina and 20 Life.",
+    attributes: [ITEM_ATTRIBUTE.EDIBLE], mealTags: [MEAL_TAG.MEAT, MEAL_TAG.HEALTHY, MEAL_TAG.HEARTY, MEAL_TAG.WARM, MEAL_TAG.HERBS],
+    staminaRecovery: 35, lifeRecovery: 20, baseSellPriceCopper: 30,
+  },
+  pan_meat_skillet: {
+    name: "Meat Skillet", description: "Red meat fried with potatoes and herbs. Restores 35 Stamina and 30 Life.",
+    attributes: [ITEM_ATTRIBUTE.EDIBLE], mealTags: [MEAL_TAG.MEAT, MEAL_TAG.HEARTY, MEAL_TAG.WARM, MEAL_TAG.HERBS],
+    staminaRecovery: 35, lifeRecovery: 30, baseSellPriceCopper: 37,
+  },
+  pan_mushroom_skillet: {
+    name: "Mushroom Skillet", description: "Mushrooms fried with onion and herbs. Restores 25 Stamina and 10 Life.",
+    attributes: [ITEM_ATTRIBUTE.EDIBLE], mealTags: [MEAL_TAG.VEGETARIAN, MEAL_TAG.HEALTHY, MEAL_TAG.WARM, MEAL_TAG.HERBS],
+    staminaRecovery: 25, lifeRecovery: 10, baseSellPriceCopper: 22,
+  },
+  pan_fried_potatoes: {
+    name: "Pan-Fried Potatoes", description: "Crisp potatoes seasoned with herbs. Restores 35 Stamina.",
+    attributes: [ITEM_ATTRIBUTE.EDIBLE], mealTags: [MEAL_TAG.VEGETARIAN, MEAL_TAG.HEARTY, MEAL_TAG.WARM, MEAL_TAG.HERBS],
+    staminaRecovery: 35, baseSellPriceCopper: 20,
+  },
+  pan_ember_chicken_skillet: {
+    name: "Ember Chicken Skillet", description: "Restores 45 Stamina and 25 Life. Grants Fire Resistance +3 for 1 day.",
+    attributes: [ITEM_ATTRIBUTE.EDIBLE], mealTags: [MEAL_TAG.MEAT, MEAL_TAG.HEARTY, MEAL_TAG.WARM, MEAL_TAG.HERBS],
+    staminaRecovery: 45, lifeRecovery: 25, baseSellPriceCopper: 57,
+    grantedStatusEffectId: "fire_resistance_3",
+  },
   pan_farmhouse: {
-    name: "Farmhouse Pan", description: "A hearty potato, egg, and onion dish. Restores 45 Stamina and 15 Life.",
+    name: "Farmhouse Pan", description: "Pan-fried potatoes served with onion and egg. Restores 50 Stamina and 20 Life.",
     attributes: [ITEM_ATTRIBUTE.EDIBLE],
     mealTags: [MEAL_TAG.VEGETARIAN, MEAL_TAG.HEALTHY, MEAL_TAG.HEARTY, MEAL_TAG.WARM],
-    staminaRecovery: 45, lifeRecovery: 15, baseSellPriceCopper: 35,
+    staminaRecovery: 50, lifeRecovery: 20, baseSellPriceCopper: 47,
   },
   stew_ember_chicken: {
     name: "Ember Chicken Stew", description: "Restores 45 Stamina and 30 Life. Grants Fire Resistance +3 for 1 day.",
@@ -564,6 +600,9 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
   beef:        { name: "Red Meat",         description: "Common red meat used in everyday cooking.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   fish:        { name: "Fish Meat",        description: "Fresh fish meat used for cooking.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   tomato:      { name: "Tomato",           description: "A ripe tomato used for cooking.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  lettuce:     { name: "Lettuce",          description: "Crisp lettuce used for salads and cold dishes.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  cucumber:    { name: "Cucumber",         description: "A fresh cucumber used for salads and cold dishes.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  spinach:     { name: "Spinach",          description: "Fresh leafy spinach used as a cooking ingredient.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   snowberry:   { name: "Snowberry",        description: "A pale winter berry.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   ember_chicken_meat: { name: "Ember Chicken Meat", description: "Rare monster meat radiating heat.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   ember_chicken_egg:  { name: "Ember Chicken Egg",  description: "A rare monster egg radiating heat.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
@@ -670,6 +709,11 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
     description: "Reduces Dungeon activity Stamina costs by 2 while equipped. Leaves Coal when its 50 Durability is spent.",
     attributes: [ITEM_ATTRIBUTE.TOOL],
     maxDurability: 50,
+  },
+  return_bell: {
+    name: "Return Bell",
+    description: "Returns the adventurer immediately from a Dungeon, even during combat.",
+    attributes: [],
   },
   quest_hunters_documents: {
     name: "Research Documents",

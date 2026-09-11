@@ -50,6 +50,7 @@ import { FOREST_DUNGEON_KEY, FOREST_FIGHT_SNAPSHOT_KEY } from "@/src/game/forest
 import { COACHMAN_ESCORT_KEY } from "@/src/game/coachman-escort-system";
 import { EMBER_ROOSTER_ENCOUNTER_SEEN_KEY } from "@/src/game/encounter-cinematics";
 import { DEFAULT_MINSTREL_STATE, MINSTREL_STATE_KEY } from "@/src/game/minstrel-system";
+import { CITY_STATE_KEY, SUPPORTER_BAG_KEY } from "@/src/game/city-system";
 import {
   DEFAULT_TITHE_STATE,
   ELAPSED_DAYS_KEY,
@@ -89,6 +90,8 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   MERCHANT_SHOP_KEY,
   MAILBOX_STATE_KEY,
   MINSTREL_STATE_KEY,
+  CITY_STATE_KEY,
+  SUPPORTER_BAG_KEY,
   // Kitchen tutorial flags
   "@tutorial:kitchen_done",
   "@kitchen:has_seen_post_garden_dialog",

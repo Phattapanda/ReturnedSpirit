@@ -9,6 +9,7 @@ type Props = {
   characterSource?: ImageSourcePropType;
   playerCharacter?: boolean;
   characterScale?: number;
+  characterAspectRatio?: number;
   speakerName?: string | null;
   onSkip?: () => void;
   children?: ReactNode;
@@ -22,6 +23,7 @@ export default function CharacterDialogFrame({
   characterSource,
   playerCharacter = false,
   characterScale = 0.8,
+  characterAspectRatio,
   speakerName,
   onSkip,
   children,
@@ -65,11 +67,11 @@ export default function CharacterDialogFrame({
   const maximumCharacterHeight = Math.min(height * 0.76, 760) * characterScale;
   const maximumCharacterWidth = Math.min(width * 0.9, 540) * characterScale;
   const resolvedCharacter = characterSource ? NativeImage.resolveAssetSource(characterSource) : null;
-  const characterAspectRatio = resolvedCharacter?.width && resolvedCharacter?.height
+  const resolvedAspectRatio = characterAspectRatio ?? (resolvedCharacter?.width && resolvedCharacter?.height
     ? resolvedCharacter.width / resolvedCharacter.height
-    : maximumCharacterWidth / maximumCharacterHeight;
-  const characterWidth = Math.min(maximumCharacterWidth, maximumCharacterHeight * characterAspectRatio);
-  const characterHeight = characterWidth / characterAspectRatio;
+    : maximumCharacterWidth / maximumCharacterHeight);
+  const characterWidth = Math.min(maximumCharacterWidth, maximumCharacterHeight * resolvedAspectRatio);
+  const characterHeight = characterWidth / resolvedAspectRatio;
   return (
     <View style={styles.blocker}>
       <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.dimmer, { opacity: dimOpacity }]} />

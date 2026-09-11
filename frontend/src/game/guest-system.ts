@@ -189,9 +189,9 @@ export const OLD_FARMER_PROFILE: GuestProfile = {
     {
       minFavor: 0, maxFavor: 24, visitDays: OLD_FARMER_VISIT_DAYS,
       exchangePool: [
-        exchangeOffer("potato", "Potato", 1, 17.5),
-        exchangeOffer("carrot", "Carrot", 1, 17.5),
-        exchangeOffer("standard_fertilizer", "Standard Fertilizer", 2, 17.5),
+        exchangeOffer("potato", "Potato", 2, 17.5),
+        exchangeOffer("carrot", "Carrot", 2, 17.5),
+        exchangeOffer("standard_fertilizer", "Standard Fertilizer", 3, 17.5),
         exchangeOffer("seed_carrot", "Carrot Seed", 1, 17.5),
         exchangeOffer("onion", "Onion", 1, 10),
         exchangeOffer("seed_potato", "Potato Seed", 1, 10),
@@ -392,13 +392,21 @@ function normalizeGuestState(raw: unknown): GuestState {
       if (t.offer && typeof t.offer === "object") {
         const offer = t.offer as GuestExchangeOffer;
         if (typeof offer.itemId === "string" && Number(offer.quantity) > 0) {
+          const itemId = normalizeGuestExchangeItemId(offer.itemId);
+          const oldFarmerQuantity = guestId === "old_farmer"
+            ? itemId === "carrot" || itemId === "potato"
+              ? 2
+              : itemId === "standard_fertilizer"
+                ? 3
+                : null
+            : null;
           visitTrades[guestId] = {
             daySerial,
             claimed: Boolean(t.claimed),
             offer: {
-              itemId: normalizeGuestExchangeItemId(offer.itemId),
+              itemId,
               name: String(offer.name || offer.itemId),
-              quantity: Math.max(1, Math.floor(Number(offer.quantity) || 1)),
+              quantity: oldFarmerQuantity ?? Math.max(1, Math.floor(Number(offer.quantity) || 1)),
               weight: Math.max(0, Number(offer.weight) || 0),
             },
           };

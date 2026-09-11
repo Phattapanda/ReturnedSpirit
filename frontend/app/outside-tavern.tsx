@@ -12,6 +12,7 @@ import TravelHeader from "@/src/components/travel-header";
 import CurrencyPrice from "@/src/components/currency-price";
 import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
 import StoryDialogOverlay, { type StoryDialogChoice, type StoryDialogLine } from "@/src/components/story-dialog-overlay";
+import { COACHMAN_DIALOG_SCALE, DIALOG_CHARACTER_ASSETS } from "@/src/assets/dialog-character-assets";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { useHaptics } from "@/src/feedback/haptics-provider";
 import { getCoachmanTravelStatus, loadTravelState, payForCarriage, spendWalkingStamina, unlockNextCityAfterEscort } from "@/src/game/travel-system";
@@ -20,7 +21,6 @@ import { loadGuestState } from "@/src/game/guest-system";
 import { areRegularGuestsUnlockedForDay, loadPostGuestTutorialState } from "@/src/game/post-guest-tutorial";
 import { MERCHANT_STOCK, prepareMerchantShop, purchaseMerchantItem, type MerchantShopState, type MerchantStockId } from "@/src/game/merchant-shop";
 import { finalizeCoachmanEscortDecline, hasCompletedCityRoadEncounter, loadCoachmanEscortState, prepareCoachmanEscortDeparture, reconsiderCoachmanEscort } from "@/src/game/coachman-escort-system";
-import { DIALOG_CHARACTER_ASSETS } from "@/src/assets/dialog-character-assets";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
 import { QUESTS, loadCityState, turnInQuest, type CityState, type QuestId } from "@/src/game/city-system";
 
@@ -239,11 +239,11 @@ export default function OutsideTavernScreen() {
     setCoachmanReoffer("declined");
   }
   const coachmanReofferLine: StoryDialogLine | null = coachmanReoffer === "question"
-    ? { speaker: "Coachman", portrait: DIALOG_CHARACTER_ASSETS.coachman, text: "Good morning, I just wanted to ask if you’ve changed your mind?" }
+    ? { speaker: "Coachman", portrait: DIALOG_CHARACTER_ASSETS.coachman, characterScale: COACHMAN_DIALOG_SCALE, text: "Good morning, I just wanted to ask if you’ve changed your mind?" }
     : coachmanReoffer === "accepted"
-      ? { speaker: "Coachman", portrait: DIALOG_CHARACTER_ASSETS.coachman, text: "Thank you. Talk to me when you’re ready to leave." }
+      ? { speaker: "Coachman", portrait: DIALOG_CHARACTER_ASSETS.coachman, characterScale: COACHMAN_DIALOG_SCALE, text: "Thank you. Talk to me when you’re ready to leave." }
       : coachmanReoffer === "declined"
-        ? { speaker: "Coachman", portrait: DIALOG_CHARACTER_ASSETS.coachman, text: "A real shame." }
+        ? { speaker: "Coachman", portrait: DIALOG_CHARACTER_ASSETS.coachman, characterScale: COACHMAN_DIALOG_SCALE, text: "A real shame." }
         : null;
   const coachmanReofferChoices: readonly StoryDialogChoice[] = coachmanReoffer === "question" ? [
     { label: "YES", onPress: () => { void acceptCoachmanReoffer(); } },

@@ -20,7 +20,7 @@ import { NEXT_RUN_INTRO_PENDING_KEY } from "@/src/game/tithe-system";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { useHaptics } from "@/src/feedback/haptics-provider";
 import CharacterDialogFrame from "@/src/components/character-dialog-frame";
-import { DIALOG_CHARACTER_ASSETS, RUPERT_DIALOG_SCALE, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
+import { DIALOG_CHARACTER_ASSETS, RUPERT_DIALOG_SCALE, getPlayerDialogAspectRatio, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
   PLAYER_AVATAR_KEY,
@@ -487,6 +487,7 @@ export default function IntroScreen() {
           characterSource={introCharacterSource}
           playerCharacter={introPlayerSpeaking}
           characterScale={introPlayerSpeaking ? getPlayerDialogScale(playerAvatarId) : RUPERT_DIALOG_SCALE}
+          characterAspectRatio={introPlayerSpeaking ? getPlayerDialogAspectRatio(playerAvatarId) : undefined}
           speakerName={currentDialogEntry.speakerName}
           onSkip={currentDialogEntry.choices ? undefined : skipDialogDestination ? skipDialog : advanceDialog}
           actions={currentDialogEntry.choices ? (

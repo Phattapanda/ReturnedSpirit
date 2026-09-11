@@ -9,6 +9,7 @@ export type StoryDialogLine = {
   portrait?: ImageSourcePropType;
   playerPortrait?: boolean;
   characterScale?: number;
+  characterAspectRatio?: number;
   highlightedPhrases?: readonly string[];
 };
 
@@ -39,7 +40,7 @@ export default function StoryDialogOverlay({ visible, line, choices = [], onCont
     : onContinue
       ? <TouchableOpacity style={styles.continueButton} onPress={onContinue} activeOpacity={0.8}><Text style={styles.continueText}>Continue</Text><Ionicons name="chevron-forward" size={16} color="#F5E6C8" style={styles.continueIcon} /></TouchableOpacity>
       : null;
-  return <CharacterDialogFrame visible={visible} characterSource={line.portrait} playerCharacter={line.playerPortrait} characterScale={line.characterScale} speakerName={line.speaker} onSkip={onSkip} actions={actions}>
+  return <CharacterDialogFrame visible={visible} characterSource={line.portrait} playerCharacter={line.playerPortrait} characterScale={line.characterScale} characterAspectRatio={line.characterAspectRatio} speakerName={line.speaker} onSkip={onSkip} actions={actions}>
     <RichText line={line} />
   </CharacterDialogFrame>;
 }

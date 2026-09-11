@@ -8,7 +8,12 @@ export const AVATAR3_DIALOG_SCALE = 0.8;
 export const INTRO_PLAYER_DIALOG_SCALE = 0.8;
 export const RUPERT_DIALOG_SCALE = 0.95;
 export const OLD_FARMER_DIALOG_SCALE = 0.72;
-export const COACHMAN_DIALOG_SCALE = 0.8;
+export const COACHMAN_DIALOG_SCALE = 0.84;
+
+// Avatar 1's expression images use differently sized source canvases. Keep
+// every expression in the same frame as the Kitchen's sad portrait so wider
+// screens cannot make taller source files appear larger.
+const AVATAR1_KITCHEN_ASPECT_RATIO = 512 / 916;
 
 export const MERCHANT_GUILD_RECEPTIONIST_ASSETS = {
   dialog: require("../../assets/images/dialog/dialogue_receptionist_merchant.png"),
@@ -19,6 +24,10 @@ export function getPlayerDialogScale(avatarId: PlayerAvatarId): number {
   if (avatarId === 2) return AVATAR2_DIALOG_SCALE;
   if (avatarId === 3) return AVATAR3_DIALOG_SCALE;
   return PLAYER_DIALOG_SCALE;
+}
+
+export function getPlayerDialogAspectRatio(avatarId: PlayerAvatarId): number | undefined {
+  return avatarId === 1 ? AVATAR1_KITCHEN_ASPECT_RATIO : undefined;
 }
 
 export function getDialogExpressionForStamina(stamina: number): DialogExpression {

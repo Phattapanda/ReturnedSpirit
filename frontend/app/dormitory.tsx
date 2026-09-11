@@ -1436,7 +1436,7 @@ function UpgradeRow({ upgrade, resources, onTap }: UpgradeRowProps) {
       style={[styles.upgradeRow, unavailable && styles.upgradeRowUnavailable, upgrade.completed && styles.upgradeRowCompleted]}
     >
       <View style={styles.upgradeDetails}>
-        <Text style={styles.upgradeName}>{upgrade.displayName}</Text>
+        <Text style={styles.upgradeName} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>{upgrade.displayName}</Text>
         {/* Effects */}
         <View style={styles.upgradeEffects}>
           {upgrade.effects.sleepStaminaRecovery ? (
@@ -1463,7 +1463,7 @@ function UpgradeRow({ upgrade, resources, onTap }: UpgradeRowProps) {
         </View>
         {!upgrade.completed && !affordable ? (
           <View style={styles.upgradeNotAffordBadge}>
-            <Text style={styles.upgradeNotAffordText}>Not enough resources.</Text>
+            <Text style={styles.upgradeNotAffordText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Not enough resources.</Text>
           </View>
         ) : null}
       </View>
@@ -1655,7 +1655,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.20)",
   },
   upgradeDetails: { flex: 1, minWidth: 0 },
-  upgradeName:    { color: "#F5E6C8", fontSize: 14, fontFamily: "Oldenburg", marginBottom: 4 },
+  upgradeName:    { color: "#F5E6C8", fontSize: 14, fontFamily: "Oldenburg", marginBottom: 4, flexShrink: 1 },
   upgradeEffects: { flexDirection: "column", gap: 2, marginBottom: 6 },
   upgradeEffect:  { color: "rgba(196,148,58,0.80)", fontSize: 12 },
   upgradeCosts:   { flexDirection: "row", flexWrap: "wrap", gap: 8 },
@@ -1665,7 +1665,7 @@ const styles = StyleSheet.create({
     marginTop: 6, backgroundColor: "rgba(200,50,20,0.12)", borderRadius: 6,
     paddingHorizontal: 8, paddingVertical: 3, alignSelf: "flex-start",
   },
-  upgradeNotAffordText: { color: "#CC4400", fontSize: 11, fontFamily: "Oldenburg" },
+  upgradeNotAffordText: { color: "#CC4400", fontSize: 11, fontFamily: "Oldenburg", flexShrink: 1 },
   upgradeBuildButton: {
     minWidth: 92, minHeight: 38, paddingHorizontal: 16, borderRadius: 9,
     alignItems: "center", justifyContent: "center",

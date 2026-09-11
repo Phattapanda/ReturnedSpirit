@@ -12,6 +12,7 @@
       "bundleIdentifier": "com.emergent.deutschgame.b8t357"
     },
     "android": {
+      "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000000"

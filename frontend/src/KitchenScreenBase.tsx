@@ -41,7 +41,7 @@ import QuestBookButton from "@/src/components/quest-book";
 import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
 import StoryDialogOverlay, { type StoryDialogChoice, type StoryDialogLine } from "@/src/components/story-dialog-overlay";
 import CharacterDialogFrame from "@/src/components/character-dialog-frame";
-import { DIALOG_CHARACTER_ASSETS, RUPERT_DIALOG_SCALE, getDialogExpressionForStamina, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
+import { COACHMAN_DIALOG_SCALE, DIALOG_CHARACTER_ASSETS, RUPERT_DIALOG_SCALE, getDialogExpressionForStamina, getPlayerDialogAspectRatio, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
 import {
   LocationStatusBadge,
   notifyLocationStatusChanged,
@@ -366,6 +366,7 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   leather: require("../assets/images/leather.png"),
   rope: require("../assets/images/rope.png"),
   torch: require("../assets/images/torch_normal.png"),
+  return_bell: require("../assets/images/return_bell.png"),
   ore_iron: require("../assets/images/ore_iron.png"),
   ore_copper: require("../assets/images/ore_copper.png"),
   ore_silver: require("../assets/images/ore_silver.png"),
@@ -384,6 +385,13 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   grown_cinnamon_stalks_cloves: require("../assets/images/quest_item.png"),
   yeast_nutrients: require("../assets/images/quest_item.png"),
   tomato: require("../assets/images/tomato.png"),
+  pan_fried_eggs: require("../assets/images/pan_fried_eggs.png"),
+  pan_fishermans_fry: require("../assets/images/pan_fishermans_fry.png"),
+  pan_meat_and_carrots: require("../assets/images/pan_meat_and_carrots.png"),
+  pan_meat_skillet: require("../assets/images/pan_meat_skillet.png"),
+  pan_mushroom_skillet: require("../assets/images/pan_mushroom_skillet.png"),
+  pan_fried_potatoes: require("../assets/images/pan_fried_potatoes.png"),
+  pan_ember_chicken_skillet: require("../assets/images/pan_ember_chicken_skillet.png"),
   pan_farmhouse: require("../assets/images/farmhouse_pan.png"),
   snowberrysherbet: require("../assets/images/snowberry_sherbet.png"),
   cooking_pot: require("../assets/images/cooking_pot.png"),
@@ -573,7 +581,7 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
     clearManagedInterval: clearInterval,
   } = useManagedTimers();
   const router = useRouter();
-  const { harvestReady, merchantPresent, receptionistPresent, sleepReady } = useLocationStatusBadges();
+  const { harvestReady, mailboxUnread, merchantPresent, receptionistPresent, sleepReady } = useLocationStatusBadges();
   const insets = useSafeAreaInsets();
   const { width: W, height: H } = useWindowDimensions();
   const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(DEFAULT_PLAYER_AVATAR_ID);
@@ -850,7 +858,9 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
 
   function openEscortDialog(mode: NonNullable<typeof escortDialogMode>, lines: StoryDialogLine[]) {
     setEscortDialogMode(mode);
-    setEscortDialogLines(lines);
+    setEscortDialogLines(lines.map((line) => line.speaker === "Coachman"
+      ? { ...line, characterScale: line.characterScale ?? COACHMAN_DIALOG_SCALE }
+      : line));
     setEscortDialogIndex(0);
   }
 
@@ -1090,7 +1100,7 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
   // ── Name input
   const [nameInputOpen, setNameInputOpen] = useState(false);
   const [nameInputVal, setNameInputVal] = useState("");
-  const [iosKeyboardHeight, setIosKeyboardHeight] = useState(0);
+  const [keyboardTop, setKeyboardTop] = useState<number | null>(null);
 
   // ── Tooltip
   const [tooltipVisible, setTooltipVisible] = useState(false);
@@ -1315,12 +1325,15 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ts]);
 
-  // iOS overlays the keyboard, while Android already resizes the visible app
-  // window. Applying this offset on Android would move the dialog twice.
+  // Some Android devices overlay the keyboard while others resize the app.
+  // Store the keyboard's top edge and offset only the portion that actually
+  // overlaps the current visible window, avoiding both coverage and a double
+  // jump on resize-mode devices.
   useEffect(() => {
-    if (Platform.OS !== "ios") return;
-    const showSub = Keyboard.addListener("keyboardWillShow", (event) => setIosKeyboardHeight(event.endCoordinates.height));
-    const hideSub = Keyboard.addListener("keyboardWillHide", () => setIosKeyboardHeight(0));
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+    const showSub = Keyboard.addListener(showEvent, (event) => setKeyboardTop(event.endCoordinates.screenY));
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardTop(null));
     return () => { showSub.remove(); hideSub.remove(); };
   }, []);
 
@@ -5094,6 +5107,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
               {renderLocContent(isEffectivelyActive)}
               {isGardenBtn && harvestReady && <LocationStatusBadge kind="harvest" />}
               {loc.id === "dormitory" && sleepReady && <LocationStatusBadge kind="sleep" />}
+              {loc.id === "mail" && mailboxUnread && <LocationStatusBadge kind="mail" />}
               {loc.id === "explore" && (receptionistPresent ? <LocationStatusBadge kind="receptionist" /> : merchantPresent ? <LocationStatusBadge kind="merchant" /> : null)}
             </TouchableOpacity>
           );
@@ -5157,8 +5171,9 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
           characterSource={kitchenDialogCharacter}
           playerCharacter={kitchenDialogPlayerSpeaking}
           characterScale={kitchenDialogPlayerSpeaking ? getPlayerDialogScale(playerAvatarId) : RUPERT_DIALOG_SCALE}
+          characterAspectRatio={kitchenDialogPlayerSpeaking ? getPlayerDialogAspectRatio(playerAvatarId) : undefined}
           speakerName={kitchenDialogSpeaker}
-          bottomOffset={ts === "NAME_INPUT" ? iosKeyboardHeight : 0}
+          bottomOffset={ts === "NAME_INPUT" && keyboardTop !== null ? Math.max(0, H - keyboardTop) : 0}
           onSkip={dlgActive ? (dlgIdx < dlgLines.length - 1 ? skipDialogToLastLine : advanceDialog) : undefined}
           actions={ts === "NAME_INPUT" && nameInputOpen ? (
             <View style={styles.nameDialogActions}>

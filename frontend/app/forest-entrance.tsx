@@ -18,6 +18,7 @@ import { useHaptics } from "@/src/feedback/haptics-provider";
 import {
   FOREST_FLOOR_COUNT, FOREST_FORWARD_STAMINA_COST, FOREST_MONSTERS, FOREST_REST_FLOORS,
   FOREST_SEARCH_BASE_SUCCESS, FOREST_SEARCH_PERCEPTION_BONUS,
+  getForestAttackPreview,
   ambushHiddenForestMonster, attackForestMonster, bandageAtForestRestArea, defendAgainstForestMonster, escapeForestCombat,
   collectPendingForestCarcass, dismissPendingForestLoot, enterForestDungeon, forestAreaForFloor, goForwardInForest, hideFromForestMonster, leaveForestDungeon, letHiddenForestMonsterPass, searchForestArea,
   type DungeonActionResult, type ForestDungeonState, type ForestMonsterId,
@@ -29,7 +30,7 @@ import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats } from "@/
 import { completeDungeonDayTransition } from "@/src/game/dungeon-day-transition";
 import { EMBER_ROOSTER_ENCOUNTER_SEEN_KEY } from "@/src/game/encounter-cinematics";
 import { activeSupporter, discardSupporterItem, eatSupporterItem, loadSupporterBag, moveSupporterItemToPlayer, type SupporterId } from "@/src/game/city-system";
-import { ITEM_ATTRIBUTE, ITEM_CATALOG, hasItemAttribute, isConsumable, isEdible, type BagItem, type PlayerBagData } from "@/src/game/item-system";
+import { DEFAULT_BAG, ITEM_ATTRIBUTE, ITEM_CATALOG, PLAYER_BAG_KEY, hasItemAttribute, isConsumable, isEdible, normalizePlayerBagData, type BagItem, type PlayerBagData } from "@/src/game/item-system";
 import { setGameplayBackBlocked } from "@/src/components/gameplay-back-guard";
 import { PLAYER_AVATAR_KEY, type PlayerAvatarId } from "@/src/game/player-avatar";
 
@@ -119,6 +120,8 @@ export default function ForestEntranceScreen() {
   const [headerRefreshKey, setHeaderRefreshKey] = useState(0);
   const [currentLife, setCurrentLife] = useState(1);
   const [maximumLife, setMaximumLife] = useState(DEFAULT_PLAYER_STATS.maximumLife);
+  const [combatStats, setCombatStats] = useState(DEFAULT_PLAYER_STATS);
+  const [combatBag, setCombatBag] = useState<PlayerBagData>(DEFAULT_BAG);
   const [karmaPoints, setKarmaPoints] = useState(0);
   const [deathError, setDeathError] = useState<string | null>(null);
   const [entryConfirmed, setEntryConfirmed] = useState(false);
@@ -183,12 +186,15 @@ export default function ForestEntranceScreen() {
   useFocusEffect(useCallback(() => {
     if (!entryConfirmed) return undefined;
     let active = true;
-    Promise.all([enterForestDungeon(), AsyncStorage.getItem("@game:life"), loadProgressionState(), AsyncStorage.getItem(PLAYER_STATS_KEY), AsyncStorage.getItem(EMBER_ROOSTER_ENCOUNTER_SEEN_KEY)]).then(([loaded, rawLife, progression, rawStats, rawEncounterSeen]) => {
+    Promise.all([enterForestDungeon(), AsyncStorage.getItem("@game:life"), loadProgressionState(), AsyncStorage.getItem(PLAYER_STATS_KEY), AsyncStorage.getItem(EMBER_ROOSTER_ENCOUNTER_SEEN_KEY), AsyncStorage.getItem(PLAYER_BAG_KEY)]).then(([loaded, rawLife, progression, rawStats, rawEncounterSeen, rawBag]) => {
       if (!active) return;
       setState(loaded);
       setCurrentLife(Math.max(0, Number.parseInt(rawLife ?? "1", 10) || 0));
       setKarmaPoints(progression.karmaPoints);
-      setMaximumLife(rawStats ? normalizePlayerStats(JSON.parse(rawStats)).maximumLife : DEFAULT_PLAYER_STATS.maximumLife);
+      const loadedStats = rawStats ? normalizePlayerStats(JSON.parse(rawStats)) : DEFAULT_PLAYER_STATS;
+      setCombatStats(loadedStats);
+      setMaximumLife(loadedStats.maximumLife);
+      setCombatBag(rawBag ? normalizePlayerBagData(JSON.parse(rawBag)) : DEFAULT_BAG);
       setEmberRoosterEncounterSeen(rawEncounterSeen === "true");
     }).catch(() => setMessage("The dungeon state could not be loaded."));
     return () => {
@@ -338,6 +344,7 @@ export default function ForestEntranceScreen() {
       }
       setMessage(result.life <= 0 ? "YOU DIED." : result.message);
       setCurrentLife(result.life);
+      setCombatBag(result.bag);
       setHeaderRefreshKey((value) => value + 1);
       if (result.life > 0) {
         if (/misses/i.test(result.message)) playSoundEffect("sword-miss", { maxDurationMs: 2500 });
@@ -409,7 +416,7 @@ export default function ForestEntranceScreen() {
       setKarmaPoints(progression.karmaPoints);
       if (!result) { setDeathError("The fight cannot be repeated or there are not enough KP."); return; }
       setState({ ...result.state, floors: { ...result.state.floors } });
-      setCurrentLife(result.life); setMessage(result.message); setHeaderRefreshKey((value) => value + 1);
+      setCurrentLife(result.life); setCombatBag(result.bag); setMessage(result.message); setHeaderRefreshKey((value) => value + 1);
     } finally { setBusy(false); }
   }
 
@@ -431,19 +438,22 @@ export default function ForestEntranceScreen() {
     finally { setBusy(false); }
   }
 
-  async function leaveSafely() {
+  async function leaveSafely(useReturnBell = false) {
     if (busy) return;
     setBusy(true);
     let result: Awaited<ReturnType<typeof leaveForestDungeon>>;
     try {
-      result = await leaveForestDungeon();
+      result = await leaveForestDungeon({ useReturnBell });
     } catch {
-      setMessage("I can only leave safely from a Rest Area or after clearing the dungeon.");
+      setMessage(useReturnBell
+        ? "I do not have a Return Bell I can use."
+        : "I can only leave safely from a Rest Area or after clearing the dungeon.");
       setBusy(false);
       return;
     }
 
     setMessage(result.message);
+    setCombatBag(result.bag);
     setHeaderRefreshKey((value) => value + 1);
     try {
       await new Promise((resolve) => setTimeout(resolve, 1400));
@@ -463,6 +473,19 @@ export default function ForestEntranceScreen() {
     }
   }
 
+  const attackPreviews = useMemo(() => monsterState ? {
+    head: getForestAttackPreview(monsterState.id, "head", combatStats, combatBag),
+    body: getForestAttackPreview(monsterState.id, "body", combatStats, combatBag),
+  } : null, [combatBag, combatStats, monsterState]);
+  const attackSubtitle = (target: "head" | "body") => {
+    const preview = attackPreviews?.[target];
+    if (!preview) return "";
+    const damage = preview.minimumDamage === preview.maximumDamage
+      ? `${preview.minimumDamage} dmg`
+      : `${preview.minimumDamage}–${preview.maximumDamage} dmg`;
+    return `${damage} · ${preview.hitChance}% hit chance`;
+  };
+
   const actionContent = useMemo(() => {
     if (!state || !floor) return null;
     if (currentLife <= 0) return <View style={styles.deathCard}><Text style={styles.deathTitle}>YOU DIED.</Text><Text style={styles.deathText}>Death is waiting.</Text></View>;
@@ -478,8 +501,8 @@ export default function ForestEntranceScreen() {
       <ActionButton label="Hide" subtitle="Let the monster pass · Search the area" disabled={busy} onPress={() => { void perform(letHiddenForestMonsterPass); }} />
     </View>;
     if (monsterState?.phase === "combat") return <View style={styles.combatGrid}>
-      <ActionButton label="Attack Head" subtitle="-30% hit · +50% damage" disabled={busy} onPress={() => { void perform(() => attackForestMonster("head")); }} />
-      <ActionButton label="Attack Body" subtitle="Normal hit chance" disabled={busy} onPress={() => { void perform(() => attackForestMonster("body")); }} />
+      <ActionButton label="Attack Head" subtitle={attackSubtitle("head")} disabled={busy} onPress={() => { void perform(() => attackForestMonster("head")); }} />
+      <ActionButton label="Attack Body" subtitle={attackSubtitle("body")} disabled={busy} onPress={() => { void perform(() => attackForestMonster("body")); }} />
       <ActionButton label="Defend" subtitle="30% + Luck dodge" disabled={busy} onPress={() => { void perform(defendAgainstForestMonster); }} />
       <ActionButton label="Escape" subtitle="50% + Luck chance" danger disabled={busy} onPress={() => { void perform(escapeForestCombat); }} />
     </View>;
@@ -494,7 +517,7 @@ export default function ForestEntranceScreen() {
     </>;
   // perform is intentionally bound to current screen state.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bossCleared, busy, currentLife, floor, isRestArea, monsterState?.phase, router, state]);
+  }, [attackPreviews, bossCleared, busy, currentLife, floor, isRestArea, monsterState?.phase, router, state]);
 
   return <View style={styles.root}>
     <Reanimated.View pointerEvents="none" style={[StyleSheet.absoluteFill, floorBackgroundStyle]}>
@@ -508,6 +531,10 @@ export default function ForestEntranceScreen() {
       refreshKey={headerRefreshKey}
       supporterImage={supporter ? SUPPORTER_IMAGES[supporter.definition.id] : undefined}
       onSupporterPress={() => { void openSupporterBag(); }}
+      onBagUpdated={setCombatBag}
+      onStatsUpdated={setCombatStats}
+      externalUseItemIds={["return_bell"]}
+      onUseItem={() => leaveSafely(true)}
     />
     <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: 128, paddingBottom: insets.bottom + 22 }]} contentInsetAdjustmentBehavior="automatic" showsVerticalScrollIndicator={false}>
       {!isRestArea ? <View style={styles.monsterStage}>

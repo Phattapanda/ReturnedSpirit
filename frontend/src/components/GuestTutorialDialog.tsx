@@ -9,6 +9,7 @@ export type GuestTutorialDialogLine = {
   portrait: ImageSourcePropType;
   playerPortrait?: boolean;
   characterScale?: number;
+  characterAspectRatio?: number;
   highlightedPhrases?: readonly string[];
 };
 
@@ -74,6 +75,7 @@ export default function GuestTutorialDialog({ visible, line, onContinue, onSkip 
       characterSource={line.portrait}
       playerCharacter={line.playerPortrait}
       characterScale={line.characterScale}
+      characterAspectRatio={line.characterAspectRatio}
       speakerName={line.speaker}
       onSkip={onSkip}
       actions={(

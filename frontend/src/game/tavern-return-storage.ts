@@ -2,7 +2,6 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import {
   DEFAULT_BAG,
-  ITEM_ATTRIBUTE,
   ITEM_CATALOG,
   PLAYER_BAG_KEY,
   normalizePlayerBagData,
@@ -34,6 +33,7 @@ export type TavernReturnStoragePlan = {
 };
 
 const CORE_MATERIAL_ID_SET = new Set<ResourceId>(CORE_MATERIAL_IDS);
+const GARDEN_RETURN_SEED_IDS = new Set(["seed_herb", "seed_carrot", "seed_potato", "seed_onion"]);
 let storageQueue: Promise<void> = Promise.resolve();
 
 function isCoreMaterialId(id: string): id is ResourceId {
@@ -86,9 +86,9 @@ function addGardenItem(inventory: GardenInventoryItem[], item: BagItem): void {
 }
 
 /**
- * Moves loose materials out of the player bag when an expedition or city visit
- * ends. The five construction materials use the shared Materials storage;
- * other material drops retain the existing Garden Inventory behavior.
+ * Moves only construction materials and seeds out of the player bag when an
+ * expedition or city visit ends. Monster drops, ores, ingots, ingredients,
+ * equipment, and every other item remain in the player's bag.
  */
 export function planTavernReturnStorage(
   playerBag: PlayerBagData,
@@ -112,8 +112,7 @@ export function planTavernReturnStorage(
 
   const slots = playerBag.slots.map((item) => {
     if (!item || item.id === "monster_carcass") return item;
-    const attributes = ITEM_CATALOG[item.id]?.attributes ?? item.attributes ?? [];
-    if (!attributes.includes(ITEM_ATTRIBUTE.MATERIAL)) return item;
+    if (!isCoreMaterialId(item.id) && !GARDEN_RETURN_SEED_IDS.has(item.id)) return item;
 
     if (isCoreMaterialId(item.id)) sharedResources[item.id] += item.quantity;
     else addGardenItem(gardenInventory, item);

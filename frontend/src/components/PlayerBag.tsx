@@ -90,6 +90,13 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   grown_cinnamon_stalks_cloves: require("../../assets/images/quest_item.png"),
   yeast_nutrients: require("../../assets/images/quest_item.png"),
   tomato: require("../../assets/images/tomato.png"),
+  pan_fried_eggs: require("../../assets/images/pan_fried_eggs.png"),
+  pan_fishermans_fry: require("../../assets/images/pan_fishermans_fry.png"),
+  pan_meat_and_carrots: require("../../assets/images/pan_meat_and_carrots.png"),
+  pan_meat_skillet: require("../../assets/images/pan_meat_skillet.png"),
+  pan_mushroom_skillet: require("../../assets/images/pan_mushroom_skillet.png"),
+  pan_fried_potatoes: require("../../assets/images/pan_fried_potatoes.png"),
+  pan_ember_chicken_skillet: require("../../assets/images/pan_ember_chicken_skillet.png"),
   pan_farmhouse: require("../../assets/images/farmhouse_pan.png"),
   snowberrysherbet: require("../../assets/images/snowberry_sherbet.png"),
   cooking_pot: require("../../assets/images/cooking_pot.png"),
@@ -148,6 +155,7 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   ore_gold: require("../../assets/images/ore_gold.png"),
   rope: require("../../assets/images/rope.png"),
   torch: require("../../assets/images/torch_normal.png"),
+  return_bell: require("../../assets/images/return_bell.png"),
   shard_mana: require("../../assets/images/shard_mana.png"),
   stone_mana: require("../../assets/images/stone_mana.png"),
   tool_rusty_butchering_knife: require("../../assets/images/tool_rusty_butchering_knife.png"),
@@ -178,11 +186,13 @@ type Props = {
   onStatsUpdated?: (stats: PlayerStats) => void;
   onStaminaUpdated?: (stamina: number) => void;
   onLifeUpdated?: (life: number) => void;
+  externalUseItemIds?: readonly string[];
+  onUseItem?: (slotIdx: number, item: BagItem) => void | Promise<void>;
 };
 
 export default function PlayerBag({
   bag, visible, context, dayIdx, onClose, onTransferItem, onDiscardItem, onShowThoughtBubble,
-  onBagUpdated, onStatsUpdated, onStaminaUpdated, onLifeUpdated,
+  onBagUpdated, onStatsUpdated, onStaminaUpdated, onLifeUpdated, externalUseItemIds, onUseItem,
 }: Props) {
   const { setManagedTimeout: setTimeout } = useManagedTimers();
   const { width: W } = useWindowDimensions();
@@ -489,7 +499,8 @@ export default function PlayerBag({
         const { slotIdx, item } = actionTarget;
         const catalog = ITEM_CATALOG[item.id];
         const equipmentKind = getEquipmentKind(item);
-        const usable = isConsumable(item) || isEdible(item);
+        const externallyUsable = !!onUseItem && externalUseItemIds?.includes(item.id) === true;
+        const usable = isConsumable(item) || isEdible(item) || externallyUsable;
         const discardable = !hasItemAttribute(item, ITEM_ATTRIBUTE.QUEST_ITEM);
         const durability = getItemDurability(item);
         const effects = [
@@ -513,7 +524,7 @@ export default function PlayerBag({
                 {effects.length === 0 && equipmentValues.length === 0 ? <Text selectable style={styles.actionDescription}>{catalog?.description ?? "No usable effect."}</Text> : null}
                 <Text style={styles.actionQuestion}>{discardable ? (usable ? "Eat or Discard?" : equipmentKind ? `${item.equipped ? "Unequip" : "Equip"} or Discard?` : "Discard this item?") : "Quest Items cannot be discarded."}</Text>
                 <View style={styles.actionButtons}>
-                  {usable ? <TouchableOpacity style={[styles.actionChoice, styles.useChoice]} onPress={() => { setActionTarget(null); void handleConsumablePress(slotIdx, item); }}><Text style={styles.useChoiceText}>Eat</Text></TouchableOpacity> : null}
+                  {usable ? <TouchableOpacity style={[styles.actionChoice, styles.useChoice]} onPress={() => { setActionTarget(null); if (externallyUsable) void onUseItem?.(slotIdx, item); else void handleConsumablePress(slotIdx, item); }}><Text style={styles.useChoiceText}>{externallyUsable ? "Use" : "Eat"}</Text></TouchableOpacity> : null}
                   {equipmentKind ? <TouchableOpacity style={[styles.actionChoice, styles.useChoice]} onPress={() => { setActionTarget(null); void toggleEquipmentAt(slotIdx); }}><Text style={styles.useChoiceText}>{item.equipped ? "Unequip" : "Equip"}</Text></TouchableOpacity> : null}
                   {discardable ? <TouchableOpacity style={[styles.actionChoice, styles.discardChoice]} onPress={() => { setActionTarget(null); setDiscardTarget({ slotIdx, item }); }}><Text style={styles.discardChoiceText}>Discard</Text></TouchableOpacity> : null}
                 </View>

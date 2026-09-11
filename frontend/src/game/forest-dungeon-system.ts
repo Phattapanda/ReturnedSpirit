@@ -7,6 +7,7 @@ import {
   normalizeBagItem,
   normalizePlayerBagData,
   planAddToBag,
+  removeBagItem,
   type BagItem,
   type PlayerBagData,
 } from "@/src/game/item-system";
@@ -18,7 +19,7 @@ import {
   rollPlayerPhysicalDamage,
 } from "@/src/game/equipment-system";
 import { loadCurrencyCopper, saveCurrencyCopper } from "@/src/game/currency-system";
-import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats } from "@/src/game/player-stats";
+import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
 import {
   GARDEN_INVENTORY_KEY,
   normalizeGardenInventory,
@@ -41,6 +42,16 @@ export const FOREST_SEARCH_BASE_SUCCESS = 60;
 export const FOREST_SEARCH_PERCEPTION_BONUS = 2;
 export const FOREST_SEARCH_LUCK_POINTS_PER_BONUS_ITEM = 10;
 export const FOREST_REST_FLOORS = new Set([5, 10, 15, 20, 25]);
+
+export const LUCK_ROLLED_FIND_ITEM_IDS: ReadonlySet<string> = new Set([
+  "herbs",
+  "mushroom",
+  "nuts",
+  "wild_berries",
+  "egg",
+  "ember_feather",
+  "ember_chicken_egg",
+]);
 
 const STAMINA_KEY = "@game:stamina";
 const LIFE_KEY = "@game:life";
@@ -65,6 +76,12 @@ export type ForestMonsterDefinition = {
   fireImmune?: boolean;
   boss?: boolean;
   maximumLife: number;
+};
+
+export type ForestAttackPreview = {
+  hitChance: number;
+  minimumDamage: number;
+  maximumDamage: number;
 };
 
 export const FOREST_MONSTERS: Record<ForestMonsterId, ForestMonsterDefinition> = {
@@ -124,6 +141,43 @@ const SEARCH_LOCATIONS: readonly SearchLocation[] = [
 ];
 
 function clampPercent(value: number): number { return Math.max(0, Math.min(100, value)); }
+
+/**
+ * Rolls the 2-5 quantity used by search, gathering, and nest finds.
+ * Each later roll is only attempted after the preceding roll succeeds.
+ */
+export function rollLuckFindQuantity(luck: number, randomValue = Math.random): number {
+  const safeLuck = Math.max(0, Number.isFinite(luck) ? luck : 0);
+  const chances = [25 + safeLuck * 5, 10 + safeLuck * 5, safeLuck * 5];
+  let quantity = 2;
+  for (const chance of chances) {
+    if (randomValue() * 100 >= clampPercent(chance)) break;
+    quantity += 1;
+  }
+  return quantity;
+}
+
+/** Uses the same accuracy and physical-damage formula as attackForestMonster. */
+export function getForestAttackPreview(
+  monsterId: ForestMonsterId,
+  target: "head" | "body",
+  stats: PlayerStats,
+  bag: PlayerBagData,
+): ForestAttackPreview {
+  const monster = FOREST_MONSTERS[monsterId];
+  const weapon = getEquippedItem(bag, "weapon");
+  const entry = weapon ? ITEM_CATALOG[weapon.id] : null;
+  const hitChance = clampPercent((entry?.basicAccuracyPercent ?? 100) + stats.accuracy - (target === "head" ? 30 : 0));
+  const strength = Math.max(0, Math.floor(stats.strength));
+  const defense = Math.max(0, Math.floor(monster.physicalDefense));
+  const minimum = Math.max(0, (entry?.damageMin ?? 0) + strength - defense);
+  const maximum = Math.max(0, Math.max(entry?.damageMin ?? 0, entry?.damageMax ?? 0) + strength - defense);
+  return {
+    hitChance,
+    minimumDamage: target === "head" ? Math.ceil(minimum * 1.5) : minimum,
+    maximumDamage: target === "head" ? Math.ceil(maximum * 1.5) : maximum,
+  };
+}
 function randomIndex(length: number, randomValue = Math.random): number {
   return Math.min(length - 1, Math.floor(Math.max(0, Math.min(0.999999, randomValue())) * length));
 }
@@ -433,9 +487,11 @@ export async function searchForestArea(): Promise<DungeonActionResult> {
 
   const location = SEARCH_LOCATIONS.find((entry) => entry.name === floor.searchLocation) ?? SEARCH_LOCATIONS[0];
   const searchLuck = hiredSupporter?.definition.id === "botanist" ? runtime.stats.luck * 1.15 : runtime.stats.luck;
-  const botanistYield = hiredSupporter?.definition.id === "botanist" && Math.random() < 0.15 ? 1 : 0;
-  const baseFindQuantity = location.itemId === "herbs" || location.itemId === "wild_berries" ? 2 : 1;
-  const findQuantity = baseFindQuantity + botanistYield + Math.min(2, Math.floor(searchLuck / FOREST_SEARCH_LUCK_POINTS_PER_BONUS_ITEM));
+  const usesLuckRolledQuantity = Boolean(location.itemId && LUCK_ROLLED_FIND_ITEM_IDS.has(location.itemId));
+  const botanistYield = !usesLuckRolledQuantity && hiredSupporter?.definition.id === "botanist" && Math.random() < 0.15 ? 1 : 0;
+  const findQuantity = usesLuckRolledQuantity
+    ? rollLuckFindQuantity(searchLuck)
+    : 1 + botanistYield + Math.min(2, Math.floor(searchLuck / FOREST_SEARCH_LUCK_POINTS_PER_BONUS_ITEM));
   let bag = runtime.bag;
   let message = `I searched the ${location.name}.`;
   if (eventRoll < 85 && location.copper) {
@@ -761,18 +817,25 @@ export async function bandageAtForestRestArea(useHerb: boolean): Promise<Dungeon
   return { ok: true, state, message: `I restore ${life - payment.life} Life.${payment.message}`, life, stamina: payment.stamina, bag };
 }
 
-export async function leaveForestDungeon(): Promise<{ message: string; bag: PlayerBagData }> {
+export async function leaveForestDungeon(options: { useReturnBell?: boolean } = {}): Promise<{ message: string; bag: PlayerBagData }> {
   const state = await loadForestDungeonState();
   const floor = currentFloorOf(state);
   const bossDefeated = state.currentFloor === FOREST_FLOOR_COUNT
     && floor.monster?.id === "elder_ember_rooster"
     && floor.monster.phase === "defeated"
     && !floor.carcassPending;
-  if (!FOREST_REST_FLOORS.has(state.currentFloor) && !bossDefeated) throw new Error("not_safe_exit");
   const runtime = await loadRuntime();
+  const safeExit = FOREST_REST_FLOORS.has(state.currentFloor) || bossDefeated;
+  if (!safeExit && !options.useReturnBell) throw new Error("not_safe_exit");
+  let returnBag = runtime.bag;
+  if (options.useReturnBell) {
+    const bellSlot = returnBag.slots.findIndex((item) => item?.id === "return_bell" && item.quantity > 0);
+    if (bellSlot < 0) throw new Error("return_bell_missing");
+    returnBag = removeBagItem(returnBag, bellSlot, 1);
+  }
   const stored = await AsyncStorage.multiGet([GARDEN_INVENTORY_KEY, SHARED_RESOURCES_KEY]);
   const storagePlan = planTavernReturnStorage(
-    runtime.bag,
+    returnBag,
     normalizeSharedResources(stored[1][1]),
     normalizeGardenInventory(stored[0][1]),
   );
@@ -786,7 +849,14 @@ export async function leaveForestDungeon(): Promise<{ message: string; bag: Play
     [SHARED_RESOURCES_KEY, JSON.stringify(storagePlan.sharedResources)],
   ]);
   await completeTempleBlessingExpedition();
-  return { message: bossDefeated ? "The Forest Entrance is cleared. You return to the tavern." : "You store the materials in the garden storage.", bag };
+  return {
+    message: options.useReturnBell
+      ? "The Return Bell rings and carries me safely back to the tavern."
+      : bossDefeated
+        ? "The Forest Entrance is cleared. You return to the tavern."
+        : "You store the materials in the garden storage.",
+    bag,
+  };
 }
 
 export async function restoreForestFightSnapshot(): Promise<DungeonActionResult | null> {

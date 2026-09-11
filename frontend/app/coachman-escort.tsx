@@ -11,12 +11,12 @@ import StoryDialogOverlay, { type StoryDialogLine } from "@/src/components/story
 import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { calculateIncomingPhysicalDamage, consumeArmorDurability, consumeWeaponDurability, getEquippedItem } from "@/src/game/equipment-system";
-import { ITEM_ATTRIBUTE, ITEM_CATALOG, PLAYER_BAG_KEY, normalizePlayerBagData, planAddToBag, type BagItem, type PlayerBagData } from "@/src/game/item-system";
+import { DEFAULT_BAG, ITEM_ATTRIBUTE, ITEM_CATALOG, PLAYER_BAG_KEY, normalizePlayerBagData, planAddToBag, type BagItem, type PlayerBagData } from "@/src/game/item-system";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
 import { setCoachmanEscortPhase } from "@/src/game/coachman-escort-system";
 import { unlockNextCityAfterEscort } from "@/src/game/travel-system";
 import { PLAYER_AVATAR_KEY, normalizePlayerAvatarId, type PlayerAvatarId } from "@/src/game/player-avatar";
-import { COACHMAN_DIALOG_SCALE, DIALOG_CHARACTER_ASSETS, PLAYER_DIALOG_SCALE, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
+import { COACHMAN_DIALOG_SCALE, DIALOG_CHARACTER_ASSETS, PLAYER_DIALOG_SCALE, getPlayerDialogAspectRatio, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
 import SceneBackground from "@/src/components/SceneBackground";
 import { addKarmaPoints } from "@/src/game/progression";
 import RunEndingOverlay from "@/src/components/RunEndingOverlay";
@@ -44,37 +44,37 @@ function TutorialCombatMessage({ message }: { message: string }) {
   })}</Text>;
 }
 
-function preBattleLines(playerName: string, playerPortrait: ImageSourcePropType, playerScale: number): StoryDialogLine[] {
+function preBattleLines(playerName: string, playerPortrait: ImageSourcePropType, playerScale: number, playerAspectRatio?: number): StoryDialogLine[] {
   return [
     { speaker: "Coachman", portrait: COACHMAN, characterScale: COACHMAN_DIALOG_SCALE, text: "If we keep this pace, we should reach the next town soon." },
-    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, text: "As long as the road stays quiet. You hired me for the possibility that it doesn’t." },
+    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, characterAspectRatio: playerAspectRatio, text: "As long as the road stays quiet. You hired me for the possibility that it doesn’t." },
     { speaker: "Coachman", portrait: COACHMAN, characterScale: COACHMAN_DIALOG_SCALE, text: "After all those stories about monsters on this road, I’d rather pay for protection than lose my cargo." },
     { text: "Suddenly, the horses rear up and the wagon comes to a sharp stop." },
     { speaker: "Coachman", portrait: COACHMAN, characterScale: COACHMAN_DIALOG_SCALE, text: "What the—?! Why did they stop?" },
     { text: "A low growl comes from the bushes. A moment later, a monster steps onto the road." },
-    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, text: "Looks like we found the reason." },
+    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, characterAspectRatio: playerAspectRatio, text: "Looks like we found the reason." },
     { speaker: "Coachman", portrait: COACHMAN, characterScale: COACHMAN_DIALOG_SCALE, text: "By the gods… The rumors are true!" },
-    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, text: "Stay behind me. Keep the horses calm. I’ll handle this." },
+    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, characterAspectRatio: playerAspectRatio, text: "Stay behind me. Keep the horses calm. I’ll handle this." },
   ];
 }
 
-function postBattleLines(playerName: string, playerPortrait: ImageSourcePropType, playerScale: number): StoryDialogLine[] {
+function postBattleLines(playerName: string, playerPortrait: ImageSourcePropType, playerScale: number, playerAspectRatio?: number): StoryDialogLine[] {
   return [
     { speaker: "Coachman", portrait: COACHMAN, characterScale: COACHMAN_DIALOG_SCALE, text: "That was a close one… A wild wolf this close to the road? I’ll have to report this to the Adventurers’ Guild when we reach town." },
-    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, text: "What about the carcass?" },
+    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, characterAspectRatio: playerAspectRatio, text: "What about the carcass?" },
     { speaker: "Coachman", portrait: COACHMAN, characterScale: COACHMAN_DIALOG_SCALE, text: "Keep it. You earned it." },
-    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, text: "The whole thing?" },
+    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, characterAspectRatio: playerAspectRatio, text: "The whole thing?" },
     { speaker: "Coachman", portrait: COACHMAN, characterScale: COACHMAN_DIALOG_SCALE, text: "Of course. The Adventurers’ Guild has butchers who can process monster carcasses for you. They’ll extract whatever useful materials they can and send them to you afterward." },
-    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, text: "Sounds convenient." },
+    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, characterAspectRatio: playerAspectRatio, text: "Sounds convenient." },
     { speaker: "Coachman", portrait: COACHMAN, characterScale: COACHMAN_DIALOG_SCALE, text: "It is. Though you can always take the carcass home and butcher it yourself." },
     { speaker: "Coachman", portrait: COACHMAN, characterScale: COACHMAN_DIALOG_SCALE, text: "You’ll need a Butchering Knife. A better knife usually means a better chance of getting more usable materials from the carcass." },
-    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, text: "Good to know. I’ll take it with me for now." },
+    { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, characterAspectRatio: playerAspectRatio, text: "Good to know. I’ll take it with me for now." },
     { speaker: "Coachman", portrait: COACHMAN, characterScale: COACHMAN_DIALOG_SCALE, text: "Just don’t put it too close to my cargo." },
   ];
 }
 
-function walkingPreBattleLines(playerName: string, playerPortrait: ImageSourcePropType, playerScale: number): StoryDialogLine[] {
-  const player = (text: string): StoryDialogLine => ({ speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, text });
+function walkingPreBattleLines(playerName: string, playerPortrait: ImageSourcePropType, playerScale: number, playerAspectRatio?: number): StoryDialogLine[] {
+  const player = (text: string): StoryDialogLine => ({ speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, characterAspectRatio: playerAspectRatio, text });
   return [
     player("That’s a long march..."),
     player("What was that noise?!"),
@@ -98,7 +98,9 @@ export default function CoachmanEscortScreen() {
   const [playerName, setPlayerName] = useState("Adventurer");
   const [playerPortrait, setPlayerPortrait] = useState(DIALOG_CHARACTER_ASSETS.avatar1.normal);
   const [playerScale, setPlayerScale] = useState(PLAYER_DIALOG_SCALE);
+  const [playerAspectRatio, setPlayerAspectRatio] = useState(getPlayerDialogAspectRatio(1));
   const [stats, setStats] = useState<PlayerStats>(DEFAULT_PLAYER_STATS);
+  const [combatBag, setCombatBag] = useState<PlayerBagData>(DEFAULT_BAG);
   const [life, setLife] = useState(DEFAULT_PLAYER_STATS.maximumLife);
   const [wolfLife, setWolfLife] = useState(WOLF_MAX_LIFE);
   const [turn, setTurn] = useState(0);
@@ -130,10 +132,18 @@ export default function CoachmanEscortScreen() {
     ],
   }));
 
-  const preLines = useMemo(() => isWalking ? walkingPreBattleLines(playerName, playerPortrait, playerScale) : preBattleLines(playerName, playerPortrait, playerScale), [isWalking, playerName, playerPortrait, playerScale]);
-  const postLines = useMemo(() => postBattleLines(playerName, playerPortrait, playerScale), [playerName, playerPortrait, playerScale]);
+  const preLines = useMemo(() => isWalking ? walkingPreBattleLines(playerName, playerPortrait, playerScale, playerAspectRatio) : preBattleLines(playerName, playerPortrait, playerScale, playerAspectRatio), [isWalking, playerAspectRatio, playerName, playerPortrait, playerScale]);
+  const postLines = useMemo(() => postBattleLines(playerName, playerPortrait, playerScale, playerAspectRatio), [playerAspectRatio, playerName, playerPortrait, playerScale]);
   const activeLines = phase === "journey" ? preLines : postLines;
   const wideBattleLayout = screenWidth >= 400;
+  const predictedAttackDamage = useMemo(() => {
+    const weapon = getEquippedItem(combatBag, "weapon");
+    const baseDamage = weapon
+      ? Math.max(1, (ITEM_CATALOG[weapon.id]?.damageMax ?? 1) + stats.strength - 3)
+      : Math.max(1, stats.strength);
+    return turn === 1 ? baseDamage * 2 : baseDamage;
+  }, [combatBag, stats.strength, turn]);
+  const attackSubtitle = (hitChance: number) => `${predictedAttackDamage} dmg · ${hitChance}% hit chance`;
 
   useEffect(() => {
     setActionPanelHeight(null);
@@ -141,7 +151,7 @@ export default function CoachmanEscortScreen() {
 
   useEffect(() => {
     void (async () => {
-      const [rawName, rawLife, rawStats, rawAvatar] = await AsyncStorage.multiGet(["@game:player_name", "@game:life", PLAYER_STATS_KEY, PLAYER_AVATAR_KEY]);
+      const [rawName, rawLife, rawStats, rawAvatar, rawBag] = await AsyncStorage.multiGet(["@game:player_name", "@game:life", PLAYER_STATS_KEY, PLAYER_AVATAR_KEY, PLAYER_BAG_KEY]);
       setPlayerName(rawName[1]?.trim() || "Adventurer");
       const loadedStats = rawStats[1] ? normalizePlayerStats(JSON.parse(rawStats[1])) : DEFAULT_PLAYER_STATS;
       setStats(loadedStats);
@@ -150,6 +160,8 @@ export default function CoachmanEscortScreen() {
       setPlayerPortrait(getPlayerDialogCharacter(avatarId, "normal", require("../assets/images/avatar1_normal.png")));
       const dialogScale = getPlayerDialogScale(avatarId);
       setPlayerScale(avatarId === 3 ? dialogScale * AVATAR3_BATTLE_TUTORIAL_SCALE_MULTIPLIER : dialogScale);
+      setPlayerAspectRatio(getPlayerDialogAspectRatio(avatarId));
+      setCombatBag(rawBag[1] ? normalizePlayerBagData(JSON.parse(rawBag[1])) : DEFAULT_BAG);
       if (!isWalking) Animated.timing(blackFade, { toValue: 0, duration: 550, useNativeDriver: true }).start();
     })();
     return () => stopGameplayMusic(600);
@@ -195,7 +207,9 @@ export default function CoachmanEscortScreen() {
 
   async function loadBag(): Promise<PlayerBagData> {
     const raw = await AsyncStorage.getItem(PLAYER_BAG_KEY);
-    return normalizePlayerBagData(raw ? JSON.parse(raw) : {});
+    const bag = normalizePlayerBagData(raw ? JSON.parse(raw) : {});
+    setCombatBag(bag);
+    return bag;
   }
 
   function flashWolf() {
@@ -234,6 +248,7 @@ export default function CoachmanEscortScreen() {
       const nextLife = Math.max(isWalking ? 0 : 1, life - damage);
       const nextBag = damage > 0 && armor ? consumeArmorDurability(bag) : bag;
       await AsyncStorage.multiSet([["@game:life", String(nextLife)], [PLAYER_BAG_KEY, JSON.stringify(nextBag)]]);
+      setCombatBag(nextBag);
       setLife(nextLife); setHeaderRefreshKey((value) => value + 1);
       const attackMessage = `Wild Wolf hits me for ${damage} damage.`;
       setCombatMessage(previousMessage ? `${previousMessage} ${attackMessage}` : attackMessage);
@@ -277,6 +292,7 @@ export default function CoachmanEscortScreen() {
       : `I hit the Wild Wolf's ${target} for ${damage} damage.`;
     if (weapon) bag = consumeWeaponDurability(bag);
     await AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(bag));
+    setCombatBag(bag);
     setWolfLife(nextWolfLife); setHeaderRefreshKey((value) => value + 1);
     setCombatMessage(attackMessage);
     playSoundEffect(weapon ? "sword-hit" : "combat-impact", { maxDurationMs: 3000 });
@@ -391,7 +407,7 @@ export default function CoachmanEscortScreen() {
     {phase === "combat" || phase === "victory" ? <>
       <SceneBackground source={BACKGROUND} topOffset={headerHeight} />
       <View style={styles.shade} />
-      <TravelHeader locationName="Road to the Next City" showPortraitRow onHeaderHeightChange={setHeaderHeight} onPortraitBottomChange={setPortraitBottom} refreshKey={headerRefreshKey} bagAttention={bagAttention} />
+      <TravelHeader locationName="Road to the Next City" showPortraitRow onHeaderHeightChange={setHeaderHeight} onPortraitBottomChange={setPortraitBottom} refreshKey={headerRefreshKey} bagAttention={bagAttention} onBagUpdated={setCombatBag} onStatsUpdated={setStats} />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={[styles.content, { paddingTop: battleTopSpacing, paddingBottom: battleBottomPadding }]}
@@ -419,14 +435,14 @@ export default function CoachmanEscortScreen() {
           }}>
             {wideBattleLayout ? (
               <View style={styles.actionRow}>
-                <Action label="Attack Head" subtitle="45% · +50% damage" onPress={() => { void playerAction("head"); }} disabled={busy} />
-                <Action label="Attack Body" subtitle="75% hit chance" onPress={() => { void playerAction("body"); }} disabled={busy} />
+                <Action label="Attack Head" subtitle={attackSubtitle(45)} onPress={() => { void playerAction("head"); }} disabled={busy} />
+                <Action label="Attack Body" subtitle={attackSubtitle(75)} onPress={() => { void playerAction("body"); }} disabled={busy} />
                 <Action label="Defend" subtitle="Prepare for the attack" onPress={() => { void defendAction(); }} disabled={busy} />
                 <Action label="Run" subtitle="Unavailable" onPress={runBlocked} disabled={busy} danger />
               </View>
             ) : (
               <>
-                <View style={styles.actionRow}><Action label="Attack Head" subtitle="45% · +50% damage" onPress={() => { void playerAction("head"); }} disabled={busy} /><Action label="Attack Body" subtitle="75% hit chance" onPress={() => { void playerAction("body"); }} disabled={busy} /></View>
+                <View style={styles.actionRow}><Action label="Attack Head" subtitle={attackSubtitle(45)} onPress={() => { void playerAction("head"); }} disabled={busy} /><Action label="Attack Body" subtitle={attackSubtitle(75)} onPress={() => { void playerAction("body"); }} disabled={busy} /></View>
                 <View style={styles.actionRow}><Action label="Defend" subtitle="Prepare for the attack" onPress={() => { void defendAction(); }} disabled={busy} /><Action label="Run" subtitle="Unavailable" onPress={runBlocked} disabled={busy} danger /></View>
               </>
             )}

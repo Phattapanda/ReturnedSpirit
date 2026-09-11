@@ -10,6 +10,7 @@ import {
 } from "@/src/game/post-guest-tutorial";
 import { loadMailboxState } from "@/src/game/mailbox-system";
 import { loadCoachmanEscortState } from "@/src/game/coachman-escort-system";
+import { loadCityState } from "@/src/game/city-system";
 import { SLEEP_STAMINA_SPEND_REQUIRED } from "@/src/game/room-config";
 
 const STAMINA_SPENT_TODAY_KEY = "@game:stamina_spent_today";
@@ -61,6 +62,10 @@ function plotIsReady(plot: StoredGardenPlot | null): boolean {
 }
 
 async function loadLocationStatus(): Promise<LocationStatus> {
+  // City deliveries (guild processing and ordered goods) become due while the
+  // player may be anywhere in the tavern. Process them before checking unread
+  // mail so the badge does not wait until Courier's Chest is opened.
+  await loadCityState();
   const [primaryRaw, secondRaw, thirdRaw, fourthRaw, guestState, postGuestState, mailboxState, escortState, spentRaw] = await Promise.all([
     AsyncStorage.getItem(PRIMARY_GARDEN_PLOT_KEY),
     AsyncStorage.getItem(SECOND_GARDEN_PLOT_KEY),

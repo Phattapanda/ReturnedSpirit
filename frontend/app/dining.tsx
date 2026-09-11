@@ -27,7 +27,7 @@ import DiningGuestArea, {
   type GuestServiceSourcePoint,
 } from "@/src/components/GuestCard";
 import GuestTutorialDialog, { type GuestTutorialDialogLine } from "@/src/components/GuestTutorialDialog";
-import { DIALOG_CHARACTER_ASSETS, OLD_FARMER_DIALOG_SCALE, RUPERT_DIALOG_SCALE, getDialogExpressionForStamina, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
+import { COACHMAN_DIALOG_SCALE, DIALOG_CHARACTER_ASSETS, OLD_FARMER_DIALOG_SCALE, RUPERT_DIALOG_SCALE, getDialogExpressionForStamina, getPlayerDialogAspectRatio, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
 import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import StatusModal from "@/src/components/StatusModal";
 import QuestBookButton from "@/src/components/quest-book";
@@ -135,6 +135,13 @@ const IMG = {
   stew_chicken: require("../assets/images/stew_chicken.png"),
   stew_ember_chicken: require("../assets/images/stew_ember_chicken.png"),
   stew_fisherman: require("../assets/images/stew_fisherman.png"),
+  pan_fried_eggs: require("../assets/images/pan_fried_eggs.png"),
+  pan_fishermans_fry: require("../assets/images/pan_fishermans_fry.png"),
+  pan_meat_and_carrots: require("../assets/images/pan_meat_and_carrots.png"),
+  pan_meat_skillet: require("../assets/images/pan_meat_skillet.png"),
+  pan_mushroom_skillet: require("../assets/images/pan_mushroom_skillet.png"),
+  pan_fried_potatoes: require("../assets/images/pan_fried_potatoes.png"),
+  pan_ember_chicken_skillet: require("../assets/images/pan_ember_chicken_skillet.png"),
   pan_farmhouse: require("../assets/images/farmhouse_pan.png"),
   snowberrysherbet: require("../assets/images/snowberry_sherbet.png"),
   rupert:        require("../assets/images/rupert.png"),
@@ -170,6 +177,13 @@ const MEAL_IMAGES: Record<string, ImageSourcePropType> = {
   stew_chicken: IMG.stew_chicken,
   stew_ember_chicken: IMG.stew_ember_chicken,
   stew_fisherman: IMG.stew_fisherman,
+  pan_fried_eggs: IMG.pan_fried_eggs,
+  pan_fishermans_fry: IMG.pan_fishermans_fry,
+  pan_meat_and_carrots: IMG.pan_meat_and_carrots,
+  pan_meat_skillet: IMG.pan_meat_skillet,
+  pan_mushroom_skillet: IMG.pan_mushroom_skillet,
+  pan_fried_potatoes: IMG.pan_fried_potatoes,
+  pan_ember_chicken_skillet: IMG.pan_ember_chicken_skillet,
   pan_farmhouse: IMG.pan_farmhouse,
   snowberrysherbet: IMG.snowberrysherbet,
 };
@@ -286,7 +300,7 @@ export default function DiningScreen() {
     clearManagedTimeout: clearTimeout,
   } = useManagedTimers();
   const router = useRouter();
-  const { harvestReady, merchantPresent, receptionistPresent, sleepReady } = useLocationStatusBadges();
+  const { harvestReady, mailboxUnread, merchantPresent, receptionistPresent, sleepReady } = useLocationStatusBadges();
   const insets = useSafeAreaInsets();
   const { width: W, height: H } = useWindowDimensions();
   const audioManager = useAudioManager();
@@ -668,8 +682,11 @@ export default function DiningScreen() {
     text: currentTutorialLine.text,
     portrait: tutorialPortraitSource(currentTutorialLine.portrait),
     playerPortrait: currentTutorialLine.portrait === "player",
+    characterAspectRatio: currentTutorialLine.portrait === "player" ? getPlayerDialogAspectRatio(playerAvatarId) : undefined,
     characterScale: currentTutorialLine.portrait === "old_farmer"
       ? OLD_FARMER_DIALOG_SCALE
+      : currentTutorialLine.portrait === "coachman"
+        ? COACHMAN_DIALOG_SCALE
       : currentTutorialLine.portrait === "player"
         ? getPlayerDialogScale(playerAvatarId)
         : currentTutorialLine.portrait === "rupert" || currentTutorialLine.portrait === "rupert_laugh" || currentTutorialLine.portrait === "rupert_sad"
@@ -1713,6 +1730,7 @@ const locationAction = guestDormitoryBlocked
               {content}
               {loc.id === "garden" && harvestReady && <LocationStatusBadge kind="harvest" />}
               {loc.id === "dormitory" && sleepReady && <LocationStatusBadge kind="sleep" />}
+              {loc.id === "mail" && mailboxUnread && <LocationStatusBadge kind="mail" />}
               {loc.id === "explore" && (receptionistPresent ? <LocationStatusBadge kind="receptionist" /> : merchantPresent ? <LocationStatusBadge kind="merchant" /> : null)}
             </TouchableOpacity>
           );

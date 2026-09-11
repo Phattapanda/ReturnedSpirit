@@ -11,10 +11,10 @@ import CurrencyHud from "@/src/components/CurrencyHud";
 import CurrencyPrice from "@/src/components/currency-price";
 import SceneBackground from "@/src/components/SceneBackground";
 import StoryDialogOverlay, { type StoryDialogChoice, type StoryDialogLine } from "@/src/components/story-dialog-overlay";
-import { COACHMAN_DIALOG_SCALE, DIALOG_CHARACTER_ASSETS, getDialogExpressionForStamina, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
+import { COACHMAN_DIALOG_SCALE, DIALOG_CHARACTER_ASSETS, getDialogExpressionForStamina, getPlayerDialogAspectRatio, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
 import {
   BLACKSMITH_SMELTING_RECIPES, BLACKSMITH_TOOL_UPGRADE_RECIPES, CITY_BUY_PRICES, GUILD_PROCESSING_FEE_PER_CARCASS, MERCHANT_CONTRACTS, QUESTS, SUPPORTERS, acceptMerchantContract, acceptQuest, buyBulkShipment,
-  buyCityItem, buyTempleBlessing, completeMerchantAptitudeTest, fulfillMerchantContract, guildRank, hasMerchantAptitudePouch, hireSupporter,
+  adventurerPromotionAvailable, adventurerRank, beginAdventurerPromotionExam, buyCityItem, buyTempleBlessing, completeAdventurerPromotionExam, completeMerchantAptitudeTest, fulfillMerchantContract, guildRank, hasMerchantAptitudePouch, hireSupporter,
   markMerchantContractTierDialogSeen, markMerchantGuildIntroductionSeen,
   citySellPrice, loadCityState, merchantBulkQuantity, merchantContractDaysRemaining, merchantContractDuration, merchantContractLimit, merchantPrice, performBlacksmithRecipe, processGuildCarcasses, processTutorialWildWolf, receiveTempleTreatment, repairCityItem,
   sellCityItem, tanMaterial, turnInQuest, type CityState, type QuestId, type SupporterId,
@@ -38,6 +38,7 @@ const MERCHANT_GUILD_BACKGROUND = require("../assets/images/merchant_guild.png")
 const TEMPLE_BACKGROUND = require("../assets/images/temple.png");
 const HOLY_SISTER = require("../assets/images/dialog/dialogue_holy_sister.png");
 const RECEPTIONIST = require("../assets/images/dialog/dialogue_receptionist.png");
+const RECEPTIONIST_PORTRAIT = require("../assets/images/receptionist.png");
 const MERCHANT_GUILD_RECEPTIONIST_DIALOG = require("../assets/images/dialog/dialogue_receptionist_merchant.png");
 const MERCHANT_GUILD_RECEPTIONIST_PORTRAIT = require("../assets/images/receptionist_merchant.png");
 const SUPPORTER_IMAGES: Record<SupporterId, ImageSourcePropType> = {
@@ -50,7 +51,7 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   red_meat: require("../assets/images/meat_red.png"), herbs: require("../assets/images/herbs.png"), mushroom: require("../assets/images/mushroom.png"),
   fish: require("../assets/images/meat_fish.png"), cloth: require("../assets/images/cloth.png"), empty_bottle: require("../assets/images/empty_bottle.png"), leather: require("../assets/images/leather.png"),
   fur: require("../assets/images/fur.png"), wolf_pelt: require("../assets/images/wolf_pelt.png"),
-  rope: require("../assets/images/rope.png"), torch: require("../assets/images/torch_normal.png"), bag3: require("../assets/images/bag3.png"),
+  rope: require("../assets/images/rope.png"), torch: require("../assets/images/torch_normal.png"), return_bell: require("../assets/images/return_bell.png"), bag3: require("../assets/images/bag3.png"),
   frying_pan: require("../assets/images/frying_pan.png"), tool_rusty_butchering_knife: require("../assets/images/tool_rusty_butchering_knife.png"),
   tool_iron_butchering_knife: require("../assets/images/tool_iron_butchering_knife.png"), tool_steel_butchering_knife: require("../assets/images/tool_steel_butchering_knife.png"),
   weapon_iron_dagger: require("../assets/images/weapon_iron_dagger.png"), weapon_iron_shortsword: require("../assets/images/weapon_iron_shortsword.png"),
@@ -68,9 +69,10 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   dried_hop_cones: require("../assets/images/quest_item.png"), malted_barley: require("../assets/images/quest_item.png"), brewers_yeast: require("../assets/images/quest_item.png"),
 };
 
-type ViewId = "city" | "market" | "food" | "general" | "sell" | "fish" | "notice_board" | "minstrels" | "artisan" | "blacksmith" | "blacksmith_buy" | "smelting" | "tool_upgrades" | "repair" | "tannery" | "carpenter" | "guild" | "support" | "processing" | "quests" | "merchant" | "bulk" | "imports" | "contracts" | "temple" | "healing" | "blessings" | "holy_goods" | "alchemy_recipes" | "holy_sister" | "side_alley";
-const PARENT: Partial<Record<ViewId, ViewId>> = { market: "city", food: "market", general: "market", sell: "general", fish: "market", notice_board: "market", minstrels: "market", artisan: "city", blacksmith: "artisan", blacksmith_buy: "blacksmith", smelting: "blacksmith", tool_upgrades: "blacksmith", repair: "blacksmith", tannery: "artisan", carpenter: "artisan", guild: "city", support: "guild", processing: "guild", quests: "guild", merchant: "city", bulk: "merchant", imports: "merchant", contracts: "merchant", temple: "city", healing: "temple", blessings: "temple", holy_goods: "temple", alchemy_recipes: "temple", holy_sister: "temple", side_alley: "city" };
-const GENERAL = [{ id: "rope", price: 12 }, { id: "cloth", price: 22 }, { id: "empty_bottle", price: 12 }, { id: "torch", price: 30 }, { id: "bag3", price: 1000 }];
+type ViewId = "city" | "market" | "food" | "general" | "sell" | "fish" | "notice_board" | "minstrels" | "artisan" | "blacksmith" | "blacksmith_buy" | "smelting" | "tool_upgrades" | "repair" | "tannery" | "carpenter" | "guild" | "expedition_shop" | "support" | "processing" | "quests" | "merchant" | "bulk" | "imports" | "contracts" | "temple" | "healing" | "blessings" | "holy_goods" | "alchemy_recipes" | "holy_sister" | "side_alley";
+const PARENT: Partial<Record<ViewId, ViewId>> = { market: "city", food: "market", general: "market", sell: "general", fish: "market", notice_board: "market", minstrels: "market", artisan: "city", blacksmith: "artisan", blacksmith_buy: "blacksmith", smelting: "blacksmith", tool_upgrades: "blacksmith", repair: "blacksmith", tannery: "artisan", carpenter: "artisan", guild: "city", expedition_shop: "guild", support: "guild", processing: "guild", quests: "guild", merchant: "city", bulk: "merchant", imports: "merchant", contracts: "merchant", temple: "city", healing: "temple", blessings: "temple", holy_goods: "temple", alchemy_recipes: "temple", holy_sister: "temple", side_alley: "city" };
+const GENERAL = [{ id: "rope", price: 12 }, { id: "cloth", price: 22 }, { id: "empty_bottle", price: 12 }, { id: "bag3", price: 1000 }];
+const EXPEDITION_SHOP = [{ id: "torch", price: 30 }, { id: "return_bell", price: 77 }];
 const BLACKSMITH = [{ id: "tool_rusty_butchering_knife", price: 50 }, { id: "tool_iron_butchering_knife", price: 70 }, { id: "tool_kitchen_knife", price: 80 }, { id: "weapon_iron_dagger", price: 45 }, { id: "weapon_iron_shortsword", price: 60 }, { id: "armor_leather_bracers", price: 50 }, { id: "armor_leather_armor", price: 90 }, { id: "frying_pan", price: 100 }];
 const BULK_SHIPMENTS = [{ id: "potato" as const, price: 40 }, { id: "carrot" as const, price: 30 }, { id: "onion" as const, price: 50 }];
 const IMPORTS = [{ id: "snowberry", price: 35, reputation: 0 }, { id: "spices", price: 45, reputation: 15 }, { id: "shard_mana", price: 100, reputation: 25 }];
@@ -115,9 +117,10 @@ function guildIntroductionLines(
   playerName: string,
   playerPortrait: ImageSourcePropType,
   playerScale: number,
+  playerAspectRatio?: number,
 ): StoryDialogLine[] {
-  const receptionist = (text: string): StoryDialogLine => ({ speaker: "Receptionist", portrait: RECEPTIONIST, characterScale: 0.91, text });
-  const player = (text: string): StoryDialogLine => ({ speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, text });
+  const receptionist = (text: string): StoryDialogLine => ({ speaker: "Receptionist", portrait: RECEPTIONIST, characterScale: 1, text });
+  const player = (text: string): StoryDialogLine => ({ speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, characterAspectRatio: playerAspectRatio, text });
   return [
     receptionist("Welcome to the Adventurer’s Guild. I don’t believe I’ve seen you here before."),
     player("No, this is my first time."),
@@ -155,6 +158,7 @@ function merchantGuildIntroductionLines(
   playerName: string,
   playerPortrait: ImageSourcePropType,
   playerScale: number,
+  playerAspectRatio?: number,
 ): StoryDialogLine[] {
   const receptionist = (text: string, highlightedPhrases?: readonly string[]): StoryDialogLine => ({
     speaker: "Merchant Guild Receptionist",
@@ -163,7 +167,7 @@ function merchantGuildIntroductionLines(
     text,
     highlightedPhrases,
   });
-  const player = (text: string): StoryDialogLine => ({ speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, text });
+  const player = (text: string): StoryDialogLine => ({ speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, characterAspectRatio: playerAspectRatio, text });
   if (branch === "yes") return [
     player("Yes, please."),
     receptionist("Of course. I’ll keep it brief."),
@@ -214,6 +218,7 @@ export default function NextCityScreen() {
   const [arrivalDialogIndex, setArrivalDialogIndex] = useState<number | null>(null);
   const [guildDialogIndex, setGuildDialogIndex] = useState<number | null>(null);
   const [merchantGuildDialog, setMerchantGuildDialog] = useState<{ branch: MerchantGuildDialogBranch; index: number } | null>(null);
+  const [promotionDialogIndex, setPromotionDialogIndex] = useState<number | null>(null);
   const [merchantTierDialogVisible, setMerchantTierDialogVisible] = useState(false);
   const [currentDay, setCurrentDay] = useState(0);
   const [cityGuardDialogIndex, setCityGuardDialogIndex] = useState<number | null>(null);
@@ -269,6 +274,12 @@ export default function NextCityScreen() {
     if (params.arrival === "walk" && !escort.walkingArrivalGuardSeen) setCityGuardDialogIndex((current) => current ?? 0);
   }, [params.arrival, setArrivalDialogIndex, setCity, setCityGuardDialogIndex, setMerchantTierDialogVisible]);
   useFocusEffect(useCallback(() => { void refresh(); }, [refresh]));
+  useEffect(() => {
+    const inAdventurersGuild = view === "guild" || view === "expedition_shop" || view === "support" || view === "processing" || view === "quests";
+    if (inAdventurersGuild && city && adventurerPromotionAvailable(city) && promotionDialogIndex === null && guildDialogIndex === null) {
+      setPromotionDialogIndex(0);
+    }
+  }, [city, guildDialogIndex, promotionDialogIndex, view]);
   function open(next: ViewId) {
     if (next === "merchant" && !guildIntroductionSeen) return;
     if (next === "minstrels") {
@@ -396,16 +407,21 @@ export default function NextCityScreen() {
     { speaker: "Coachman", portrait: DIALOG_CHARACTER_ASSETS.coachman, characterScale: COACHMAN_DIALOG_SCALE, text: "You might want to have the monster carcass processed at the Adventurers' Guild." },
   ];
   const guildLines = useMemo(
-    () => guildIntroductionLines(playerName, playerDialogPortrait, playerDialogScale),
-    [playerName, playerDialogPortrait, playerDialogScale],
+    () => guildIntroductionLines(playerName, playerDialogPortrait, playerDialogScale, getPlayerDialogAspectRatio(playerAvatarId)),
+    [playerAvatarId, playerName, playerDialogPortrait, playerDialogScale],
   );
   const merchantGuildLines = useMemo(
-    () => merchantGuildIntroductionLines(merchantGuildDialog?.branch ?? "intro", playerName, playerDialogPortrait, playerDialogScale),
-    [merchantGuildDialog?.branch, playerName, playerDialogPortrait, playerDialogScale],
+    () => merchantGuildIntroductionLines(merchantGuildDialog?.branch ?? "intro", playerName, playerDialogPortrait, playerDialogScale, getPlayerDialogAspectRatio(playerAvatarId)),
+    [merchantGuildDialog?.branch, playerAvatarId, playerName, playerDialogPortrait, playerDialogScale],
   );
+  const promotionLines = useMemo<StoryDialogLine[]>(() => [
+    { speaker: "Receptionist", portrait: RECEPTIONIST, characterScale: 1, text: "You are really hardworking. I think you are ready for the promotion exam." },
+    { speaker: "Receptionist", portrait: RECEPTIONIST, characterScale: 1, text: "When you rank up, you do get more challenging tasks, but also higher rewards and sometimes access to restricted areas." },
+    { speaker: "Receptionist", portrait: RECEPTIONIST, characterScale: 1, text: "To advance to Rank G, you must defeat 5 Ember Roosters." },
+  ], []);
   const cityGuardLines = useMemo<StoryDialogLine[]>(() => [
     { speaker: "City Guard", portrait: DIALOG_CHARACTER_ASSETS.cityGuard, characterScale: 0.8, text: "Stop right there. What are you carrying?" },
-    { speaker: playerName, portrait: playerDialogPortrait, playerPortrait: true, characterScale: playerAvatarId === 3 ? playerDialogScale * 0.9 : playerDialogScale, text: "A wild wolf attacked me on the way here. This is its carcass." },
+    { speaker: playerName, portrait: playerDialogPortrait, playerPortrait: true, characterScale: playerAvatarId === 3 ? playerDialogScale * 0.9 : playerDialogScale, characterAspectRatio: getPlayerDialogAspectRatio(playerAvatarId), text: "A wild wolf attacked me on the way here. This is its carcass." },
     { speaker: "City Guard", portrait: DIALOG_CHARACTER_ASSETS.cityGuard, characterScale: 0.8, text: "A wild wolf on the paths? Take the carcass to the Adventurers' Guild and report the incident there." },
   ], [playerAvatarId, playerDialogPortrait, playerDialogScale, playerName]);
   const minstrelIntroductionLines = useMemo<StoryDialogLine[]>(() => [
@@ -500,12 +516,32 @@ export default function NextCityScreen() {
     }
   }
   function advanceMerchantGuildIntroduction() {
-    if (!merchantGuildDialog || busy || merchantGuildDialog.branch === "intro") return;
+    if (!merchantGuildDialog || busy) return;
+    if (merchantGuildDialog.branch === "intro") {
+      if (merchantGuildDialog.index < merchantGuildLines.length - 1) {
+        setMerchantGuildDialog({ ...merchantGuildDialog, index: merchantGuildDialog.index + 1 });
+      }
+      return;
+    }
     if (merchantGuildDialog.index < merchantGuildLines.length - 1) {
       setMerchantGuildDialog({ ...merchantGuildDialog, index: merchantGuildDialog.index + 1 });
       return;
     }
     void finishMerchantGuildIntroduction();
+  }
+  async function advancePromotionDialog() {
+    if (promotionDialogIndex === null || busy) return;
+    if (promotionDialogIndex < promotionLines.length - 1) {
+      setPromotionDialogIndex(promotionDialogIndex + 1);
+      return;
+    }
+    setBusy(true);
+    try {
+      setCity(await beginAdventurerPromotionExam());
+      setPromotionDialogIndex(null);
+    } finally {
+      setBusy(false);
+    }
   }
   const merchantGuildChoices: readonly StoryDialogChoice[] = merchantGuildDialog?.branch === "intro"
     && merchantGuildDialog.index === merchantGuildLines.length - 1
@@ -545,7 +581,7 @@ export default function NextCityScreen() {
   const merchantAptitudePouchReady = hasMerchantAptitudePouch(bag);
   const adventurersGuildUnlocked = guildIntroductionSeen || escortPhase === "city_exploration" || escortPhase === "complete";
   const artisanViews: ViewId[] = ["artisan", "blacksmith", "blacksmith_buy", "smelting", "tool_upgrades", "repair", "tannery", "carpenter"];
-  const guildViews: ViewId[] = ["guild", "support", "processing", "quests"];
+  const guildViews: ViewId[] = ["guild", "expedition_shop", "support", "processing", "quests"];
   const merchantViews: ViewId[] = ["merchant", "bulk", "imports", "contracts"];
   const templeViews: ViewId[] = ["temple", "healing", "blessings", "holy_goods", "alchemy_recipes", "holy_sister"];
   const background = artisanViews.includes(view) ? ARTISAN_BACKGROUND : guildViews.includes(view) ? ADVENTURERS_GUILD_BACKGROUND : merchantViews.includes(view) ? MERCHANT_GUILD_BACKGROUND : templeViews.includes(view) ? TEMPLE_BACKGROUND : MARKET_BACKGROUND;
@@ -593,11 +629,12 @@ export default function NextCityScreen() {
     if (view === "repair") return <><Text style={styles.sectionTitle}>Repair</Text><View style={styles.notePriceRow}><Text style={styles.noteInline}>Every repair costs</Text><CurrencyPrice totalCopper={20} textStyle={styles.noteInline} /></View>{repairable.length ? repairable.map(({ item, slot }) => <TouchableOpacity key={slot} style={styles.simpleRow} onPress={() => { void action(() => repairCityItem(slot)); }}><View><Text style={styles.simpleName}>{item!.name}</Text><Text style={styles.small}>{item!.durability}/{item!.maxDurability} Durability</Text></View><CurrencyPrice totalCopper={20} textStyle={styles.goldText} /></TouchableOpacity>) : <Text style={styles.empty}>No damaged equipment in your bag.</Text>}</>;
     if (view === "tannery") return <><Text style={styles.sectionTitle}>Tannery</Text><Text style={styles.note}>The material must be carried in your bag. Each conversion costs 25 Copper Coins.</Text>{wallet}{tanneryRecipeRow("fur", 1)}{tanneryRecipeRow("wolf_pelt", 2)}<Text style={styles.note}>Leather will later be needed for bags and equipment.</Text></>;
     if (view === "carpenter") return <><Text style={styles.sectionTitle}>Carpenter</Text><Text style={styles.carpenterClosed}>Currently closed</Text>{CARPENTER_SERVICES.map((service) => <View key={service.title} style={styles.carpenterService}><View style={styles.carpenterLock}><Ionicons name="lock-closed" size={20} color="#8E7651" /></View><View style={styles.stockText}><Text style={styles.carpenterTitle}>{service.title}</Text><Text style={styles.carpenterDescription}>{service.description}</Text></View></View>)}</>;
-    if (view === "guild") return <><Text style={styles.sectionTitle}>Adventurers’ Guild</Text>{city && <Text style={styles.rank}>Guild Rank {guildRank(city.guildReputation)} · {city.guildReputation} Reputation</Text>}{nav("The Expedition Hall", city?.supporter ? `${SUPPORTERS[city.supporter.id].name} · ${city.supporter.runsRemaining} runs remaining` : "Hire support for the next Dungeon Run", "support")}{nav("Monster Processing", "Send a carcass to the Guild Butcher", "processing")}{nav("Quest Board", "Accept quests and claim completed bounties", "quests")}</>;
-    if (view === "support") return <><Text style={styles.sectionTitle}>The Expedition Hall</Text><View style={styles.notePriceRow}><CurrencyPrice totalCopper={100} textStyle={styles.noteInline} /><Text style={styles.noteInline}>per Dungeon Run. Choose up to three runs.</Text></View><View style={styles.stepper}><TouchableOpacity style={styles.stepButton} onPress={() => setRuns(Math.max(1, runs - 1))}><Text style={styles.stepText}>−</Text></TouchableOpacity><View style={styles.runCountRow}><Text style={styles.runCount}>{runs} Run{runs === 1 ? "" : "s"} ·</Text><CurrencyPrice totalCopper={runs * 100} textStyle={styles.runCount} /></View><TouchableOpacity style={styles.stepButton} onPress={() => setRuns(Math.min(3, runs + 1))}><Text style={styles.stepText}>+</Text></TouchableOpacity></View>{(Object.keys(SUPPORTERS) as SupporterId[]).map((id) => { const supporter = SUPPORTERS[id]; return <View key={id} style={styles.supporterRow}><Image source={SUPPORTER_IMAGES[id]} style={styles.supporterImage} /><View style={styles.stockText}><Text style={styles.stockName}>{supporter.name}</Text><Text style={styles.stockDescription}>{supporter.description}</Text></View><TouchableOpacity style={styles.hireButton} onPress={() => { void action(() => hireSupporter(id, runs)); }}><Text style={styles.hireText}>Hire</Text></TouchableOpacity></View>; })}</>;
+    if (view === "guild") return <><Text style={styles.sectionTitle}>Adventurers’ Guild</Text><View style={styles.merchantReceptionistRow}><Image source={RECEPTIONIST_PORTRAIT} style={styles.merchantReceptionistPortrait} resizeMode="contain" /><View style={styles.stockText}><Text style={styles.stockName}>Receptionist</Text></View></View>{city && <Text style={styles.rank}>Adventurer Rank {adventurerRank(city)} - {city.guildReputation} Reputation</Text>}{city?.adventurerPromotionActive && !city.adventurerPromotionCompleted ? <View style={styles.quest}><Text style={styles.questType}>Promotion Examination · Rank G</Text><Text style={styles.stockName}>Defeat 5 Ember Roosters</Text><Text style={styles.progress}>Progress: {city.adventurerPromotionProgress}/5</Text><TouchableOpacity disabled={busy || city.adventurerPromotionProgress < 5} style={[styles.wideButton, (busy || city.adventurerPromotionProgress < 5) && styles.disabled]} onPress={() => { void action(completeAdventurerPromotionExam); }}><Text style={styles.wideButtonText}>Complete Promotion</Text></TouchableOpacity></View> : null}{nav("Expedition Shop", "Equipment for safer Dungeon Runs", "expedition_shop")}{nav("Expedition Hall", city?.supporter ? `${SUPPORTERS[city.supporter.id].name} · ${city.supporter.runsRemaining} runs remaining` : "Hire support for the next Dungeon Run", "support")}{nav("Monster Processing", "Send a carcass to the Guild Butcher", "processing")}{nav("Quest Board", "Accept quests and claim completed bounties", "quests")}</>;
+    if (view === "expedition_shop") return <><Text style={styles.sectionTitle}>Expedition Shop</Text>{wallet}{EXPEDITION_SHOP.map(buyRow)}</>;
+    if (view === "support") return <><Text style={styles.sectionTitle}>Expedition Hall</Text><View style={styles.notePriceRow}><CurrencyPrice totalCopper={100} textStyle={styles.noteInline} /><Text style={styles.noteInline}>per Dungeon Run. Choose up to three runs.</Text></View><View style={styles.stepper}><TouchableOpacity style={styles.stepButton} onPress={() => setRuns(Math.max(1, runs - 1))}><Text style={styles.stepText}>−</Text></TouchableOpacity><View style={styles.runCountRow}><Text style={styles.runCount}>{runs} Run{runs === 1 ? "" : "s"} ·</Text><CurrencyPrice totalCopper={runs * 100} textStyle={styles.runCount} /></View><TouchableOpacity style={styles.stepButton} onPress={() => setRuns(Math.min(3, runs + 1))}><Text style={styles.stepText}>+</Text></TouchableOpacity></View>{(Object.keys(SUPPORTERS) as SupporterId[]).map((id) => { const supporter = SUPPORTERS[id]; return <View key={id} style={styles.supporterRow}><Image source={SUPPORTER_IMAGES[id]} style={styles.supporterImage} /><View style={styles.stockText}><Text style={styles.stockName}>{supporter.name}</Text><Text style={styles.stockDescription}>{supporter.description}</Text></View><TouchableOpacity style={styles.hireButton} onPress={() => { void action(() => hireSupporter(id, runs)); }}><Text style={styles.hireText}>Hire</Text></TouchableOpacity></View>; })}</>;
     if (view === "processing") return <><Text style={styles.sectionTitle}>Monster Processing</Text><Text style={styles.note}>Select every Monster Carcass you want the Guild Butcher to process.</Text>{wallet}{carriedCarcasses.length ? carriedCarcasses.map((carcass) => { const selected = selectedCarcassSet.has(carcass.key); return <TouchableOpacity key={carcass.key} style={[styles.processingChoice, selected && styles.selectedCard]} disabled={busy} onPress={() => toggleCarcass(carcass.key)} activeOpacity={0.78}><View style={styles.processingChoiceIcon}><ItemIcon id="monster_carcass" /></View><View style={styles.stockText}><Text style={styles.stockName}>{carcass.name}{carcass.stackQuantity > 1 ? ` · ${carcass.unitNumber}/${carcass.stackQuantity}` : ""}</Text><Text style={styles.stockDescription}>Estimated Result: {guildProcessingEstimate(carcass.monsterId)}</Text><View style={styles.processingUnitFee}><CurrencyPrice totalCopper={GUILD_PROCESSING_FEE_PER_CARCASS} /></View></View><View style={[styles.selectionCheck, selected && styles.selectionCheckSelected]}>{selected && <Ionicons name="checkmark" size={18} color="#FFF7E5" />}</View></TouchableOpacity>; }) : <Text style={styles.empty}>There are no processable Monster Carcasses in your bag.</Text>}<View style={styles.processingSummary}><View><Text style={styles.walletLabel}>Selected</Text><Text style={styles.processingCount}>{selectedCarcasses.length} {selectedCarcasses.length === 1 ? "Carcass" : "Carcasses"}</Text></View><View style={styles.processingTotal}><Text style={styles.walletLabel}>Processing Fee</Text><View style={styles.costLine}><CurrencyPrice totalCopper={processingTotal} textStyle={styles.processingCount} /></View></View></View><TouchableOpacity style={[styles.confirmProcessingButton, (selectedCarcasses.length === 0 || busy) && styles.disabled]} disabled={selectedCarcasses.length === 0 || busy} onPress={() => { void confirmCarcassProcessing(); }}><Ionicons name="checkmark-circle-outline" size={20} color="#FFF7E5" /><Text style={styles.wideButtonText}>Confirm</Text></TouchableOpacity><Text style={styles.note}>The results are delivered to your Courier’s Chest on the following day. Rare materials are rolled independently.</Text></>;
     if (view === "quests") return <><Text style={styles.sectionTitle}>Quest Board</Text><Text style={styles.note}>Accepted quests remain in your journal. Unaccepted quest categories are refreshed every Sunday.</Text>{(Object.keys(QUESTS) as QuestId[]).map((id) => { const def = QUESTS[id]; const status = city?.quests[id]; return <View key={id} style={styles.quest}><Text style={styles.questType}>{def.type} · Rank {def.rank}</Text><Text style={styles.stockName}>{def.title}</Text><Text style={styles.stockDescription}>{def.detail}</Text><View style={styles.rewardRow}><CurrencyPrice totalCopper={def.rewardCopper} textStyle={styles.reward} /><Text style={styles.reward}>· +{def.reputation} Guild Reputation</Text></View>{id === "wolves" && status && status.status !== "offered" && <Text style={styles.progress}>Progress: {Math.min(2, status.progress)}/2</Text>}<TouchableOpacity disabled={busy || status?.status === "completed"} style={[styles.wideButton, status?.status === "completed" && styles.disabled]} onPress={() => { void action(() => !status || status.status === "offered" ? acceptQuest(id) : turnInQuest(id)); }}><Text style={styles.wideButtonText}>{!status || status.status === "offered" ? "Accept Quest" : status.status === "completed" ? "Completed" : "Turn In"}</Text></TouchableOpacity></View>; })}</>;
-    if (view === "merchant") return <><Text style={styles.sectionTitle}>Merchant’s Guild</Text><View style={styles.merchantReceptionistRow}><Image source={MERCHANT_GUILD_RECEPTIONIST_PORTRAIT} style={styles.merchantReceptionistPortrait} resizeMode="contain" /><View style={styles.stockText}><Text style={styles.stockName}>Merchant Guild Receptionist</Text><Text style={styles.stockDescription}>Guild orders, imported goods and merchant reputation</Text></View></View><Text style={styles.rank}>Merchant Reputation · {merchantReputation}</Text>{!merchantRegistered ? <View style={styles.quest}><Text style={styles.questType}>Merchant Aptitude Test</Text><View style={styles.smithRecipeMain}><View style={styles.iconBox}><ItemIcon id="bag_herb" /></View><View style={styles.stockText}><Text style={styles.stockName}>Register as a Merchant</Text><Text style={styles.stockDescription}>Bring a herbal pouch containing exactly eleven herbs.</Text></View></View><TouchableOpacity disabled={busy || !merchantAptitudePouchReady} style={[styles.wideButton, (busy || !merchantAptitudePouchReady) && styles.disabled]} onPress={() => { void action(completeMerchantAptitudeTest); }}><Text style={styles.wideButtonText}>{merchantAptitudePouchReady ? "Hand Over Pouch" : "11 Herbs Required"}</Text></TouchableOpacity></View> : null}{nav("The Trade Hall", merchantRegistered ? "Large purchases and special commercial services" : "Merchant registration required", merchantRegistered ? "bulk" : undefined, !merchantRegistered)}{nav("Imported Goods", merchantRegistered ? "Goods and materials from other regions" : "Merchant registration required", merchantRegistered ? "imports" : undefined, !merchantRegistered)}{nav("Trade Contracts", merchantRegistered ? "Supply contracts for registered merchants" : "Merchant registration required", merchantRegistered ? "contracts" : undefined, !merchantRegistered)}</>;
+    if (view === "merchant") return <><Text style={styles.sectionTitle}>Merchant’s Guild</Text><View style={styles.merchantReceptionistRow}><Image source={MERCHANT_GUILD_RECEPTIONIST_PORTRAIT} style={styles.merchantReceptionistPortrait} resizeMode="contain" /><View style={styles.stockText}><Text style={styles.stockName}>Merchant Guild Receptionist</Text></View></View><Text style={styles.rank}>Merchant Rank {guildRank(merchantReputation)} - {merchantReputation} Reputation</Text>{!merchantRegistered ? <View style={styles.quest}><Text style={styles.questType}>Merchant Aptitude Test</Text><View style={styles.smithRecipeMain}><View style={styles.iconBox}><ItemIcon id="bag_herb" /></View><View style={styles.stockText}><Text style={styles.stockName}>Register as a Merchant</Text><Text style={styles.stockDescription}>Bring a herbal pouch containing exactly eleven herbs.</Text></View></View><TouchableOpacity disabled={busy || !merchantAptitudePouchReady} style={[styles.wideButton, (busy || !merchantAptitudePouchReady) && styles.disabled]} onPress={() => { void action(completeMerchantAptitudeTest); }}><Text style={styles.wideButtonText}>{merchantAptitudePouchReady ? "Hand Over Pouch" : "11 Herbs Required"}</Text></TouchableOpacity></View> : null}{nav("The Trade Hall", merchantRegistered ? "Large purchases and special commercial services" : "Merchant registration required", merchantRegistered ? "bulk" : undefined, !merchantRegistered)}{nav("Imported Goods", merchantRegistered ? "Goods and materials from other regions" : "Merchant registration required", merchantRegistered ? "imports" : undefined, !merchantRegistered)}{nav("Trade Contracts", merchantRegistered ? "Supply contracts for registered merchants" : "Merchant registration required", merchantRegistered ? "contracts" : undefined, !merchantRegistered)}</>;
     if (view === "bulk") return <><Text style={styles.sectionTitle}>Make an Order</Text><Text style={styles.note}>Orders arrive in shipment bags in the Courier’s Chest on the following day. Merchant Reputation may improve prices and quantities.</Text>{BULK_SHIPMENTS.map((shipment) => { const price = merchantPrice(shipment.price, merchantReputation); const quantity = merchantBulkQuantity(merchantReputation); return <View key={shipment.id} style={styles.stockRow}><View style={styles.iconBox}><ItemIcon id={shipment.id} /></View><View style={styles.stockText}><Text style={styles.stockName}>{ITEM_CATALOG[shipment.id]?.name} Shipment</Text><Text style={styles.stockDescription}>{quantity} {ITEM_CATALOG[shipment.id]?.name} · delivery tomorrow</Text></View><TouchableOpacity style={styles.priceButton} disabled={busy} onPress={() => { void action(() => buyBulkShipment(shipment.id, shipment.price)); }}><CurrencyPrice totalCopper={price} /></TouchableOpacity></View>; })}</>;
     if (view === "imports") return <><Text style={styles.sectionTitle}>Imported Goods</Text><Text style={styles.note}>Higher Merchant Reputation opens rarer trade routes.</Text>{tavernQuests.claimed.serve_water && !tavernQuests.purchasedBrewItems.brewers_yeast ? brewQuestBuyRow("brewers_yeast", 40) : null}{IMPORTS.map((item) => item.reputation <= merchantReputation ? buyRow({ id: item.id, price: merchantPrice(item.price, merchantReputation) }) : <View key={item.id} style={[styles.stockRow, styles.disabled]}><View style={styles.iconBox}><Ionicons name="lock-closed" size={25} color="#C4943A" /></View><View style={styles.stockText}><Text style={styles.stockName}>{ITEM_CATALOG[item.id]?.name}</Text><Text style={styles.stockDescription}>Requires {item.reputation} Merchant Reputation</Text></View></View>)}</>;
     if (view === "contracts") {
@@ -659,6 +696,12 @@ export default function NextCityScreen() {
         line={guildDialogIndex === null ? null : guildLines[guildDialogIndex] ?? null}
         onContinue={() => { void advanceGuildIntroduction(); }}
         onSkip={() => { if (guildDialogIndex === guildLines.length - 1) void advanceGuildIntroduction(); else setGuildDialogIndex(guildLines.length - 1); }}
+      />
+      <StoryDialogOverlay
+        visible={promotionDialogIndex !== null}
+        line={promotionDialogIndex === null ? null : promotionLines[promotionDialogIndex] ?? null}
+        onContinue={() => { void advancePromotionDialog(); }}
+        onSkip={() => { if (promotionDialogIndex === promotionLines.length - 1) void advancePromotionDialog(); else setPromotionDialogIndex(promotionLines.length - 1); }}
       />
       <StoryDialogOverlay
         visible={merchantGuildDialog !== null}
