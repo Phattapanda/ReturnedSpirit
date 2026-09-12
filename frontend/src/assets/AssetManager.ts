@@ -147,6 +147,7 @@ export const ASSET_REGISTRY: AssetEntry[] = [
 
   // ── Other item images ───────────────────────────────────────────────────────
   { key: 'herbs',         module: require('../../assets/images/herbs.png'),         group: 'items' },
+  { key: 'spices',        module: require('../../assets/images/spices.png'),        group: 'items' },
   { key: 'seed_herb',     module: require('../../assets/images/seed_herb.png'),     group: 'items' },
   { key: 'seed_potato',   module: require('../../assets/images/seed_potato.png'),  group: 'items' },
   { key: 'seed_carrot',   module: require('../../assets/images/seed_carrot.png'),  group: 'items' },
@@ -299,7 +300,12 @@ export const ASSET_REGISTRY: AssetEntry[] = [
   { key: 'pan_mushroom_skillet', module: require('../../assets/images/pan_mushroom_skillet.png'), group: 'items' },
   { key: 'pan_fried_potatoes', module: require('../../assets/images/pan_fried_potatoes.png'), group: 'items' },
   { key: 'pan_ember_chicken_skillet', module: require('../../assets/images/pan_ember_chicken_skillet.png'), group: 'items' },
+  { key: 'pan_ember_egg_hash', module: require('../../assets/images/pan_ember_egg_hash.png'), group: 'items' },
   { key: 'pan_farmhouse', module: require('../../assets/images/farmhouse_pan.png'), group: 'items' },
+  { key: 'pan_rare_mushroom_skillet', module: require('../../assets/images/pan_rare_mushroom_skillet.png'), group: 'items' },
+  { key: 'knife_garden_salad', module: require('../../assets/images/knife_garden_salad.png'), group: 'items' },
+  { key: 'knife_carrot_cucumber_salad', module: require('../../assets/images/knife_carrot_cucumber_salad.png'), group: 'items' },
+  { key: 'knife_fishermans_cold_plate', module: require('../../assets/images/knife_fishermans_cold_plate.png'), group: 'items' },
   { key: 'snowberrysherbet', module: require('../../assets/images/snowberry_sherbet.png'), group: 'items' },
   { key: 'cooking_pot', module: require('../../assets/images/cooking_pot.png'), group: 'items' },
   { key: 'frying_pan', module: require('../../assets/images/frying_pan.png'), group: 'items' },

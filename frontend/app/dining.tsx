@@ -31,6 +31,7 @@ import { COACHMAN_DIALOG_SCALE, DIALOG_CHARACTER_ASSETS, OLD_FARMER_DIALOG_SCALE
 import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import StatusModal from "@/src/components/StatusModal";
 import QuestBookButton from "@/src/components/quest-book";
+import SeasonedItemBadge from "@/src/components/seasoned-item-badge";
 import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
 import TavernLocationTransition from "@/src/components/tavern-location-transition";
 import CivilServantDialog from "@/src/components/CivilServantDialog";
@@ -66,6 +67,7 @@ import {
   getMealBaseSellPriceCopper,
   hasMealTag,
   normalizePlayerBagData,
+  type BagItem,
   type PlayerBagData,
 } from "@/src/game/item-system";
 import { addCurrencyCopper } from "@/src/game/currency-system";
@@ -142,7 +144,12 @@ const IMG = {
   pan_mushroom_skillet: require("../assets/images/pan_mushroom_skillet.png"),
   pan_fried_potatoes: require("../assets/images/pan_fried_potatoes.png"),
   pan_ember_chicken_skillet: require("../assets/images/pan_ember_chicken_skillet.png"),
+  pan_ember_egg_hash: require("../assets/images/pan_ember_egg_hash.png"),
   pan_farmhouse: require("../assets/images/farmhouse_pan.png"),
+  pan_rare_mushroom_skillet: require("../assets/images/pan_rare_mushroom_skillet.png"),
+  knife_garden_salad: require("../assets/images/knife_garden_salad.png"),
+  knife_carrot_cucumber_salad: require("../assets/images/knife_carrot_cucumber_salad.png"),
+  knife_fishermans_cold_plate: require("../assets/images/knife_fishermans_cold_plate.png"),
   snowberrysherbet: require("../assets/images/snowberry_sherbet.png"),
   rupert:        require("../assets/images/rupert.png"),
   rupertsad:     require("../assets/images/rupertsad.png"),
@@ -184,7 +191,12 @@ const MEAL_IMAGES: Record<string, ImageSourcePropType> = {
   pan_mushroom_skillet: IMG.pan_mushroom_skillet,
   pan_fried_potatoes: IMG.pan_fried_potatoes,
   pan_ember_chicken_skillet: IMG.pan_ember_chicken_skillet,
+  pan_ember_egg_hash: IMG.pan_ember_egg_hash,
   pan_farmhouse: IMG.pan_farmhouse,
+  pan_rare_mushroom_skillet: IMG.pan_rare_mushroom_skillet,
+  knife_garden_salad: IMG.knife_garden_salad,
+  knife_carrot_cucumber_salad: IMG.knife_carrot_cucumber_salad,
+  knife_fishermans_cold_plate: IMG.knife_fishermans_cold_plate,
   snowberrysherbet: IMG.snowberrysherbet,
 };
 
@@ -812,6 +824,13 @@ export default function DiningScreen() {
     }
   }
 
+  function seasonedMealPraise(meal: BagItem, profile: GuestVisitView["profile"]): string | null {
+    if (meal.seasonedStage === undefined) return null;
+    const isUnpopular = meal.id === profile.leastFavoriteDishId ||
+      profile.dislikedMealTags.some((tag) => hasMealTag(meal, tag));
+    return isUnpopular ? null : '"You seasoned that very well."';
+  }
+
   function coachmanMealReaction(reaction: GuestMealReaction): string {
     if (reaction === "favorite") return '"Red Stew. Now that is exactly what a long day on the road calls for."';
     if (reaction === "favored") return '"Hot and filling. You know how to welcome a tired traveller."';
@@ -984,7 +1003,7 @@ export default function DiningScreen() {
           audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
           setServiceBusy(false);
           showStandaloneServiceDialog(
-            { speaker, portrait, text: guestId === "merchant" ? '"A fair trade. Until next time."' : '"Thank you. Safe travels to you."' },
+            { speaker, portrait, text: seasonedMealPraise(activeMeal, guest.profile) ?? (guestId === "merchant" ? '"A fair trade. Until next time."' : '"Thank you. Safe travels to you."') },
             () => departGuest(guestId),
           );
         });
@@ -1003,7 +1022,7 @@ export default function DiningScreen() {
             await addCurrencyCopper(price);
             setServiceBusy(false);
             showStandaloneServiceDialog(
-              { speaker, portrait, text: '"Thank you. That was just what I needed."' },
+              { speaker, portrait, text: seasonedMealPraise(activeMeal, guest.profile) ?? '"Thank you. That was just what I needed."' },
               () => departGuest(guestId),
             );
           });
@@ -1076,7 +1095,7 @@ export default function DiningScreen() {
             {
               speaker: "Local Boozer",
               portrait: "local_boozer",
-              text: alcoholic ? '"Now that is a proper drink. I will gladly pay double."' : '"Not a drink, but it will do."',
+              text: seasonedMealPraise(activeMeal, guest.profile) ?? (alcoholic ? '"Now that is a proper drink. I will gladly pay double."' : '"Not a drink, but it will do."'),
             },
             () => departGuest("local_boozer"),
           );
@@ -1134,7 +1153,7 @@ export default function DiningScreen() {
             await addCurrencyCopper(price);
             setServiceBusy(false);
             showStandaloneServiceDialog(
-              { speaker: "Coachman", portrait: "coachman", text: coachmanMealReaction(reaction.reaction) },
+              { speaker: "Coachman", portrait: "coachman", text: seasonedMealPraise(activeMeal, guest.profile) ?? coachmanMealReaction(reaction.reaction) },
               () => departGuest("coachman"),
             );
           });
@@ -1273,7 +1292,7 @@ export default function DiningScreen() {
           audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
           setServiceBusy(false);
           showStandaloneServiceDialog(
-            { speaker: "Old Farmer", portrait: "old_farmer", text: farmerMealReaction(reaction.reaction) },
+            { speaker: "Old Farmer", portrait: "old_farmer", text: seasonedMealPraise(activeMeal, guest.profile) ?? farmerMealReaction(reaction.reaction) },
             () => departGuest("old_farmer"),
           );
         },
@@ -1329,7 +1348,7 @@ export default function DiningScreen() {
           await addCurrencyCopper(price);
           setServiceBusy(false);
           showStandaloneServiceDialog(
-            { speaker: "Old Farmer", portrait: "old_farmer", text: farmerMealReaction(reaction.reaction) },
+            { speaker: "Old Farmer", portrait: "old_farmer", text: seasonedMealPraise(activeMeal, guest.profile) ?? farmerMealReaction(reaction.reaction) },
             () => departGuest("old_farmer"),
           );
         });
@@ -1618,7 +1637,10 @@ export default function DiningScreen() {
                   >
                     {meal ? (
                       mealImage ? (
-                        <Image source={mealImage} style={styles.mealImage} resizeMode="contain" resizeMethod="resize" />
+                        <>
+                          <Image source={mealImage} style={styles.mealImage} resizeMode="contain" resizeMethod="resize" />
+                          <SeasonedItemBadge visible={meal.seasonedStage !== undefined} />
+                        </>
                       ) : (
                         <Text style={styles.mealFallbackText} numberOfLines={2}>{meal.name}</Text>
                       )
@@ -1965,6 +1987,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(90,65,30,0.42)",
     alignItems: "center",
     justifyContent: "center",
+    position: "relative",
   },
   mealSlotActive: {
     borderWidth: 2,

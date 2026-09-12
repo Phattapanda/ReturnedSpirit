@@ -33,6 +33,7 @@ import SceneBackground from "@/src/components/SceneBackground";
 import CurrencyHud from "@/src/components/CurrencyHud";
 import CurrencyPrice from "@/src/components/currency-price";
 import ItemDurabilityBadge from "@/src/components/item-durability-badge";
+import SeasonedItemBadge from "@/src/components/seasoned-item-badge";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { useHaptics } from "@/src/feedback/haptics-provider";
 import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
@@ -73,6 +74,7 @@ import {
   DEFAULT_PLAYER_STATS,
   calcEffectiveStaminaCost,
   getActiveStaminaBuffReduction,
+  getEffectiveLuck,
   normalizePlayerStats,
   type PlayerStats,
 } from "@/src/game/player-stats";
@@ -392,7 +394,12 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   pan_mushroom_skillet: require("../assets/images/pan_mushroom_skillet.png"),
   pan_fried_potatoes: require("../assets/images/pan_fried_potatoes.png"),
   pan_ember_chicken_skillet: require("../assets/images/pan_ember_chicken_skillet.png"),
+  pan_ember_egg_hash: require("../assets/images/pan_ember_egg_hash.png"),
   pan_farmhouse: require("../assets/images/farmhouse_pan.png"),
+  pan_rare_mushroom_skillet: require("../assets/images/pan_rare_mushroom_skillet.png"),
+  knife_garden_salad: require("../assets/images/knife_garden_salad.png"),
+  knife_carrot_cucumber_salad: require("../assets/images/knife_carrot_cucumber_salad.png"),
+  knife_fishermans_cold_plate: require("../assets/images/knife_fishermans_cold_plate.png"),
   snowberrysherbet: require("../assets/images/snowberry_sherbet.png"),
   cooking_pot: require("../assets/images/cooking_pot.png"),
   frying_pan: require("../assets/images/frying_pan.png"),
@@ -414,6 +421,7 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   empty_bottle: require("../assets/images/empty_bottle.png"),
   seed_herb:   require("../assets/images/seed_herb.png"),
   herbs:       require("../assets/images/herbs.png"),
+  spices:      require("../assets/images/spices.png"),
   oldpot:      require("../assets/images/oldpot.png"),
   tool_rusty_butchering_knife: require("../assets/images/tool_rusty_butchering_knife.png"),
   tool_iron_butchering_knife: require("../assets/images/tool_iron_butchering_knife.png"),
@@ -3929,9 +3937,11 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     const recipe = findCookingRecipe(ingredients, tool);
     if (!recipe) return null;
     const craftCount = getCraftableRecipeCount(ingredients, recipe, tool);
-    return craftCount > 0
-      ? createCraftedItem(recipe.outputId, recipe.outputQuantity * craftCount)
-      : null;
+    if (craftCount < 1) return null;
+    const preview = createCraftedItem(recipe.outputId, recipe.outputQuantity * craftCount);
+    return recipe.seasonedStage
+      ? { ...preview, name: `Seasoned ${preview.name}`, seasonedStage: recipe.seasonedStage }
+      : preview;
   }
 
   async function transferCookingItemToCrate(srcSlot: number) {
@@ -4173,7 +4183,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       return;
     }
 
-    const outputs = createRecipeOutputs(recipe, craftCount, getContainerStackLimit("kitchenTable"), playerStats.luck, currentTool);
+    const outputs = createRecipeOutputs(recipe, craftCount, getContainerStackLimit("kitchenTable"), getEffectiveLuck(playerStats), currentTool);
     const newTable = tableItemsRef.current.slice();
     const targetSlots: number[] = [];
     for (let i = 0; i < newTable.length && targetSlots.length < outputs.length; i++) {
@@ -4204,16 +4214,18 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     setCraftTool(newTool);
     AsyncStorage.setItem(SK.CRAFT_INGREDIENTS, JSON.stringify(newIng)).catch(() => {});
     AsyncStorage.setItem(SK.CRAFT_TOOL_SLOT, JSON.stringify(newTool)).catch(() => {});
-    if (!discoveredRecipeIdsRef.current.includes(recipe.id)) {
+    if (!recipe.hiddenFromRecipeBook && !discoveredRecipeIdsRef.current.includes(recipe.id)) {
       pendingNewRecipeRef.current = { name: recipe.name, outputId: recipe.outputId };
       const reservedIds = [...discoveredRecipeIdsRef.current, recipe.id];
       discoveredRecipeIdsRef.current = reservedIds;
       setDiscoveredRecipeIds(reservedIds);
     }
-    discoverRecipe(recipe.id).then((ids) => {
-      discoveredRecipeIdsRef.current = ids;
-      setDiscoveredRecipeIds(ids);
-    }).catch(() => {});
+    if (!recipe.hiddenFromRecipeBook) {
+      discoverRecipe(recipe.id).then((ids) => {
+        discoveredRecipeIdsRef.current = ids;
+        setDiscoveredRecipeIds(ids);
+      }).catch(() => {});
+    }
     startCraftOutputFlight(outputs, targetSlots, newTable, tutorialCraft);
   }
 
@@ -4513,6 +4525,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
             {!isBeingDragged && imgSrc && (
               <Image source={imgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
             )}
+            {!isBeingDragged && <SeasonedItemBadge visible={item.seasonedStage !== undefined} />}
             {!isBeingDragged && <ItemDurabilityBadge item={item} />}
             {!isBeingDragged && item.quantity > 1 && (
               <Text style={styles.tableItemQty}>{item.quantity}</Text>
@@ -4543,6 +4556,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
             {!isBeingDragged && imgSrc && (
               <Image source={imgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
             )}
+            {!isBeingDragged && <SeasonedItemBadge visible={item.seasonedStage !== undefined} />}
             {!isBeingDragged && <ItemDurabilityBadge item={item} />}
             {!isBeingDragged && item.quantity > 1 && (
               <Text style={styles.tableItemQty}>{item.quantity}</Text>
@@ -4581,6 +4595,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         {imgSrc && (
           <Image source={imgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
         )}
+        <SeasonedItemBadge visible={item.seasonedStage !== undefined} />
         <ItemDurabilityBadge item={item} />
         {item.quantity > 1 && <Text style={styles.tableItemQty}>{item.quantity}</Text>}
       </Pressable>
@@ -4768,7 +4783,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
              owns its own Pan gesture, matching the reliable Day-1 soup architecture. */}
         {(() => {
           const previewRecipe = findCookingRecipe(craftIngSlots, craftTool);
-          const previewDiscovered = !!previewRecipe && discoveredRecipeIds.includes(previewRecipe.id);
+          const previewDiscovered = !!previewRecipe && (previewRecipe.hiddenFromRecipeBook || discoveredRecipeIds.includes(previewRecipe.id));
           const craftGrid = (
             <View style={styles.gridContainer}>
               <View style={styles.gridRow}>
@@ -4793,6 +4808,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                               {!craftBeingDragged && craftImgSrc && (
                                 <Image source={craftImgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
                               )}
+                              {!craftBeingDragged && <SeasonedItemBadge visible={craftItem.seasonedStage !== undefined} />}
                               {!craftBeingDragged && <ItemDurabilityBadge item={craftItem} />}
                               {!craftBeingDragged && craftItem.quantity > 1 && (
                                 <Text style={styles.tableItemQty}>{craftItem.quantity}</Text>
@@ -4803,6 +4819,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                           <Pressable style={styles.soupSlotTouch} onPress={() => returnCraftIngToTable(i)}>
                             <View style={{ width: "100%", height: "100%", alignItems: "center", justifyContent: "center" }}>
                               {craftImgSrc && <Image source={craftImgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />}
+                              <SeasonedItemBadge visible={craftItem.seasonedStage !== undefined} />
                               <ItemDurabilityBadge item={craftItem} />
                               {craftItem.quantity > 1 && <Text style={styles.tableItemQty}>{craftItem.quantity}</Text>}
                             </View>
@@ -4870,7 +4887,10 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                         {!previewDiscovered ? (
                           <Ionicons name="help" size={30} color="#E7C77A" />
                         ) : ITEM_IMAGES[craftResult.id] ? (
-                          <Image source={ITEM_IMAGES[craftResult.id]} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
+                          <>
+                            <Image source={ITEM_IMAGES[craftResult.id]} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
+                            <SeasonedItemBadge visible={craftResult.seasonedStage !== undefined} />
+                          </>
                         ) : null}
                         {previewDiscovered && craftResult.quantity > 1 && <Text style={styles.tableItemQty}>{craftResult.quantity}</Text>}
                       </View>
@@ -4946,7 +4966,10 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                 activeOpacity={0.75}
               >
                 {item && ITEM_IMAGES[item.id] ? (
-                  <Image source={ITEM_IMAGES[item.id]} style={styles.smallCrateItemImage} resizeMode="contain" />
+                  <>
+                    <Image source={ITEM_IMAGES[item.id]} style={styles.smallCrateItemImage} resizeMode="contain" />
+                    <SeasonedItemBadge visible={item.seasonedStage !== undefined} />
+                  </>
                 ) : null}
                 <ItemDurabilityBadge item={item} />
                 {item && !ITEM_IMAGES[item.id] && <Text style={styles.smallCrateFallback} numberOfLines={2}>{item.name}</Text>}
@@ -5726,8 +5749,11 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
           >
             <TouchableOpacity activeOpacity={1} onPress={() => setKitchenDetailItem(null)}>
               <View style={styles.detailPanel}>
-                <Image source={ITEM_IMAGES[kitchenDetailItem.id] ?? ITEM_IMAGES.soup_herb} style={styles.detailImg} resizeMode="contain" resizeMethod="resize" />
-                <Text style={styles.detailName}>{kitchenDetailItem.id === "monster_carcass" ? kitchenDetailItem.name : (ITEM_CATALOG[kitchenDetailItem.id]?.name ?? kitchenDetailItem.name)}</Text>
+                <View style={styles.detailImageWrap}>
+                  <Image source={ITEM_IMAGES[kitchenDetailItem.id] ?? ITEM_IMAGES.soup_herb} style={styles.detailImg} resizeMode="contain" resizeMethod="resize" />
+                  <SeasonedItemBadge visible={kitchenDetailItem.seasonedStage !== undefined} />
+                </View>
+                <Text style={styles.detailName}>{kitchenDetailItem.seasonedStage !== undefined || kitchenDetailItem.id === "monster_carcass" ? kitchenDetailItem.name : (ITEM_CATALOG[kitchenDetailItem.id]?.name ?? kitchenDetailItem.name)}</Text>
                 {kitchenDetailItem.containedItem && kitchenDetailItem.containedQuantity != null && (
                   <Text style={styles.detailContents}>Contains: {kitchenDetailItem.containedQuantity}× {kitchenDetailItem.containedItem}</Text>
                 )}
@@ -5997,6 +6023,7 @@ const styles = StyleSheet.create({
     alignItems: "center", gap: 8,
   },
   detailImg: { width: 60, height: 60 },
+  detailImageWrap: { width: 60, height: 60, position: "relative" },
   detailName: { color: "#C4943A", fontSize: 15, fontFamily: "Oldenburg", textAlign: "center" },
   detailContents: { color: "#F0E8D5", fontSize: 12, fontFamily: "Oldenburg", textAlign: "center" },
   detailDesc: { color: "rgba(240,232,213,0.75)", fontSize: 12, fontFamily: "Oldenburg", textAlign: "center", marginBottom: 2 },

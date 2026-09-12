@@ -15,6 +15,7 @@ export type StatusEffectDefinition = {
   modifiers?: {
     staminaCostReduction?: number;
     fireResistance?: number;
+    luck?: number;
   };
 };
 
@@ -98,6 +99,16 @@ export const STATUS_EFFECT_DEFINITIONS: Record<string, StatusEffectDefinition> =
     stacking: "refresh",
     sourceItemId: "stew_ember_chicken",
     modifiers: { fireResistance: 3 },
+  },
+  luck_3: {
+    id: "luck_3",
+    name: "Luck +3",
+    kind: "buff",
+    description: "Increases Luck by 3.",
+    defaultDurationDays: 1,
+    stacking: "refresh",
+    sourceItemId: "pan_rare_mushroom_skillet",
+    modifiers: { luck: 3 },
   },
 };
 
@@ -304,6 +315,7 @@ export function recordTraitCureEvent(
 export function getStatusModifiers(state: StatusEffectState): {
   staminaCostReduction: number;
   fireResistance: number;
+  luck: number;
   fireDamageTakenMultiplier: number;
 } {
   const staminaCostReduction = state.temporary.reduce((total, active) => {
@@ -314,8 +326,12 @@ export function getStatusModifiers(state: StatusEffectState): {
     const value = STATUS_EFFECT_DEFINITIONS[active.id]?.modifiers?.fireResistance ?? 0;
     return total + value * active.stacks;
   }, 0);
+  const luck = state.temporary.reduce((total, active) => {
+    const value = STATUS_EFFECT_DEFINITIONS[active.id]?.modifiers?.luck ?? 0;
+    return total + value * active.stacks;
+  }, 0);
   const fireDamageTakenMultiplier = state.traits.reduce((total, active) => {
     return total * (TRAIT_DEFINITIONS[active.id]?.modifiers?.fireDamageTakenMultiplier ?? 1);
   }, 1);
-  return { staminaCostReduction, fireResistance, fireDamageTakenMultiplier };
+  return { staminaCostReduction, fireResistance, luck, fireDamageTakenMultiplier };
 }

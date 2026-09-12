@@ -15,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
 import ItemDurabilityBadge from "@/src/components/item-durability-badge";
+import SeasonedItemBadge from "@/src/components/seasoned-item-badge";
 import Animated, {
   cancelAnimation,
   useSharedValue,
@@ -97,7 +98,12 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   pan_mushroom_skillet: require("../../assets/images/pan_mushroom_skillet.png"),
   pan_fried_potatoes: require("../../assets/images/pan_fried_potatoes.png"),
   pan_ember_chicken_skillet: require("../../assets/images/pan_ember_chicken_skillet.png"),
+  pan_ember_egg_hash: require("../../assets/images/pan_ember_egg_hash.png"),
   pan_farmhouse: require("../../assets/images/farmhouse_pan.png"),
+  pan_rare_mushroom_skillet: require("../../assets/images/pan_rare_mushroom_skillet.png"),
+  knife_garden_salad: require("../../assets/images/knife_garden_salad.png"),
+  knife_carrot_cucumber_salad: require("../../assets/images/knife_carrot_cucumber_salad.png"),
+  knife_fishermans_cold_plate: require("../../assets/images/knife_fishermans_cold_plate.png"),
   snowberrysherbet: require("../../assets/images/snowberry_sherbet.png"),
   cooking_pot: require("../../assets/images/cooking_pot.png"),
   frying_pan: require("../../assets/images/frying_pan.png"),
@@ -110,6 +116,7 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   seed_herb:   require("../../assets/images/seed_herb.png"),
   seed_carrot: require("../../assets/images/seed_carrot.png"),
   herbs:       require("../../assets/images/herbs.png"),
+  spices:      require("../../assets/images/spices.png"),
   soup_herb:    require("../../assets/images/soup_herb.png"),
   soup_carrot:  require("../../assets/images/soup_carrot.png"),
   soup_potato:  require("../../assets/images/soup_potato.png"),
@@ -452,9 +459,12 @@ export default function PlayerBag({
             <TouchableOpacity activeOpacity={1} onPress={() => setInfoItem(null)}>
               <View style={styles.infoPanel}>
                 {ITEM_IMAGES[infoItem.id] && (
-                  <Image source={ITEM_IMAGES[infoItem.id]} style={styles.infoImg} resizeMode="contain" resizeMethod="resize" />
+                  <View style={styles.infoImageWrap}>
+                    <Image source={ITEM_IMAGES[infoItem.id]} style={styles.infoImg} resizeMode="contain" resizeMethod="resize" />
+                    <SeasonedItemBadge visible={infoItem.seasonedStage !== undefined} />
+                  </View>
                 )}
-                <Text style={styles.infoName}>{infoItem.id === "monster_carcass" ? infoItem.name : (ITEM_CATALOG[infoItem.id]?.name ?? infoItem.name)}</Text>
+                <Text style={styles.infoName}>{infoItem.seasonedStage !== undefined || infoItem.id === "monster_carcass" ? infoItem.name : (ITEM_CATALOG[infoItem.id]?.name ?? infoItem.name)}</Text>
                 {infoItem.containedItem && infoItem.containedQuantity != null && (
                   <Text style={styles.infoContents}>
                     Contains: {infoItem.containedQuantity} {infoItem.containedItem}
@@ -614,6 +624,7 @@ function BagSlot({ item, size, selected, onPressIn, onLongPress, onPress }: Slot
       {imgSrc ? (
         <>
           <Image source={imgSrc} style={styles.slotImg} resizeMode="contain" resizeMethod="resize" />
+          <SeasonedItemBadge visible={item?.seasonedStage !== undefined} />
           <ItemDurabilityBadge item={item} />
           {item?.containedQuantity != null && item.containedQuantity > 0 && (
             <View style={styles.contentsCircle}>
@@ -717,6 +728,7 @@ const styles = StyleSheet.create({
     borderColor: "rgba(196,148,58,0.55)", padding: 18, maxWidth: 300, alignItems: "center", gap: 8,
   },
   infoImg: { width: 60, height: 60 },
+  infoImageWrap: { width: 60, height: 60, position: "relative" },
   infoName: { color: "#C4943A", fontSize: 15, fontFamily: "Oldenburg", textAlign: "center" },
   infoContents: { color: "#F0E8D5", fontSize: 12, fontFamily: "Oldenburg", textAlign: "center" },
   infoDesc: { color: "rgba(240,232,213,0.75)", fontSize: 12, fontFamily: "Oldenburg", textAlign: "center", marginBottom: 2 },

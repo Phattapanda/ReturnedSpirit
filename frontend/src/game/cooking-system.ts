@@ -15,9 +15,18 @@ export type CookingRecipe = {
   outputId: string; outputQuantity: number; byproducts?: readonly { id: string; quantity: number }[];
   sellPriceCopper: number; staminaRecovery: number; lifeRecovery: number; tags: readonly MealTag[];
   buff?: { effectId: string; name: string; intensity: number; durationDays: number };
+  /** Runtime recipes such as seasoning must work at the table without entering the recipe book. */
+  hiddenFromRecipeBook?: boolean;
+  seasonedStage?: 1 | 2 | 3;
 };
 
 export const COOKING_RECIPES: readonly CookingRecipe[] = [
+  {
+    id: "spices", name: "Spices", stage: 1, rarity: "common", unlock: "Early",
+    ingredients: [{ id: "herbs", quantity: 2 }, { id: "shard_mana", quantity: 1 }],
+    toolId: null, outputId: "spices", outputQuantity: 2,
+    sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 0, tags: [],
+  },
   {
     id: "soup_herb", name: "Herb Soup", stage: 1, rarity: "common", unlock: "Start",
     ingredients: [{ id: "herbs", quantity: 2 }, { id: "bucketwater", quantity: 1 }],
@@ -133,11 +142,48 @@ export const COOKING_RECIPES: readonly CookingRecipe[] = [
     buff: { effectId: "fire_resistance_3", name: "Fire Resistance +3", intensity: 3, durationDays: 1 },
   },
   {
+    id: "pan_ember_egg_hash", name: "Ember Egg Hash", stage: 2, rarity: "rare", unlock: "Monster Cooking I",
+    ingredients: [{ id: "ember_chicken_egg", quantity: 1 }, { id: "potato", quantity: 1 }, { id: "onion", quantity: 1 }],
+    toolId: "frying_pan", outputId: "pan_ember_egg_hash", outputQuantity: 2,
+    sellPriceCopper: 53, staminaRecovery: 40, lifeRecovery: 25,
+    tags: ["warm", "vegetarian", "healthy", "hearty"],
+    buff: { effectId: "fire_resistance_2", name: "Fire Resistance +2", intensity: 2, durationDays: 1 },
+  },
+  {
     id: "pan_farmhouse", name: "Farmhouse Pan", stage: 2, rarity: "uncommon", unlock: "Mid",
     ingredients: [{ id: "pan_fried_potatoes", quantity: 1 }, { id: "onion", quantity: 1 }, { id: "egg", quantity: 1 }],
     toolId: "frying_pan", outputId: "pan_farmhouse", outputQuantity: 2,
     sellPriceCopper: 47, staminaRecovery: 50, lifeRecovery: 20,
     tags: ["warm", "vegetarian", "healthy", "hearty"],
+  },
+  {
+    id: "pan_rare_mushroom_skillet", name: "Rare Mushroom Skillet", stage: 2, rarity: "rare", unlock: "Monster Cooking I",
+    ingredients: [{ id: "mushroom_rare", quantity: 1 }, { id: "onion", quantity: 1 }, { id: "herbs", quantity: 1 }],
+    toolId: "frying_pan", outputId: "pan_rare_mushroom_skillet", outputQuantity: 2,
+    sellPriceCopper: 49, staminaRecovery: 35, lifeRecovery: 15,
+    tags: ["warm", "vegetarian", "healthy", "herbs"],
+    buff: { effectId: "luck_3", name: "Luck +3", intensity: 3, durationDays: 1 },
+  },
+  {
+    id: "knife_garden_salad", name: "Garden Salad", stage: 1, rarity: "common", unlock: "Early",
+    ingredients: [{ id: "lettuce", quantity: 1 }, { id: "cucumber", quantity: 1 }, { id: "tomato", quantity: 1 }],
+    toolId: "tool_kitchen_knife", outputId: "knife_garden_salad", outputQuantity: 2,
+    sellPriceCopper: 42, staminaRecovery: 25, lifeRecovery: 10,
+    tags: ["cold", "vegetarian", "healthy"],
+  },
+  {
+    id: "knife_carrot_cucumber_salad", name: "Carrot-Cucumber Salad", stage: 1, rarity: "common", unlock: "Early",
+    ingredients: [{ id: "carrot", quantity: 1 }, { id: "cucumber", quantity: 1 }, { id: "herbs", quantity: 1 }],
+    toolId: "tool_kitchen_knife", outputId: "knife_carrot_cucumber_salad", outputQuantity: 2,
+    sellPriceCopper: 24, staminaRecovery: 20, lifeRecovery: 5,
+    tags: ["cold", "vegetarian", "healthy", "herbs"],
+  },
+  {
+    id: "knife_fishermans_cold_plate", name: "Fisherman's Cold Plate", stage: 1, rarity: "common", unlock: "Early",
+    ingredients: [{ id: "fish", quantity: 1 }, { id: "cucumber", quantity: 1 }, { id: "tomato", quantity: 1 }],
+    toolId: "tool_kitchen_knife", outputId: "knife_fishermans_cold_plate", outputQuantity: 2,
+    sellPriceCopper: 52, staminaRecovery: 30, lifeRecovery: 20,
+    tags: ["cold", "healthy"],
   },
   {
     id: "stew_ember_chicken", name: "Ember Chicken Stew", stage: 2, rarity: "rare", unlock: "Monster Cooking I",
@@ -196,6 +242,38 @@ function findButcheringRecipe(ingredientSlots: readonly (BagItem | null)[], tool
   };
 }
 
+function findSeasoningRecipe(ingredientSlots: readonly (BagItem | null)[], tool: BagItem | null): CookingRecipe | null {
+  if (tool !== null) return null;
+  const occupied = ingredientSlots.filter((item): item is BagItem => item !== null);
+  if (occupied.some((item) => item.seasonedStage !== undefined)) return null;
+  const totals = ingredientTotals(occupied);
+  if (totals.size !== 2 || (totals.get("spices") ?? 0) < 1) return null;
+
+  const dish = occupied.find((item) => item.id !== "spices");
+  if (!dish) return null;
+  const sourceRecipe = COOKING_RECIPES.find((recipe) => recipe.outputId === dish.id && recipe.tags.length > 0);
+  if (!sourceRecipe) return null;
+
+  return {
+    id: `season_${dish.id}`,
+    name: `Season ${sourceRecipe.name}`,
+    stage: sourceRecipe.stage,
+    rarity: sourceRecipe.rarity,
+    unlock: "Seasoning",
+    ingredients: [{ id: dish.id, quantity: 1 }, { id: "spices", quantity: 1 }],
+    toolId: null,
+    outputId: dish.id,
+    outputQuantity: 1,
+    sellPriceCopper: sourceRecipe.sellPriceCopper,
+    staminaRecovery: sourceRecipe.staminaRecovery,
+    lifeRecovery: sourceRecipe.lifeRecovery,
+    tags: sourceRecipe.tags,
+    buff: sourceRecipe.buff,
+    hiddenFromRecipeBook: true,
+    seasonedStage: sourceRecipe.stage,
+  };
+}
+
 function carcassesPerCraft(recipe: CookingRecipe): number {
   return recipe.ingredients.reduce(
     (total, ingredient) => total + (ingredient.id.toLocaleLowerCase().includes("carcass") ? ingredient.quantity : 0),
@@ -234,6 +312,8 @@ export function getCraftableRecipeCount(
 export function findCookingRecipe(ingredientSlots: readonly (BagItem | null)[], tool: BagItem | null): CookingRecipe | null {
   const butchering = findButcheringRecipe(ingredientSlots, tool);
   if (butchering) return butchering;
+  const seasoning = findSeasoningRecipe(ingredientSlots, tool);
+  if (seasoning) return seasoning;
   const totals = ingredientTotals(ingredientSlots);
   return COOKING_RECIPES.find((recipe) => {
     if (!isCookingToolCompatible(tool?.id ?? null, recipe.toolId) || (tool && tool.quantity !== 1)) return false;
@@ -288,6 +368,21 @@ export function createRecipeOutputs(
       }
       return stacks;
     });
+  }
+  if (recipe.seasonedStage) {
+    const outputs: BagItem[] = [];
+    let remaining = recipe.outputQuantity * craftCount;
+    while (remaining > 0) {
+      const quantity = Math.min(remaining, maxStackQuantity);
+      const output = createCraftedItem(recipe.outputId, quantity);
+      outputs.push({
+        ...output,
+        name: `Seasoned ${ITEM_CATALOG[recipe.outputId]?.name ?? output.name}`,
+        seasonedStage: recipe.seasonedStage,
+      });
+      remaining -= quantity;
+    }
+    return outputs;
   }
   const outputs = [
     { id: recipe.outputId, quantity: recipe.outputQuantity * craftCount },

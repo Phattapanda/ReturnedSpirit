@@ -245,8 +245,8 @@ export const OLD_FARMER_PROFILE: GuestProfile = {
   initialFavor: 0,
   favoriteDishId: "soup_carrot",
   leastFavoriteDishId: null,
-  preferredMealTags: [],
-  dislikedMealTags: [],
+  preferredMealTags: [MEAL_TAG.SEASONED, MEAL_TAG.HEALTHY],
+  dislikedMealTags: [MEAL_TAG.SWEET],
   exchangePool: [],
 };
 

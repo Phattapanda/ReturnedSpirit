@@ -62,7 +62,7 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   ingot_silver: require("../assets/images/ingot_silver.png"), ingot_gold: require("../assets/images/ingot_gold.png"),
   ore_iron: require("../assets/images/ore_iron.png"), ore_copper: require("../assets/images/ore_copper.png"),
   ore_silver: require("../assets/images/ore_silver.png"), ore_gold: require("../assets/images/ore_gold.png"),
-  snowberry: require("../assets/images/snowberry.png"), shard_mana: require("../assets/images/shard_mana.png"),
+  snowberry: require("../assets/images/snowberry.png"), spices: require("../assets/images/spices.png"), shard_mana: require("../assets/images/shard_mana.png"),
   monster_carcass: require("../assets/images/monster_carcass.png"),
   bag_herb: require("../assets/images/bag_herb.png"), bag_carrot: require("../assets/images/bag_carrot.png"), bag_onion: require("../assets/images/bag_onion.png"),
   soup_herb: require("../assets/images/soup_herb.png"), soup_carrot: require("../assets/images/soup_carrot.png"), soup_onion: require("../assets/images/soup_onion.png"),

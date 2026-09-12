@@ -19,7 +19,7 @@ import {
   rollPlayerPhysicalDamage,
 } from "@/src/game/equipment-system";
 import { loadCurrencyCopper, saveCurrencyCopper } from "@/src/game/currency-system";
-import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
+import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, getEffectiveLuck, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
 import {
   GARDEN_INVENTORY_KEY,
   normalizeGardenInventory,
@@ -486,7 +486,8 @@ export async function searchForestArea(): Promise<DungeonActionResult> {
   }
 
   const location = SEARCH_LOCATIONS.find((entry) => entry.name === floor.searchLocation) ?? SEARCH_LOCATIONS[0];
-  const searchLuck = hiredSupporter?.definition.id === "botanist" ? runtime.stats.luck * 1.15 : runtime.stats.luck;
+  const effectiveLuck = getEffectiveLuck(runtime.stats);
+  const searchLuck = hiredSupporter?.definition.id === "botanist" ? effectiveLuck * 1.15 : effectiveLuck;
   const usesLuckRolledQuantity = Boolean(location.itemId && LUCK_ROLLED_FIND_ITEM_IDS.has(location.itemId));
   const botanistYield = !usesLuckRolledQuantity && hiredSupporter?.definition.id === "botanist" && Math.random() < 0.15 ? 1 : 0;
   const findQuantity = usesLuckRolledQuantity
@@ -531,7 +532,7 @@ async function monsterAttack(
   const floor = currentFloorOf(state);
   const monsterState = floor.monster!;
   const monster = FOREST_MONSTERS[monsterState.id];
-  const dodged = defending && Math.random() * 100 < clampPercent(30 + runtime.stats.luck);
+  const dodged = defending && Math.random() * 100 < clampPercent(30 + getEffectiveLuck(runtime.stats));
   let bag = runtime.bag;
   let life = runtime.life;
   let message: string;
@@ -587,7 +588,7 @@ export async function hideFromForestMonster(): Promise<DungeonActionResult> {
   const nextFloor: ForestFloorState = { ...floor, monster: nextMonster };
   const nextState: ForestDungeonState = { ...state, floors: { ...state.floors, [String(state.currentFloor)]: nextFloor } };
   await saveFightSnapshot(nextState, runtime.life, runtime.stamina, runtime.bag);
-  if (Math.random() * 100 < clampPercent(50 + runtime.stats.luck)) {
+  if (Math.random() * 100 < clampPercent(50 + getEffectiveLuck(runtime.stats))) {
     nextMonster.phase = "hidden";
     const message = `I remain unseen. I can ambush the ${monster.name} or stay hidden and let it pass.`;
     await saveRuntime(nextState, runtime.life, runtime.stamina, runtime.bag);
@@ -718,7 +719,7 @@ export async function escapeForestCombat(): Promise<DungeonActionResult> {
   const runtime = await loadRuntime();
   const floor = currentFloorOf(state);
   if (!floor.monster || floor.monster.phase !== "combat") return { ok: false, state, message: "There is nothing to escape from.", ...runtime };
-  if (Math.random() * 100 < clampPercent(50 + runtime.stats.luck)) {
+  if (Math.random() * 100 < clampPercent(50 + getEffectiveLuck(runtime.stats))) {
     const previousFloor = Math.max(1, state.currentFloor - 1);
     state.currentFloor = previousFloor;
     if (!state.floors[String(previousFloor)]) state.floors[String(previousFloor)] = createFloorState(previousFloor);

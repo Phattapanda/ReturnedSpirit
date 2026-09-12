@@ -75,6 +75,10 @@ export function getActiveStaminaBuffReduction(stats: PlayerStats): number {
   return getStatusModifiers(stats.statusEffects).staminaCostReduction;
 }
 
+export function getEffectiveLuck(stats: PlayerStats): number {
+  return stats.luck + getStatusModifiers(stats.statusEffects).luck;
+}
+
 /** Central cost formula: Endurance and active effects can reduce an action to zero. */
 export function calcEffectiveStaminaCost(
   baseCost: number,

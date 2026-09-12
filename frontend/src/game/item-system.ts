@@ -26,6 +26,7 @@ export const MEAL_TAG = {
   WARM: "warm",
   COLD: "cold",
   ALCOHOLIC: "alcoholic",
+  SEASONED: "seasoned",
 } as const;
 
 export type MealTag = (typeof MEAL_TAG)[keyof typeof MEAL_TAG];
@@ -57,6 +58,8 @@ export type BagItem = {
   equipped?: boolean;
   /** Identifies which monster produced a stackable generic carcass. */
   monsterId?: string;
+  /** The cooking stage whose seasoning bonus is attached to this concrete dish. */
+  seasonedStage?: 1 | 2 | 3;
 };
 
 export type PlayerBagData = {
@@ -223,6 +226,7 @@ export function canStack(a: BagItem, b: BagItem): boolean {
     sameOptionalTagSet(a.mealTags, b.mealTags) &&
     (a.consumableCategory ?? null) === (b.consumableCategory ?? null) &&
     (a.monsterId ?? null) === (b.monsterId ?? null) &&
+    (a.seasonedStage ?? null) === (b.seasonedStage ?? null) &&
     ((a.durability === undefined && b.durability === undefined) ||
       (a.id === "torch" && b.id === "torch" && !a.equipped && !b.equipped && a.durability === b.durability && a.maxDurability === b.maxDurability)) &&
     !getItemAttributes(a).includes(ITEM_ATTRIBUTE.STORAGE) &&
@@ -451,7 +455,7 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
   charred_wood: { name: "Charred Wood", description: "Fire-blackened wood that still holds traces of heat.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   leather: { name: "Leather", description: "Processed animal hide used to craft durable equipment.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   sap: { name: "Sap", description: "Sticky tree sap used in crafting and alchemy.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
-  spices: { name: "Spices", description: "A fragrant imported blend used in uncommon recipes.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  spices: { name: "Spices", description: "A fragrant blend crafted from Herbs and a Mana Shard. Used to season cooked dishes.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   wine: { name: "Wine", description: "Imported regional wine for drinks and refined recipes.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   alchemical_ingredients: { name: "Alchemical Ingredients", description: "An assortment of imported reagents for alchemy.", attributes: [ITEM_ATTRIBUTE.INGREDIENT, ITEM_ATTRIBUTE.MATERIAL] },
   holy_herb: { name: "Holy Herb", description: "A carefully cultivated temple herb used in sacred remedies.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
@@ -567,11 +571,38 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
     staminaRecovery: 45, lifeRecovery: 25, baseSellPriceCopper: 57,
     grantedStatusEffectId: "fire_resistance_3",
   },
+  pan_ember_egg_hash: {
+    name: "Ember Egg Hash", description: "Restores 40 Stamina and 25 Life. Grants Fire Resistance +2 for 1 day.",
+    attributes: [ITEM_ATTRIBUTE.EDIBLE], mealTags: [MEAL_TAG.VEGETARIAN, MEAL_TAG.HEALTHY, MEAL_TAG.HEARTY, MEAL_TAG.WARM],
+    staminaRecovery: 40, lifeRecovery: 25, baseSellPriceCopper: 53,
+    grantedStatusEffectId: "fire_resistance_2",
+  },
   pan_farmhouse: {
     name: "Farmhouse Pan", description: "Pan-fried potatoes served with onion and egg. Restores 50 Stamina and 20 Life.",
     attributes: [ITEM_ATTRIBUTE.EDIBLE],
     mealTags: [MEAL_TAG.VEGETARIAN, MEAL_TAG.HEALTHY, MEAL_TAG.HEARTY, MEAL_TAG.WARM],
     staminaRecovery: 50, lifeRecovery: 20, baseSellPriceCopper: 47,
+  },
+  pan_rare_mushroom_skillet: {
+    name: "Rare Mushroom Skillet", description: "Restores 35 Stamina and 15 Life. Grants Luck +3 for 1 day.",
+    attributes: [ITEM_ATTRIBUTE.EDIBLE], mealTags: [MEAL_TAG.VEGETARIAN, MEAL_TAG.HEALTHY, MEAL_TAG.WARM, MEAL_TAG.HERBS],
+    staminaRecovery: 35, lifeRecovery: 15, baseSellPriceCopper: 49,
+    grantedStatusEffectId: "luck_3",
+  },
+  knife_garden_salad: {
+    name: "Garden Salad", description: "A fresh lettuce, cucumber, and tomato salad. Restores 25 Stamina and 10 Life.",
+    attributes: [ITEM_ATTRIBUTE.EDIBLE], mealTags: [MEAL_TAG.VEGETARIAN, MEAL_TAG.HEALTHY, MEAL_TAG.COLD],
+    staminaRecovery: 25, lifeRecovery: 10, baseSellPriceCopper: 42,
+  },
+  knife_carrot_cucumber_salad: {
+    name: "Carrot-Cucumber Salad", description: "A crisp carrot and cucumber salad with herbs. Restores 20 Stamina and 5 Life.",
+    attributes: [ITEM_ATTRIBUTE.EDIBLE], mealTags: [MEAL_TAG.VEGETARIAN, MEAL_TAG.HEALTHY, MEAL_TAG.COLD, MEAL_TAG.HERBS],
+    staminaRecovery: 20, lifeRecovery: 5, baseSellPriceCopper: 24,
+  },
+  knife_fishermans_cold_plate: {
+    name: "Fisherman's Cold Plate", description: "A cold plate of fish, cucumber, and tomato. Restores 30 Stamina and 20 Life.",
+    attributes: [ITEM_ATTRIBUTE.EDIBLE], mealTags: [MEAL_TAG.HEALTHY, MEAL_TAG.COLD],
+    staminaRecovery: 30, lifeRecovery: 20, baseSellPriceCopper: 52,
   },
   stew_ember_chicken: {
     name: "Ember Chicken Stew", description: "Restores 45 Stamina and 30 Life. Grants Fire Resistance +3 for 1 day.",
@@ -795,10 +826,14 @@ export function hasItemAttribute(itemOrId: BagItem | string, attribute: ItemAttr
  * A future item variant may provide mealTags on the BagItem to override the catalog.
  */
 export function getItemMealTags(itemOrId: BagItem | string): MealTag[] {
-  if (typeof itemOrId !== "string" && itemOrId.mealTags !== undefined) {
-    return [...new Set<MealTag>(itemOrId.mealTags)];
+  const tags = typeof itemOrId !== "string" && itemOrId.mealTags !== undefined
+    ? itemOrId.mealTags
+    : ITEM_CATALOG[itemId(itemOrId)]?.mealTags ?? [];
+  const normalized = new Set<MealTag>(tags);
+  if (typeof itemOrId !== "string" && itemOrId.seasonedStage !== undefined) {
+    normalized.add(MEAL_TAG.SEASONED);
   }
-  return [...(ITEM_CATALOG[itemId(itemOrId)]?.mealTags ?? [])];
+  return [...normalized];
 }
 
 export function hasMealTag(itemOrId: BagItem | string, tag: MealTag): boolean {
@@ -821,7 +856,10 @@ export function getConsumableCategory(itemOrId: BagItem | string): ConsumableCat
 export function getMealBaseSellPriceCopper(itemOrId: BagItem | string): number | null {
   if (!isEdible(itemOrId)) return null;
   const price = ITEM_CATALOG[itemId(itemOrId)]?.baseSellPriceCopper;
-  return Number.isFinite(price) ? Math.max(0, Math.floor(price!)) : null;
+  if (!Number.isFinite(price)) return null;
+  const seasonedStage = typeof itemOrId === "string" ? undefined : itemOrId.seasonedStage;
+  const seasoningBonus = seasonedStage === 1 ? 10 : seasonedStage === 2 ? 15 : seasonedStage === 3 ? 20 : 0;
+  return Math.max(0, Math.floor(price!)) + seasoningBonus;
 }
 
 export function getGrantedStatusEffectId(itemOrId: BagItem | string): string | null {
