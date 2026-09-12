@@ -71,7 +71,7 @@ export const QUESTS = {
 const RANK_H_QUEST_KARMA_POINTS = 3;
 
 export type CityState = {
-  version: 1;
+  version: 2;
   foodStockDay: number;
   foodStock: string[];
   supporter: { id: SupporterId; runsRemaining: number; announcedRunSerial: number | null } | null;
@@ -106,10 +106,11 @@ const DEFAULT_QUESTS: CityState["quests"] = {
   camp: { status: "offered", progress: 0 }, healing: { status: "offered", progress: 0 },
 };
 
+const FOOD_STALL_ITEMS = ["potato", "carrot", "onion", "tomato", "cucumber", "lettuce", "egg", "white_meat", "red_meat", "herbs", "mushroom"];
+
 function foodStock(day: number): string[] {
-  const core = ["potato", "carrot", "onion", "tomato", "egg", "white_meat", "red_meat", "herbs", "mushroom"];
-  const omitted = day % core.length;
-  return core.filter((_, index) => index !== omitted || index < 4);
+  const omitted = ((Math.floor(day) % FOOD_STALL_ITEMS.length) + FOOD_STALL_ITEMS.length) % FOOD_STALL_ITEMS.length;
+  return FOOD_STALL_ITEMS.filter((_, index) => index !== omitted);
 }
 
 function merchantWeek(day: number, weekday: number): number {
@@ -128,9 +129,11 @@ function normalizeCityState(raw: unknown, day: number, weekday: number): CitySta
   const validContract = (id: unknown): id is MerchantContractId => typeof id === "string" && id in MERCHANT_CONTRACTS;
   const normalizedMerchantReputation = Math.max(0, Math.floor(value.merchantReputation ?? 0));
   return {
-    version: 1,
+    version: 2,
     foodStockDay: value.foodStockDay === day ? day : day,
-    foodStock: value.foodStockDay === day && Array.isArray(value.foodStock) ? value.foodStock : foodStock(day),
+    foodStock: value.version === 2 && value.foodStockDay === day && Array.isArray(value.foodStock)
+      ? value.foodStock.filter((id) => FOOD_STALL_ITEMS.includes(id)).slice(0, 10)
+      : foodStock(day),
     supporter: value.supporter && SUPPORTERS[value.supporter.id]
       ? { id: value.supporter.id, runsRemaining: Math.max(0, Math.min(3, Math.floor(value.supporter.runsRemaining))), announcedRunSerial: value.supporter.announcedRunSerial ?? null }
       : null,
@@ -413,7 +416,7 @@ export async function performBlacksmithRecipe(recipeId: BlacksmithRecipeId): Pro
   };
 }
 
-export async function buyCityItem(id: string, priceCopper: number): Promise<CityActionResult> {
+export async function buyCityItem(id: string, priceCopper: number, quantity = 1): Promise<CityActionResult> {
   const bag = await loadBag();
   if (!bag.unlocked) return { ok: false, message: "I need my bag first." };
   if (id === "bag3") {
@@ -424,6 +427,7 @@ export async function buyCityItem(id: string, priceCopper: number): Promise<City
     return { ok: true, message: "Backpack upgraded to the 4 × 4 Big Backpack." };
   }
   const item = createItem(id);
+  item.quantity = Math.max(1, Math.floor(quantity));
   const plan = item.maxDurability === undefined || id === "torch" ? planAddToBag(item, bag) : planAddToNextFreeBagSlot(item, bag);
   const fits = "ok" in plan ? plan.ok : plan.canTransfer && plan.remainderQty === 0;
   if (!fits) return { ok: false, message: "My bag is full." };
@@ -431,7 +435,7 @@ export async function buyCityItem(id: string, priceCopper: number): Promise<City
   if (balance < priceCopper) return { ok: false, message: "I do not have enough coins." };
   await AsyncStorage.multiSet([[PLAYER_BAG_KEY, JSON.stringify({ ...bag, slots: plan.updatedSlots })], ["@game:currency_copper", String(balance - priceCopper)]]);
   await saveCurrencyCopper(balance - priceCopper);
-  return { ok: true, message: `${item.name} added to my bag.` };
+  return { ok: true, message: `${item.quantity > 1 ? `${item.quantity}× ` : ""}${item.name} added to my bag.` };
 }
 
 export function merchantPrice(basePrice: number, reputation: number): number {
@@ -538,7 +542,7 @@ export async function completeTempleBlessingExpedition(): Promise<void> {
   state.blessing = null; await saveCityState(state);
 }
 
-const BASE_PRICES: Record<string, number> = { potato: 6, carrot: 6, onion: 7, tomato: 8, egg: 8, white_meat: 14, red_meat: 18, herbs: 7, mushroom: 9, fish: 14, rope: 9, cloth: 17, empty_bottle: 9 };
+const BASE_PRICES: Record<string, number> = { potato: 6, carrot: 6, onion: 7, tomato: 8, cucumber: 8, lettuce: 8, egg: 8, white_meat: 14, red_meat: 18, herbs: 7, mushroom: 9, fish: 14, rope: 9, cloth: 17, empty_bottle: 9 };
 export const CITY_BUY_PRICES = Object.fromEntries(Object.entries(BASE_PRICES).map(([id, price]) => [id, Math.floor(price * 1.2)]));
 export function citySellPrice(id: string): number { return Math.ceil((BASE_PRICES[id] ?? ITEM_CATALOG[id]?.baseSellPriceCopper ?? 2) * 0.5); }
 

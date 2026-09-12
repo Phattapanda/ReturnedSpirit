@@ -175,6 +175,7 @@ export const ASSET_REGISTRY: AssetEntry[] = [
   { key: 'rope',          module: require('../../assets/images/rope.png'),          group: 'items' },
   { key: 'torch',         module: require('../../assets/images/torch_normal.png'),  group: 'items' },
   { key: 'return_bell',   module: require('../../assets/images/return_bell.png'),   group: 'items' },
+  { key: 'coal',          module: require('../../assets/images/coal.png'),          group: 'items' },
   { key: 'ore_iron',      module: require('../../assets/images/ore_iron.png'),      group: 'items' },
   { key: 'ore_copper',    module: require('../../assets/images/ore_copper.png'),    group: 'items' },
   { key: 'ore_silver',    module: require('../../assets/images/ore_silver.png'),    group: 'items' },
@@ -293,6 +294,8 @@ export const ASSET_REGISTRY: AssetEntry[] = [
   { key: 'grown_cinnamon_stalks_cloves', module: require('../../assets/images/quest_item.png'), group: 'items' },
   { key: 'yeast_nutrients', module: require('../../assets/images/quest_item.png'), group: 'items' },
   { key: 'tomato', module: require('../../assets/images/tomato.png'), group: 'items' },
+  { key: 'cucumber', module: require('../../assets/images/cucumber.png'), group: 'items' },
+  { key: 'lettuce', module: require('../../assets/images/lettuce.png'), group: 'items' },
   { key: 'pan_fried_eggs', module: require('../../assets/images/pan_fried_eggs.png'), group: 'items' },
   { key: 'pan_fishermans_fry', module: require('../../assets/images/pan_fishermans_fry.png'), group: 'items' },
   { key: 'pan_meat_and_carrots', module: require('../../assets/images/pan_meat_and_carrots.png'), group: 'items' },
@@ -364,8 +367,6 @@ export const ASSET_REGISTRY: AssetEntry[] = [
   { key: 'workout1',   module: require('../../assets/images/workout1.png'),   group: 'ui' },
   { key: 'workout2',   module: require('../../assets/images/workout2.png'),   group: 'ui' },
   { key: 'well_icon',  module: require('../../assets/images/well.png'),       group: 'navigation' },
-  { key: 'craft_area',module: require('../../assets/images/craft-area.webp'), group: 'ui' },
-  { key: 'table_2x6', module: require('../../assets/images/table-2x6.webp'), group: 'ui' },
 ];
 
 /** Total number of assets (used for real progress calculation). */
