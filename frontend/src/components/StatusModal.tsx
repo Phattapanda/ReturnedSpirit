@@ -54,8 +54,8 @@ export default function StatusModal({
     setTimeout(() => { upgradeLocked.current = false; }, 300);
   }
 
-  const statRows: { label: string; field: UpgradableField; value: string }[] = [
-    { label: "Stamina",        field: "maximumStamina", value: `${currentStamina} / ${stats.maximumStamina}` },
+  const statRows: { label: string; field?: UpgradableField; value: string }[] = [
+    { label: "Stamina",                                  value: `${currentStamina} / ${stats.maximumStamina}` },
     { label: "Life",           field: "maximumLife",    value: `${currentLife} / ${stats.maximumLife}` },
     { label: "Strength",       field: "strength",       value: String(stats.strength) },
     { label: "Endurance",      field: "endurance",      value: String(stats.endurance) },
@@ -113,19 +113,21 @@ export default function StatusModal({
           {/* Stats */}
           <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
             {statRows.map(({ label, field, value }) => {
-              const canAffordUpgrade = stats.growthPoints >= UPGRADE_GP_COST;
+              const canAffordUpgrade = field !== undefined && stats.growthPoints >= UPGRADE_GP_COST;
               return (
-                <View key={field} style={styles.statRow}>
+                <View key={field ?? label} style={styles.statRow}>
                   <Text style={styles.statLabel}>{label}</Text>
                   <Text style={styles.statValue}>{value}</Text>
-                  <TouchableOpacity
-                    style={[styles.upgradeBtn, !canAffordUpgrade && styles.upgradeBtnDisabled]}
-                    onPress={() => handleUpgrade(field)}
-                    disabled={!canAffordUpgrade}
-                    activeOpacity={0.75}
-                  >
-                    <Text style={[styles.upgradeBtnText, !canAffordUpgrade && styles.upgradeBtnTextDisabled]}>+</Text>
-                  </TouchableOpacity>
+                  {field ? (
+                    <TouchableOpacity
+                      style={[styles.upgradeBtn, !canAffordUpgrade && styles.upgradeBtnDisabled]}
+                      onPress={() => handleUpgrade(field)}
+                      disabled={!canAffordUpgrade}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={[styles.upgradeBtnText, !canAffordUpgrade && styles.upgradeBtnTextDisabled]}>+</Text>
+                    </TouchableOpacity>
+                  ) : <View style={styles.upgradeBtnPlaceholder} />}
                 </View>
               );
             })}
@@ -244,6 +246,7 @@ const styles = StyleSheet.create({
   },
   upgradeBtnText: { color: "#C4943A", fontSize: 17, fontFamily: "Oldenburg" },
   upgradeBtnTextDisabled: { color: "rgba(196,148,58,0.30)" },
+  upgradeBtnPlaceholder: { width: 32, height: 32 },
 
   infoPanel: {
     backgroundColor: "#1A0E05",

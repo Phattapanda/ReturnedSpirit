@@ -818,7 +818,7 @@ export async function bandageAtForestRestArea(useHerb: boolean): Promise<Dungeon
   return { ok: true, state, message: `I restore ${life - payment.life} Life.${payment.message}`, life, stamina: payment.stamina, bag };
 }
 
-export async function leaveForestDungeon(options: { useReturnBell?: boolean } = {}): Promise<{ message: string; bag: PlayerBagData }> {
+export async function leaveForestDungeon(options: { useReturnBell?: boolean; karmaRescue?: boolean } = {}): Promise<{ message: string; bag: PlayerBagData }> {
   const state = await loadForestDungeonState();
   const floor = currentFloorOf(state);
   const bossDefeated = state.currentFloor === FOREST_FLOOR_COUNT
@@ -827,7 +827,7 @@ export async function leaveForestDungeon(options: { useReturnBell?: boolean } = 
     && !floor.carcassPending;
   const runtime = await loadRuntime();
   const safeExit = FOREST_REST_FLOORS.has(state.currentFloor) || bossDefeated;
-  if (!safeExit && !options.useReturnBell) throw new Error("not_safe_exit");
+  if (!safeExit && !options.useReturnBell && !options.karmaRescue) throw new Error("not_safe_exit");
   let returnBag = runtime.bag;
   if (options.useReturnBell) {
     const bellSlot = returnBag.slots.findIndex((item) => item?.id === "return_bell" && item.quantity > 0);
@@ -851,7 +851,9 @@ export async function leaveForestDungeon(options: { useReturnBell?: boolean } = 
   ]);
   await completeTempleBlessingExpedition();
   return {
-    message: options.useReturnBell
+    message: options.karmaRescue
+      ? "You escape death and return to the tavern with your belongings."
+      : options.useReturnBell
       ? "The Return Bell rings and carries me safely back to the tavern."
       : bossDefeated
         ? "The Forest Entrance is cleared. You return to the tavern."

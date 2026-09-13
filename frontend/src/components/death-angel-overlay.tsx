@@ -5,7 +5,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Animated, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { nextRunBonusCost, REPEAT_FIGHT_KP_COST } from "@/src/game/death-angel-system";
+import { KARMA_TAVERN_RETURN_COST, nextRunBonusCost, REPEAT_FIGHT_KP_COST } from "@/src/game/death-angel-system";
 import { PLAYER_AVATAR_KEY, normalizePlayerAvatarId, type PlayerAvatarId } from "@/src/game/player-avatar";
 import type { NextRunBonuses, NextRunFreeItem } from "@/src/game/next-run";
 
@@ -31,6 +31,7 @@ type Props = {
   busy?: boolean;
   error?: string | null;
   onRepeatFight?: () => void;
+  onKarmaTavernReturn?: () => void;
   onStartNextRun: (bonuses: NextRunBonuses, avatarId: PlayerAvatarId) => void;
 };
 
@@ -42,7 +43,7 @@ const FREE_ITEMS: { id: NextRunFreeItem; label: string }[] = [
   { id: "onion_bag", label: "1× Bag with Onions (15)" },
 ];
 
-export default function DeathAngelOverlay({ visible, karmaPoints, busy = false, error, onRepeatFight, onStartNextRun }: Props) {
+export default function DeathAngelOverlay({ visible, karmaPoints, busy = false, error, onRepeatFight, onKarmaTavernReturn, onStartNextRun }: Props) {
   const insets = useSafeAreaInsets();
   const deathOpacity = useRef(new Animated.Value(1)).current;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -121,7 +122,7 @@ export default function DeathAngelOverlay({ visible, karmaPoints, busy = false, 
   if (!visible) return null;
   const cost = nextRunBonusCost(bonuses);
 
-  function toggle(key: "betterValues" | "growthPoints" | "preserveFavor") {
+  function toggle(key: "betterValues" | "growthPoints" | "preserveFavor" | "skipRupertTutorials") {
     setBonuses((current) => ({ ...current, [key]: !current[key] }));
   }
 
@@ -160,6 +161,9 @@ export default function DeathAngelOverlay({ visible, karmaPoints, busy = false, 
         {onRepeatFight ? <TouchableOpacity style={[styles.mainButton, karmaPoints < REPEAT_FIGHT_KP_COST && styles.disabled]} disabled={busy || karmaPoints < REPEAT_FIGHT_KP_COST} onPress={onRepeatFight}>
           <Text style={styles.mainButtonText}>Repeat Fight</Text><Text style={styles.cost}>{REPEAT_FIGHT_KP_COST} KP · Restore fight-start state and items</Text>
         </TouchableOpacity> : null}
+        {onKarmaTavernReturn ? <TouchableOpacity style={[styles.mainButton, karmaPoints < KARMA_TAVERN_RETURN_COST && styles.disabled]} disabled={busy || karmaPoints < KARMA_TAVERN_RETURN_COST} onPress={onKarmaTavernReturn}>
+          <Text style={styles.mainButtonText}>Go back to the tavern</Text><Text style={styles.cost}>{KARMA_TAVERN_RETURN_COST} KP · Return with 1 Stamina and 1 Life, keep your items</Text>
+        </TouchableOpacity> : null}
         <TouchableOpacity style={styles.mainButton} disabled={busy} onPress={() => setShowNewRun(true)}>
           <Text style={styles.mainButtonText}>Begin from the Start</Text><Text style={styles.cost}>Free · Choose optional blessings</Text>
         </TouchableOpacity>
@@ -167,6 +171,7 @@ export default function DeathAngelOverlay({ visible, karmaPoints, busy = false, 
         <Text style={styles.optionsTitle}>Blessings for the next run</Text>
         <Option selected={!!bonuses.betterValues} label="Better starting values" cost="10 KP · +10 Maximum Stamina, +5 Maximum Life" onPress={() => toggle("betterValues")} />
         <Option selected={!!bonuses.growthPoints} label="30 Growth Points" cost="10 KP" onPress={() => toggle("growthPoints")} />
+        <Option selected={!!bonuses.skipRupertTutorials} label="Skip Rupert’s Tutorials" cost="10 KP · Unlock basic tavern features from Day 1" onPress={() => toggle("skipRupertTutorials")} />
         <Option selected={bonuses.copper === 100} label="Start with 1 Silver Coin" cost="5 KP · 1 Silver Coin" onPress={() => setBonuses((current) => ({ ...current, copper: current.copper === 100 ? 0 : 100 }))} />
         <Option selected={bonuses.copper === 300} label="Start with 3 Silver Coins" cost="15 KP · 3 Silver Coins" onPress={() => setBonuses((current) => ({ ...current, copper: current.copper === 300 ? 0 : 300 }))} />
         <Option selected={!!bonuses.preserveFavor} label="Keep Guest Favor" cost="25 KP" onPress={() => toggle("preserveFavor")} />

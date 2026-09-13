@@ -9,6 +9,26 @@ import { deliverMailboxMessage, type MailReward } from "@/src/game/mailbox-syste
 import { GUEST_STATE_KEY, loadGuestState, type GuestId } from "@/src/game/guest-system";
 import { ALL_SNAPSHOT_KEYS, createSnapshot } from "@/src/game/save-manager";
 import { EMBER_ROOSTER_ENCOUNTER_SEEN_KEY } from "@/src/game/encounter-cinematics";
+import { GUEST_TUTORIAL_INTRO_KEY } from "@/src/game/guest-tutorial";
+import {
+  DEFAULT_POST_GUEST_TUTORIAL_STATE,
+  POST_GUEST_TUTORIAL_STATE_KEY,
+  getKitchenTableSlotCount,
+} from "@/src/game/post-guest-tutorial";
+import { QUESTBOOK_UNLOCKED_KEY } from "@/src/game/questbook-system";
+import { TRAVEL_STATE_KEY, type TravelState } from "@/src/game/travel-system";
+import {
+  createEmptyGardenPlot,
+  createGardenPlotFromSeed,
+  gardenPlotStorageKey,
+} from "@/src/game/garden-crop-system";
+import {
+  DEFAULT_BAG,
+  ITEM_CATALOG,
+  KITCHEN_TABLE_KEY,
+  PLAYER_BAG_KEY,
+  type BagItem,
+} from "@/src/game/item-system";
 import {
   DEFAULT_TITHE_STATE,
   ELAPSED_DAYS_KEY,
@@ -26,8 +46,85 @@ export type NextRunBonuses = {
   growthPoints?: boolean;
   copper?: 0 | 100 | 300;
   preserveFavor?: boolean;
+  skipRupertTutorials?: boolean;
   freeItem?: NextRunFreeItem | null;
 };
+
+function rupertTutorialSkipEntries(): [string, string][] {
+  const postGuestState = {
+    ...DEFAULT_POST_GUEST_TUTORIAL_STATE,
+    secondPlotThoughtSeen: true,
+    upgradeIntroSeen: true,
+  };
+  const playerBag = {
+    ...DEFAULT_BAG,
+    unlocked: true,
+    slots: [
+      {
+        id: "bucket",
+        itemType: "bucket",
+        name: ITEM_CATALOG.bucket.name,
+        quantity: 1,
+        attributes: [...ITEM_CATALOG.bucket.attributes],
+      },
+      ...DEFAULT_BAG.slots.slice(1),
+    ],
+  };
+  const herbSoupCatalog = ITEM_CATALOG.soup_herb;
+  const herbSoup: BagItem = {
+    id: "soup_herb",
+    itemType: "soup_herb",
+    name: herbSoupCatalog.name,
+    quantity: 1,
+    attributes: [...herbSoupCatalog.attributes],
+  };
+  const kitchenTable = Array<BagItem | null>(getKitchenTableSlotCount(postGuestState)).fill(null);
+  kitchenTable[0] = herbSoup;
+  kitchenTable[1] = {
+    id: "oldpot",
+    itemType: "oldpot",
+    name: ITEM_CATALOG.oldpot.name,
+    quantity: 1,
+    attributes: [...ITEM_CATALOG.oldpot.attributes],
+  };
+  const travelState: TravelState = {
+    version: 1,
+    exploreUnlocked: true,
+    unlockedDestinations: ["next_city"],
+  };
+  const plantedHerbPlot = {
+    ...createGardenPlotFromSeed(createEmptyGardenPlot(1), "seed_herb")!,
+    cropAsset: "bed_herb",
+    completedGrowthDays: 1,
+    remainingGrowthDays: 1,
+    progressPercent: 50,
+  };
+
+  return [
+    ["@tutorial:kitchen_done", "true"],
+    ["@kitchen:has_seen_post_garden_dialog", "true"],
+    ["@kitchen:dormitory_unlocked", "true"],
+    ["@kitchen:tuesday_morning_shown", "true"],
+    ["@kitchen:soup_demo_seen", "true"],
+    ["@kitchen:cooking_tutorial_done", "true"],
+    ["@garden:has_entered", "true"],
+    ["@garden:has_seen_introduction", "true"],
+    ["@garden:minimum_task_complete", "true"],
+    ["@garden:tutorial_complete", "true"],
+    ["@garden:tutorial_state", "IDLE"],
+    [gardenPlotStorageKey(1), JSON.stringify(plantedHerbPlot)],
+    ["@garden:inventory_bag_unlocked", "true"],
+    ["@garden:has_received_bucket", "true"],
+    ["@garden:activity_bar_unlocked", "true"],
+    ["@game:bag_inspected", "true"],
+    [PLAYER_BAG_KEY, JSON.stringify(playerBag)],
+    [KITCHEN_TABLE_KEY, JSON.stringify(kitchenTable)],
+    [GUEST_TUTORIAL_INTRO_KEY, "service_complete"],
+    [POST_GUEST_TUTORIAL_STATE_KEY, JSON.stringify(postGuestState)],
+    [QUESTBOOK_UNLOCKED_KEY, "true"],
+    [TRAVEL_STATE_KEY, JSON.stringify(travelState)],
+  ];
+}
 
 function nextRunPackageReward(choice: NextRunFreeItem): MailReward {
   if (choice === "stamina_potions") return { type: "item", itemId: "potion_stamina_low_grade", quantity: 3 };
@@ -72,6 +169,7 @@ export async function prepareNextRun(slotNumber: number, bonuses: NextRunBonuses
     [GUEST_STATE_KEY, JSON.stringify(nextGuestState)],
     [TITHE_STATE_KEY, JSON.stringify(DEFAULT_TITHE_STATE)],
     [NEXT_RUN_INTRO_PENDING_KEY, "true"],
+    ...(bonuses.skipRupertTutorials ? rupertTutorialSkipEntries() : []),
   ]);
   if (bonuses.freeItem) {
     await deliverMailboxMessage({

@@ -72,8 +72,13 @@ function loadCompletedRoomUpgrades(raw: string | null): RoomUpgrade[] {
   }
 }
 
+type DungeonDayTransitionOptions = {
+  finalStamina?: number;
+  finalLife?: number;
+};
+
 /** Ends a dungeon outing exactly like sleeping, then checkpoints in the Dormitory. */
-export async function completeDungeonDayTransition(): Promise<void> {
+export async function completeDungeonDayTransition(options: DungeonDayTransitionOptions = {}): Promise<void> {
   const values = await AsyncStorage.multiGet([
     KEYS.dayIndex,
     ELAPSED_DAYS_KEY,
@@ -94,8 +99,14 @@ export async function completeDungeonDayTransition(): Promise<void> {
   const recovery = calcSleepRecovery(loadCompletedRoomUpgrades(stored[KEYS.upgrades]));
   const oldStamina = Math.max(0, Number.parseInt(stored[KEYS.stamina] ?? '0', 10) || 0);
   const oldLife = Math.max(0, Number.parseInt(stored[KEYS.life] ?? '0', 10) || 0);
-  const newStamina = Math.min(stats.maximumStamina, oldStamina + recovery.stamina);
-  const newLife = Math.min(stats.maximumLife, oldLife + recovery.life);
+  const recoveredStamina = Math.min(stats.maximumStamina, oldStamina + recovery.stamina);
+  const recoveredLife = Math.min(stats.maximumLife, oldLife + recovery.life);
+  const newStamina = options.finalStamina === undefined
+    ? recoveredStamina
+    : Math.min(stats.maximumStamina, Math.max(0, Math.floor(options.finalStamina)));
+  const newLife = options.finalLife === undefined
+    ? recoveredLife
+    : Math.min(stats.maximumLife, Math.max(0, Math.floor(options.finalLife)));
 
   const updates: [string, string][] = [
     [KEYS.dayIndex, String(newDay)],

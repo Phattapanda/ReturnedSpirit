@@ -113,18 +113,17 @@ export function advancePlayerStatusEffectsDay(stats: PlayerStats): PlayerStats {
 }
 
 export type UpgradableField =
-  | "maximumStamina" | "maximumLife"
+  | "maximumLife"
   | "strength" | "endurance" | "perception"
   | "accuracy" | "luck" | "effectiveness";
 
 export const UPGRADABLE_FIELDS: UpgradableField[] = [
-  "maximumStamina", "maximumLife",
+  "maximumLife",
   "strength", "endurance", "perception",
   "accuracy", "luck", "effectiveness",
 ];
 
 export const STAT_LABELS: Record<UpgradableField, string> = {
-  maximumStamina: "Maximum Stamina",
   maximumLife:    "Maximum Life",
   strength:       "Strength",
   endurance:      "Endurance",
@@ -140,7 +139,7 @@ export const STAT_DESCRIPTIONS: Record<string, string> = {
   LIFE:
     "Your health. Life can be restored by eating, drinking, and sleeping. If your Life Points reach 0, you can lose everything. Increasing your maximum Life fully restores your Life Points.",
   STRENGTH:      "Affects the damage you deal.",
-  ENDURANCE:     "Affects your maximum Stamina and your resistance to damage. At certain levels, it also permanently reduces the Stamina cost of activities.",
+  ENDURANCE:     "Affects your resistance to damage. At certain levels, it also permanently reduces the Stamina cost of activities.",
   PERCEPTION:    "Affects how often you discover items, enemies, and traps.",
   ACCURACY:      "Affects your physical and magical hit rate.",
   LUCK:          "Affects your chance of discovering rare items and your evasion rate.",
@@ -149,7 +148,6 @@ export const STAT_DESCRIPTIONS: Record<string, string> = {
 
 /**
  * Apply one upgrade.
- * - maximumStamina: +5, currentStamina unchanged
  * - maximumLife: +5, currentLife set to new max
  * - others: +1
  * Returns updated stats + new currentLife (or null if unchanged).
@@ -167,9 +165,7 @@ export function applyStatUpgrade(
   };
   let newCurrentLife: number | null = null;
 
-  if (field === "maximumStamina") {
-    updated.maximumStamina = stats.maximumStamina + 5;
-  } else if (field === "maximumLife") {
+  if (field === "maximumLife") {
     updated.maximumLife = stats.maximumLife + 5;
     newCurrentLife = updated.maximumLife; // full heal
   } else {

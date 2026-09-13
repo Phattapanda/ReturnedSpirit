@@ -23,7 +23,7 @@ import {
   collectPendingForestCarcass, dismissPendingForestLoot, enterForestDungeon, forestAreaForFloor, goForwardInForest, hideFromForestMonster, leaveForestDungeon, letHiddenForestMonsterPass, searchForestArea,
   type DungeonActionResult, type ForestDungeonState, type ForestMonsterId,
 } from "@/src/game/forest-dungeon-system";
-import { beginChosenNextRun, repeatForestFight } from "@/src/game/death-angel-system";
+import { beginChosenNextRun, repeatForestFight, returnToTavernAfterForestDeath } from "@/src/game/death-angel-system";
 import { loadProgressionState } from "@/src/game/progression";
 import type { NextRunBonuses } from "@/src/game/next-run";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats } from "@/src/game/player-stats";
@@ -420,6 +420,37 @@ export default function ForestEntranceScreen() {
     } finally { setBusy(false); }
   }
 
+  async function karmaReturnToTavern() {
+    if (busy) return;
+    setBusy(true); setDeathError(null);
+    try {
+      const result = await returnToTavernAfterForestDeath();
+      const progression = await loadProgressionState();
+      setKarmaPoints(progression.karmaPoints);
+      if (!result) {
+        setDeathError("The tavern return failed or there are not enough KP.");
+        return;
+      }
+      setMessage(result.message);
+      setCombatBag(result.bag);
+      setHeaderRefreshKey((value) => value + 1);
+      await new Promise((resolve) => setTimeout(resolve, 1400));
+      setReturnNarrationVisible(true);
+      stopGameplayMusic(700);
+      await new Promise<void>((resolve) => {
+        Animated.timing(returnFade, { toValue: 1, duration: 850, useNativeDriver: true }).start(() => resolve());
+      });
+      await completeDungeonDayTransition({ finalStamina: 1, finalLife: 1 });
+      setCurrentLife(1);
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      router.replace("/dormitory");
+    } catch {
+      returnFade.setValue(0);
+      setReturnNarrationVisible(false);
+      setDeathError("The tavern return could not be completed.");
+    } finally { setBusy(false); }
+  }
+
   async function startNextRun(bonuses: NextRunBonuses, avatarId: PlayerAvatarId) {
     if (busy) return;
     setBusy(true); setDeathError(null);
@@ -557,7 +588,7 @@ export default function ForestEntranceScreen() {
       </>}
     </ScrollView>
     {lootFlights.length > 0 ? <LootFlightOverlay flights={lootFlights} width={screenWidth} height={screenHeight} headerHeight={headerHeight} /> : null}
-    <DeathAngelOverlay visible={currentLife <= 0} karmaPoints={karmaPoints} busy={busy} error={deathError} onRepeatFight={() => { void repeatFight(); }} onStartNextRun={(bonuses, avatarId) => { void startNextRun(bonuses, avatarId); }} />
+    <DeathAngelOverlay visible={currentLife <= 0} karmaPoints={karmaPoints} busy={busy} error={deathError} onRepeatFight={() => { void repeatFight(); }} onKarmaTavernReturn={() => { void karmaReturnToTavern(); }} onStartNextRun={(bonuses, avatarId) => { void startNextRun(bonuses, avatarId); }} />
     <Modal visible={contractVisible && !!supporter} transparent animationType="fade" onRequestClose={() => setContractVisible(false)}>
       <View style={styles.warningBackdrop}><View style={styles.supporterPanel}>
         {supporter ? <Image source={SUPPORTER_IMAGES[supporter.definition.id]} style={styles.contractPortrait} /> : null}
