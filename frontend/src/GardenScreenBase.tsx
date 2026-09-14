@@ -45,6 +45,7 @@ import StatusModal from "@/src/components/StatusModal";
 import QuestBookButton from "@/src/components/quest-book";
 import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
 import {
+  DiningGuestCountBadge,
   LocationStatusBadge,
   notifyLocationStatusChanged,
   useLocationStatusBadges,
@@ -289,7 +290,7 @@ export default function GardenScreen() {
     clearManagedInterval: clearInterval,
   } = useManagedTimers();
   const router = useRouter();
-  const { mailboxUnread, merchantPresent, receptionistPresent, sleepReady } = useLocationStatusBadges();
+  const { guestCount, mailboxUnread, merchantPresent, receptionistPresent, sleepReady } = useLocationStatusBadges();
   const insets = useSafeAreaInsets();
   const { width: W, height: H } = useWindowDimensions();
   const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(DEFAULT_PLAYER_AVATAR_ID);
@@ -2335,6 +2336,7 @@ return (
       resizeMode="contain"
       resizeMethod="resize"
     />
+    {loc.id === "dining" && <DiningGuestCountBadge count={guestCount} />}
     {loc.id === "dormitory" && sleepReady && <LocationStatusBadge kind="sleep" />}
     {loc.id === "mail" && mailboxUnread && <LocationStatusBadge kind="mail" />}
     {loc.id === "explore" && (receptionistPresent ? <LocationStatusBadge kind="receptionist" /> : merchantPresent ? <LocationStatusBadge kind="merchant" /> : null)}
@@ -2738,7 +2740,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7, paddingVertical: 2, zIndex: 1000, elevation: 30,
   },
   staFloatText: { color: "#FFF", fontSize: 12, fontFamily: "Oldenburg", fontWeight: "700" },
-  locationName: { color: "#F0E8D5", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 1, textAlign: "center", marginTop: 4 },
+  locationName: { color: "#F0E8D5", fontSize: 15, fontFamily: "Oldenburg", letterSpacing: 1, textAlign: "center", marginTop: 4 },
   rightHeaderColumn: { alignItems: "flex-end", alignSelf: "flex-start", gap: 4, marginLeft: 2, transform: [{ translateY: -2 }] },
   rightHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
   dayBadge: {

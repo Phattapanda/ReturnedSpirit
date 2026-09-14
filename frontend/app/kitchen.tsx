@@ -14,7 +14,7 @@ import { KitchenRuntimeContext, notifyKitchenPlayerThought } from "@/src/game/ki
  */
 export default function KitchenScreen() {
   const [instanceKey, setInstanceKey] = useState(0);
-  const { stamina: staminaParam } = useLocalSearchParams<{ stamina?: string }>();
+  const { stamina: staminaParam, rupertAlchemyIntro } = useLocalSearchParams<{ stamina?: string; rupertAlchemyIntro?: string }>();
   const parsedStamina = staminaParam === undefined ? undefined : Number.parseInt(staminaParam, 10);
   const entryStamina = Number.isFinite(parsedStamina) ? Math.max(0, parsedStamina!) : undefined;
 
@@ -30,7 +30,11 @@ export default function KitchenScreen() {
     <TavernLocationTransition location="kitchen">
       <KitchenRuntimeContext.Provider value={{ refreshKitchen, showPlayerThought }}>
         <View style={styles.root}>
-          <KitchenScreenBase key={instanceKey} entryStamina={entryStamina} />
+          <KitchenScreenBase
+            key={instanceKey}
+            entryStamina={entryStamina}
+            rupertAlchemyIntroRequested={rupertAlchemyIntro === "1"}
+          />
 
         </View>
       </KitchenRuntimeContext.Provider>

@@ -19,7 +19,7 @@ import {
   rollPlayerPhysicalDamage,
 } from "@/src/game/equipment-system";
 import { loadCurrencyCopper, saveCurrencyCopper } from "@/src/game/currency-system";
-import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, getEffectiveLuck, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
+import { ACCURACY_HIT_CHANCE_PER_POINT, DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, getEffectiveLuck, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
 import {
   GARDEN_INVENTORY_KEY,
   normalizeGardenInventory,
@@ -28,6 +28,7 @@ import {
 } from "@/src/game/tavern-return-storage";
 import { SHARED_RESOURCES_KEY } from "@/src/game/shared-resources";
 import { FOREST_DIRECT_LOOT, getButcheringDefinition } from "@/src/game/butchering-system";
+import { queueRupertAlchemyIntroAfterDungeon } from "@/src/game/rupert-alchemy-intro";
 import {
   activeSupporter, activeTempleBlessing, addToSupporterFirst, beginSupporterDungeonRun,
   beginTempleBlessingExpedition, completeTempleBlessingExpedition, deliverSupporterBagAfterDungeonRun, hasActiveCampQuest,
@@ -41,6 +42,8 @@ export const FOREST_FORWARD_STAMINA_COST = 3;
 export const FOREST_SEARCH_BASE_SUCCESS = 60;
 export const FOREST_SEARCH_PERCEPTION_BONUS = 2;
 export const FOREST_SEARCH_LUCK_POINTS_PER_BONUS_ITEM = 10;
+export const FOREST_AMBUSH_DAMAGE_MULTIPLIER = 1.5;
+export const FOREST_AMBUSH_BASE_CRITICAL_CHANCE = 25;
 export const FOREST_REST_FLOORS = new Set([5, 10, 15, 20, 25]);
 
 export const LUCK_ROLLED_FIND_ITEM_IDS: ReadonlySet<string> = new Set([
@@ -70,6 +73,8 @@ export type ForestMonsterDefinition = {
   id: ForestMonsterId;
   name: string;
   strength: number;
+  /** Percentage-point penalty applied to the player's physical hit chance. */
+  agility?: number;
   physicalDefense: number;
   magicalDefense: number;
   fireMagicalDefense?: number;
@@ -86,14 +91,14 @@ export type ForestAttackPreview = {
 
 export const FOREST_MONSTERS: Record<ForestMonsterId, ForestMonsterDefinition> = {
   forest_slime: { id: "forest_slime", name: "Forest Slime", strength: 3, physicalDefense: 1, magicalDefense: 0, maximumLife: 6 },
-  feral_rabbit: { id: "feral_rabbit", name: "Feral Rabbit", strength: 5, physicalDefense: 2, magicalDefense: 0, maximumLife: 10 },
-  wild_boar: { id: "wild_boar", name: "Wild Boar", strength: 7, physicalDefense: 4, magicalDefense: 3, maximumLife: 18 },
-  wild_wolf: { id: "wild_wolf", name: "Wild Wolf", strength: 9, physicalDefense: 3, magicalDefense: 2, maximumLife: 18 },
-  ember_chick: { id: "ember_chick", name: "Ember Chick", strength: 5, physicalDefense: 2, magicalDefense: 0, fireMagicalDefense: 10, maximumLife: 12 },
-  ember_chicken: { id: "ember_chicken", name: "Ember Chicken", strength: 10, physicalDefense: 6, magicalDefense: 0, fireMagicalDefense: 15, maximumLife: 22 },
-  ember_rooster: { id: "ember_rooster", name: "Ember Rooster", strength: 12, physicalDefense: 5, magicalDefense: 0, fireMagicalDefense: 13, maximumLife: 25 },
-  goblin_forager: { id: "goblin_forager", name: "Goblin Forager", strength: 8, physicalDefense: 4, magicalDefense: 5, maximumLife: 15 },
-  elder_ember_rooster: { id: "elder_ember_rooster", name: "Elder Ember Rooster", strength: 20, physicalDefense: 10, magicalDefense: 0, fireImmune: true, boss: true, maximumLife: 50 },
+  feral_rabbit: { id: "feral_rabbit", name: "Feral Rabbit", strength: 5, agility: 5, physicalDefense: 2, magicalDefense: 0, maximumLife: 10 },
+  wild_boar: { id: "wild_boar", name: "Wild Boar", strength: 7, agility: 10, physicalDefense: 4, magicalDefense: 3, maximumLife: 18 },
+  wild_wolf: { id: "wild_wolf", name: "Wild Wolf", strength: 9, agility: 20, physicalDefense: 3, magicalDefense: 2, maximumLife: 18 },
+  ember_chick: { id: "ember_chick", name: "Ember Chick", strength: 5, agility: 3, physicalDefense: 2, magicalDefense: 0, fireMagicalDefense: 10, maximumLife: 12 },
+  ember_chicken: { id: "ember_chicken", name: "Ember Chicken", strength: 10, agility: 8, physicalDefense: 6, magicalDefense: 0, fireMagicalDefense: 15, maximumLife: 22 },
+  ember_rooster: { id: "ember_rooster", name: "Ember Rooster", strength: 12, agility: 13, physicalDefense: 5, magicalDefense: 0, fireMagicalDefense: 13, maximumLife: 25 },
+  goblin_forager: { id: "goblin_forager", name: "Goblin Forager", strength: 8, agility: 7, physicalDefense: 4, magicalDefense: 5, maximumLife: 15 },
+  elder_ember_rooster: { id: "elder_ember_rooster", name: "Elder Ember Rooster", strength: 20, agility: 5, physicalDefense: 10, magicalDefense: 0, fireImmune: true, boss: true, maximumLife: 50 },
 };
 
 export type ForestMonsterState = {
@@ -142,6 +147,14 @@ const SEARCH_LOCATIONS: readonly SearchLocation[] = [
 
 function clampPercent(value: number): number { return Math.max(0, Math.min(100, value)); }
 
+export function getForestHideChance(stats: PlayerStats): number {
+  return clampPercent(50 + getEffectiveLuck(stats));
+}
+
+export function getForestAmbushCriticalChance(stats: PlayerStats): number {
+  return clampPercent(FOREST_AMBUSH_BASE_CRITICAL_CHANCE + getEffectiveLuck(stats));
+}
+
 /**
  * Rolls the 2-5 quantity used by search, gathering, and nest finds.
  * Each later roll is only attempted after the preceding roll succeeds.
@@ -167,7 +180,12 @@ export function getForestAttackPreview(
   const monster = FOREST_MONSTERS[monsterId];
   const weapon = getEquippedItem(bag, "weapon");
   const entry = weapon ? ITEM_CATALOG[weapon.id] : null;
-  const hitChance = clampPercent((entry?.basicAccuracyPercent ?? 100) + stats.accuracy - (target === "head" ? 30 : 0));
+  const hitChance = clampPercent(
+    (entry?.basicAccuracyPercent ?? 100)
+    + stats.accuracy * ACCURACY_HIT_CHANCE_PER_POINT
+    - (monster.agility ?? 0)
+    - (target === "head" ? 30 : 0),
+  );
   const strength = Math.max(0, Math.floor(stats.strength));
   const defense = Math.max(0, Math.floor(monster.physicalDefense));
   const minimum = Math.max(0, (entry?.damageMin ?? 0) + strength - defense);
@@ -407,6 +425,20 @@ function dungeonActivityCost(bag: PlayerBagData, baseCost: number): number {
   return getEquippedItem(bag, "tool")?.id === "torch" ? Math.max(0, baseCost - 2) : baseCost;
 }
 
+/** Uses the same stamina-cost and success-chance formula as searchForestArea. */
+export function getForestSearchPreview(
+  baseStaminaCost: number,
+  stats: PlayerStats,
+  bag: PlayerBagData,
+  hasBotanistSupport: boolean,
+) {
+  const searchPerception = hasBotanistSupport ? stats.perception * 1.15 : stats.perception;
+  return {
+    staminaCost: dungeonActivityCost(bag, baseStaminaCost),
+    successChance: clampPercent(FOREST_SEARCH_BASE_SUCCESS + searchPerception * FOREST_SEARCH_PERCEPTION_BONUS),
+  };
+}
+
 function payDungeonActivityCost(stamina: number, life: number, cost: number) {
   const staminaPaid = Math.min(Math.max(0, stamina), cost);
   const lifePaid = Math.max(0, cost - staminaPaid);
@@ -438,17 +470,20 @@ export async function searchForestArea(): Promise<DungeonActionResult> {
   const runtime = await loadRuntime();
   const floor = currentFloorOf(state);
   if (!floor.searchAvailable || floor.searched || floor.monster?.phase === "combat") return { ok: false, state, message: "There is nothing more to search here.", ...runtime };
-  const activityCost = dungeonActivityCost(runtime.bag, floor.searchCost);
-  const payment = payDungeonActivityCost(runtime.stamina, runtime.life, activityCost);
+  const hiredSupporter = await activeSupporter();
+  const searchPreview = getForestSearchPreview(
+    floor.searchCost,
+    runtime.stats,
+    runtime.bag,
+    hiredSupporter?.definition.id === "botanist",
+  );
+  const payment = payDungeonActivityCost(runtime.stamina, runtime.life, searchPreview.staminaCost);
   const stamina = payment.stamina;
   const paidLife = payment.life;
   runtime.bag = consumeTorchDurability(runtime.bag);
   const nextFloor = { ...floor, searched: true, searchAvailable: false };
   const nextState = { ...state, floors: { ...state.floors, [String(state.currentFloor)]: nextFloor } };
-  const hiredSupporter = await activeSupporter();
-  const searchPerception = hiredSupporter?.definition.id === "botanist" ? runtime.stats.perception * 1.15 : runtime.stats.perception;
-  const successChance = clampPercent(FOREST_SEARCH_BASE_SUCCESS + searchPerception * FOREST_SEARCH_PERCEPTION_BONUS);
-  if (Math.random() * 100 >= successChance) {
+  if (Math.random() * 100 >= searchPreview.successChance) {
     nextFloor.message = "I could not find anything useful.";
     nextFloor.message += payment.message;
     await saveRuntime(nextState, paidLife, stamina, runtime.bag);
@@ -587,10 +622,9 @@ export async function hideFromForestMonster(): Promise<DungeonActionResult> {
   const nextMonster: ForestMonsterState = { ...floor.monster, phase: "combat" };
   const nextFloor: ForestFloorState = { ...floor, monster: nextMonster };
   const nextState: ForestDungeonState = { ...state, floors: { ...state.floors, [String(state.currentFloor)]: nextFloor } };
-  await saveFightSnapshot(nextState, runtime.life, runtime.stamina, runtime.bag);
-  if (Math.random() * 100 < clampPercent(50 + getEffectiveLuck(runtime.stats))) {
-    nextMonster.phase = "hidden";
-    const message = `I remain unseen. I can ambush the ${monster.name} or stay hidden and let it pass.`;
+  if (Math.random() * 100 < getForestHideChance(runtime.stats)) {
+    nextMonster.phase = "avoided";
+    const message = `I remain unseen until the ${monster.name} passes. The area is safe to search.`;
     await saveRuntime(nextState, runtime.life, runtime.stamina, runtime.bag);
     return {
       ok: true,
@@ -601,7 +635,7 @@ export async function hideFromForestMonster(): Promise<DungeonActionResult> {
       bag: runtime.bag,
     };
   }
-  await saveForestDungeonState(nextState);
+  await saveFightSnapshot(nextState, runtime.life, runtime.stamina, runtime.bag);
   const result = await monsterAttack(nextState, runtime, false);
   return { ...result, message: `The ${monster.name} discovers me. ${result.message}` };
 }
@@ -610,14 +644,23 @@ export async function ambushHiddenForestMonster(): Promise<DungeonActionResult> 
   const state = await loadForestDungeonState();
   const runtime = await loadRuntime();
   const floor = currentFloorOf(state);
-  if (!floor.monster || floor.monster.phase !== "hidden") return { ok: false, state, message: "There is no hidden ambush to make.", ...runtime };
+  if (!floor.monster || (floor.monster.phase !== "noticed" && floor.monster.phase !== "hidden")) return { ok: false, state, message: "There is no ambush to make.", ...runtime };
   const monster = FOREST_MONSTERS[floor.monster.id];
   const weapon = getEquippedItem(runtime.bag, "weapon");
-  const damage = rollPlayerPhysicalDamage(runtime.stats.strength, monster.physicalDefense, weapon) * 2;
+  floor.monster.phase = "combat";
+  await saveFightSnapshot(state, runtime.life, runtime.stamina, runtime.bag);
+  const openingDamage = Math.ceil(
+    rollPlayerPhysicalDamage(runtime.stats.strength, monster.physicalDefense, weapon)
+    * FOREST_AMBUSH_DAMAGE_MULTIPLIER,
+  );
+  const criticalHit = Math.random() * 100 < getForestAmbushCriticalChance(runtime.stats);
+  const damage = criticalHit ? openingDamage * 2 : openingDamage;
   floor.monster.life = Math.max(0, floor.monster.life - damage);
   floor.monster.phase = floor.monster.life <= 0 ? "defeated" : "combat";
   let bag = weapon ? consumeWeaponDurability(runtime.bag) : runtime.bag;
-  let message = `I ambush the ${monster.name} and strike critically for ${damage} damage. I retain the initiative.`;
+  let message = criticalHit
+    ? `I ambush the ${monster.name} and strike critically for ${damage} damage. I retain the initiative.`
+    : `I ambush the ${monster.name} for ${damage} damage. I retain the initiative.`;
   let lootFlights: DungeonLootFlight[] | undefined;
   if (floor.monster.phase === "defeated") {
     const loot = await grantMonsterDefeatRewards(floor, bag, monster);
@@ -634,7 +677,7 @@ export async function ambushHiddenForestMonster(): Promise<DungeonActionResult> 
     life: runtime.life,
     stamina: runtime.stamina,
     bag,
-    playerAttack: { kind: weapon ? "critical" : "punch", damage, defeated: floor.monster.phase === "defeated" },
+    playerAttack: { kind: criticalHit ? "critical" : normalAttackKind(weapon), damage, defeated: floor.monster.phase === "defeated" },
     lootFlights,
   };
 }
@@ -659,7 +702,12 @@ export async function attackForestMonster(target: "head" | "body"): Promise<Dung
   const monster = FOREST_MONSTERS[floor.monster.id];
   const weapon = getEquippedItem(runtime.bag, "weapon");
   const baseAccuracy = weapon ? ITEM_CATALOG[weapon.id]?.basicAccuracyPercent ?? 100 : 100;
-  const hitChance = clampPercent(baseAccuracy + runtime.stats.accuracy - (target === "head" ? 30 : 0));
+  const hitChance = clampPercent(
+    baseAccuracy
+    + runtime.stats.accuracy * ACCURACY_HIT_CHANCE_PER_POINT
+    - (monster.agility ?? 0)
+    - (target === "head" ? 30 : 0),
+  );
   let bag = runtime.bag;
   let message: string;
   let playerAttack: DungeonActionResult["playerAttack"];
@@ -849,6 +897,7 @@ export async function leaveForestDungeon(options: { useReturnBell?: boolean; kar
     [GARDEN_INVENTORY_KEY, JSON.stringify(storagePlan.gardenInventory)],
     [SHARED_RESOURCES_KEY, JSON.stringify(storagePlan.sharedResources)],
   ]);
+  await queueRupertAlchemyIntroAfterDungeon(bag);
   await completeTempleBlessingExpedition();
   return {
     message: options.karmaRescue

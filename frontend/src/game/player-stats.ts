@@ -40,6 +40,9 @@ export const DEFAULT_PLAYER_STATS: PlayerStats = {
   statusEffects: DEFAULT_STATUS_EFFECT_STATE,
 };
 
+/** Each Accuracy point adds this many percentage points to attack hit chance. */
+export const ACCURACY_HIT_CHANCE_PER_POINT = 2;
+
 export const UPGRADE_GP_COST = 10;
 
 function normalizedInteger(value: unknown, fallback: number, minimum = 0): number {
@@ -141,7 +144,7 @@ export const STAT_DESCRIPTIONS: Record<string, string> = {
   STRENGTH:      "Affects the damage you deal.",
   ENDURANCE:     "Affects your resistance to damage. At certain levels, it also permanently reduces the Stamina cost of activities.",
   PERCEPTION:    "Affects how often you discover items, enemies, and traps.",
-  ACCURACY:      "Affects your physical and magical hit rate.",
+  ACCURACY:      "Each point adds 2 percentage points to your physical and magical hit rate.",
   LUCK:          "Affects your chance of discovering rare items and your evasion rate.",
   EFFECTIVENESS: "Affects equipment crafting.",
 };

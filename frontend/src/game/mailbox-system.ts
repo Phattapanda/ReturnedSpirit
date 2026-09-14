@@ -198,12 +198,14 @@ function normalizeMessage(raw: unknown): MailboxMessage | null {
   if (typeof message.id !== "string" || typeof message.sender !== "string" ||
       typeof message.subject !== "string" || typeof message.body !== "string") return null;
   const validKinds = new Set<MailSenderKind>(["developer", "npc", "guild", "adventurer", "system"]);
+  const canonicalSubject = message.subject.replaceAll("Forest Wolf", "Wild Wolf");
+  const canonicalBody = message.body.replaceAll("Forest Wolf", "Wild Wolf");
   return {
     id: message.id,
     sender: message.sender,
     senderKind: validKinds.has(message.senderKind as MailSenderKind) ? message.senderKind as MailSenderKind : "system",
-    subject: message.subject,
-    body: message.body,
+    subject: canonicalSubject,
+    body: canonicalBody,
     deliveredAt: Math.max(0, Number(message.deliveredAt) || 0),
     rewards: Array.isArray(message.rewards) ? message.rewards.map(normalizeReward).filter((reward): reward is MailReward => reward !== null) : [],
     read: message.read === true,

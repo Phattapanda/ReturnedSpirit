@@ -49,6 +49,7 @@ import { KITCHEN_SMALL_CRATE_KEY } from "@/src/game/kitchen-small-crate";
 import { FOREST_DUNGEON_KEY, FOREST_FIGHT_SNAPSHOT_KEY } from "@/src/game/forest-dungeon-system";
 import { COACHMAN_ESCORT_KEY } from "@/src/game/coachman-escort-system";
 import { EMBER_ROOSTER_ENCOUNTER_SEEN_KEY } from "@/src/game/encounter-cinematics";
+import { RUPERT_ALCHEMY_INTRO_PENDING_KEY, RUPERT_ALCHEMY_INTRO_SEEN_KEY } from "@/src/game/rupert-alchemy-intro";
 import { DEFAULT_MINSTREL_STATE, MINSTREL_STATE_KEY } from "@/src/game/minstrel-system";
 import { CITY_STATE_KEY, SUPPORTER_BAG_KEY } from "@/src/game/city-system";
 import {
@@ -108,6 +109,8 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   FOREST_FIGHT_SNAPSHOT_KEY,
   COACHMAN_ESCORT_KEY,
   EMBER_ROOSTER_ENCOUNTER_SEEN_KEY,
+  RUPERT_ALCHEMY_INTRO_PENDING_KEY,
+  RUPERT_ALCHEMY_INTRO_SEEN_KEY,
   DISCOVERED_RECIPES_KEY,
   // Garden state
   "@garden:has_entered",

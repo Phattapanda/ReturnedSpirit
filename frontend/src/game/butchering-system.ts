@@ -42,7 +42,7 @@ export const BUTCHERING_DEFINITIONS: Readonly<Record<string, ButcheringDefinitio
     rare: [{ id: "tusk", chances: [10, 18, 25] }],
   },
   wild_wolf: {
-    monsterId: "wild_wolf", recipeName: "Butcher Forest Wolf", carcassName: "Forest Wolf Carcass",
+    monsterId: "wild_wolf", recipeName: "Butcher Wild Wolf", carcassName: "Wild Wolf Carcass",
     primary: { id: "red_meat", ranges: [range(2, 3), range(3, 4), range(4, 5)] },
     secondary: [{ id: "wolf_pelt", ranges: [range(0, 1), range(1), range(1, 2)] }],
     rare: [{ id: "fang", chances: [8, 15, 25] }],

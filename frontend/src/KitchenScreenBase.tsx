@@ -44,6 +44,7 @@ import StoryDialogOverlay, { type StoryDialogChoice, type StoryDialogLine } from
 import CharacterDialogFrame from "@/src/components/character-dialog-frame";
 import { COACHMAN_DIALOG_SCALE, DIALOG_CHARACTER_ASSETS, RUPERT_DIALOG_SCALE, getDialogExpressionForStamina, getPlayerDialogAspectRatio, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
 import {
+  DiningGuestCountBadge,
   LocationStatusBadge,
   notifyLocationStatusChanged,
   useLocationStatusBadges,
@@ -82,6 +83,7 @@ import { applyTemporaryEffect } from "@/src/game/status-effect-system";
 import { loadLogbook, type LogEntry, LOGBOOK_KEY } from "@/src/game/logbook";
 import { COPPER_PER_SILVER, loadCurrencyCopper } from "@/src/game/currency-system";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
+import { completeRupertAlchemyIntro } from "@/src/game/rupert-alchemy-intro";
 import { setPlaytimePaused } from "@/src/game/playtime-tracker";
 import {
   guestTutorialHasReached,
@@ -556,6 +558,13 @@ const D_CRAFT_SUCCESS: DLine[] = [
   { id: "d_craft.0", speaker: "Rupert", portrait: "laugh", text: '"Well done! The herb soup is ready."' },
 ];
 
+const D_RUPERT_ALCHEMY_INTRO: DLine[] = [
+  { id: "d_rupert_alchemy.0", speaker: "Rupert", portrait: "normal", text: '"I see that you were successful in the Forest Dungeon?"' },
+  { id: "d_rupert_alchemy.1", speaker: "Rupert", portrait: "normal", text: '"Oh, this is part of a monster. This type of ingredient can be used for alchemy."' },
+  { id: "d_rupert_alchemy.2", speaker: "Rupert", portrait: "sad", text: '"I\'m not very familiar with this, but you can buy recipes in the city."' },
+  { id: "d_rupert_alchemy.3", speaker: "Rupert", portrait: "normal", text: '"I once heard that you can make good spices using herbs and mana shards."' },
+];
+
 const HARVEST_BAG_CONTENTS = {
   bag_herb: { itemId: "herbs", singular: "herb", plural: "herbs" },
   bag_carrot: { itemId: "carrot", singular: "carrot", plural: "carrots" },
@@ -573,9 +582,10 @@ const COOKING_RECIPE_INGREDIENT_IDS = new Set(
   COOKING_RECIPES.flatMap((recipe) => recipe.ingredients.map((ingredient) => ingredient.id)),
 );
 
-/** Ingredients, prepared dishes, recipe intermediates and Kitchen vessels can be split one item at a time. */
+/** Ingredients, prepared dishes, recipe intermediates, Kitchen vessels and usable stacked supplies can be split one item at a time. */
 function isKitchenSplittableStack(item: BagItem): boolean {
-  return item.id === "bucket" ||
+  return item.id === "return_bell" ||
+    item.id === "bucket" ||
     item.id === "monster_carcass" ||
     isEdible(item) ||
     hasItemAttribute(item, ITEM_ATTRIBUTE.INGREDIENT) ||
@@ -584,7 +594,13 @@ function isKitchenSplittableStack(item: BagItem): boolean {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function KitchenScreen({ entryStamina }: { entryStamina?: number }) {
+export default function KitchenScreen({
+  entryStamina,
+  rupertAlchemyIntroRequested = false,
+}: {
+  entryStamina?: number;
+  rupertAlchemyIntroRequested?: boolean;
+}) {
   const {
     setManagedTimeout: setTimeout,
     clearManagedTimeout: clearTimeout,
@@ -592,7 +608,7 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
     clearManagedInterval: clearInterval,
   } = useManagedTimers();
   const router = useRouter();
-  const { harvestReady, mailboxUnread, merchantPresent, receptionistPresent, sleepReady } = useLocationStatusBadges();
+  const { guestCount, harvestReady, mailboxUnread, merchantPresent, receptionistPresent, sleepReady } = useLocationStatusBadges();
   const insets = useSafeAreaInsets();
   const { width: W, height: H } = useWindowDimensions();
   const [playerAvatarId, setPlayerAvatarId] = useState<PlayerAvatarId>(DEFAULT_PLAYER_AVATAR_ID);
@@ -741,6 +757,11 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
   // ── Bag & Stats
   const [playerBag, setPlayerBag] = useState<PlayerBagData>(DEFAULT_BAG);
   const playerBagRef = useRef<PlayerBagData>(DEFAULT_BAG);
+  const kitchenBagTransferBusyRef = useRef(false);
+  function updatePlayerBagState(nextBag: PlayerBagData) {
+    playerBagRef.current = nextBag;
+    setPlayerBag(nextBag);
+  }
   const [playerStats, setPlayerStats] = useState<PlayerStats>(DEFAULT_PLAYER_STATS);
   const [bagOpen, setBagOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
@@ -811,6 +832,7 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
   const [dlgLines, setDlgLines] = useState<DLine[]>([]);
   const [dlgIdx, setDlgIdx] = useState(0);
   const dlgDoneRef = useRef<(() => void) | null>(null);
+  const rupertAlchemyIntroStartedRef = useRef(false);
   const lastAdvanceTimeRef = useRef(0); // anti-rapid-tap debounce
   const [escortDialogMode, setEscortDialogMode] = useState<"rupert" | "offer" | "counteroffer" | "accepted" | "declined" | null>(null);
   const [escortDialogLines, setEscortDialogLines] = useState<StoryDialogLine[]>([]);
@@ -937,6 +959,21 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
   }
 
   useEffect(() => {
+    if (
+      !rupertAlchemyIntroRequested ||
+      rupertAlchemyIntroStartedRef.current ||
+      ts !== "IDLE" ||
+      dlgActive ||
+      bubble ||
+      escortDialogMode
+    ) return;
+    rupertAlchemyIntroStartedRef.current = true;
+    showDialog(D_RUPERT_ALCHEMY_INTRO, () => { void completeRupertAlchemyIntro(); });
+  // This one-time route event intentionally waits until every earlier Kitchen tutorial overlay is finished.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bubble, dlgActive, escortDialogMode, rupertAlchemyIntroRequested, ts]);
+
+  useEffect(() => {
     if (ts !== "IDLE" || dlgActive || bubble || escortDialogMode) return;
     const timer = setTimeout(() => {
       void (async () => {
@@ -991,17 +1028,21 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
   async function handleBagToTable(bagSlotIdx: number, item: BagItem) {
     setBagOpen(false);
     const TABLE_STACK_LIMIT = 20;
-    const currentTable = tableItems.slice();
-    let transfer = item.quantity;
+    const currentBag = playerBagRef.current;
+    const sourceItem = currentBag.slots[bagSlotIdx];
+    if (!sourceItem || sourceItem.id !== item.id || sourceItem.quantity <= 0) return;
+
+    const currentTable = tableItemsRef.current.slice();
+    let transfer = sourceItem.quantity;
 
     // Fill compatible existing stacks first
     for (let i = 0; i < currentTable.length; i++) {
       if (soupSlotRef.current === i) continue;
       const t = currentTable[i];
       if (
-        t && t.id === item.id &&
-        t.containedItem === item.containedItem &&
-        t.containedQuantity === item.containedQuantity &&
+        t && t.id === sourceItem.id &&
+        t.containedItem === sourceItem.containedItem &&
+        t.containedQuantity === sourceItem.containedQuantity &&
         t.quantity < TABLE_STACK_LIMIT
       ) {
         const add = Math.min(transfer, TABLE_STACK_LIMIT - t.quantity);
@@ -1018,7 +1059,7 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
         if (soupSlotRef.current === i) continue;
         if (!currentTable[i]) {
           const add = Math.min(transfer, TABLE_STACK_LIMIT);
-          currentTable[i] = { ...item, quantity: add };
+          currentTable[i] = { ...sourceItem, quantity: add };
           if (firstNewSlot === null) firstNewSlot = i;
           transfer -= add;
           if (transfer <= 0) break;
@@ -1026,7 +1067,7 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
       }
     }
 
-    const transferred = item.quantity - transfer;
+    const transferred = sourceItem.quantity - transfer;
     if (transferred <= 0) {
       showPlayerBubble('"No free space available."');
       return;
@@ -1034,16 +1075,17 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
 
     // Update bag (remove transferred qty)
     const newBag: PlayerBagData = {
-      ...playerBag,
-      slots: playerBag.slots.map((s, idx) => {
+      ...currentBag,
+      slots: currentBag.slots.map((s, idx) => {
         if (idx !== bagSlotIdx || !s) return s;
         const remaining = s.quantity - transferred;
         return remaining > 0 ? { ...s, quantity: remaining } : null;
       }),
     };
 
+    tableItemsRef.current = currentTable;
     setTableItems(currentTable);
-    setPlayerBag(newBag);
+    updatePlayerBagState(newBag);
     audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
     await AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(currentTable)).catch(() => {});
     await AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(newBag)).catch(() => {});
@@ -1391,7 +1433,7 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
 
         // Load bag
         const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
-        if (rawBag) { try { setPlayerBag(normalizePlayerBagData(JSON.parse(rawBag))); } catch { /* default */ } }
+        if (rawBag) { try { updatePlayerBagState(normalizePlayerBagData(JSON.parse(rawBag))); } catch { /* default */ } }
         const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
         let loadedMaxStamina = DEFAULT_PLAYER_STATS.maximumStamina;
         if (rawStats) {
@@ -1740,7 +1782,7 @@ export default function KitchenScreen({ entryStamina }: { entryStamina?: number 
     try {
       const result = await purchaseTavernDrinkUpgrade(upgradeId);
       setPostGuestState(result.state);
-      setPlayerBag(result.playerBag);
+      updatePlayerBagState(result.playerBag);
       if (!result.ok) {
         setUpgradeMessage(result.reason === "prerequisite_locked"
           ? upgradeId === "serve_ale" ? "Get the guest area ready first." : "Unlock Standard Ale first."
@@ -1874,7 +1916,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
 
           // Refresh bag/stats
           const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
-          if (rawBag) { try { setPlayerBag(normalizePlayerBagData(JSON.parse(rawBag))); } catch { /* default */ } }
+          if (rawBag) { try { updatePlayerBagState(normalizePlayerBagData(JSON.parse(rawBag))); } catch { /* default */ } }
           const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
           if (rawStats) {
             try {
@@ -3520,6 +3562,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   }
 
   async function returnCookingItemToBag(srcSlot: number) {
+    if (kitchenBagTransferBusyRef.current) return;
     const sourceItem = getCookingItemAtSlot(srcSlot);
     if (sourceItem?.id === "crate1") {
       showPlayerBubble('"The Small Crate stays in the Kitchen."');
@@ -3536,12 +3579,12 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       return;
     }
 
-    playerBagRef.current = plan.bag;
+    kitchenBagTransferBusyRef.current = true;
     tableItemsRef.current = plan.tableItems;
     craftIngSlotsRef.current = plan.craftIngredients;
     craftToolRef.current = plan.craftTool;
 
-    setPlayerBag(plan.bag);
+    updatePlayerBagState(plan.bag);
     setTableItems(plan.tableItems);
     setCraftIngSlots(plan.craftIngredients);
     setCraftTool(plan.craftTool);
@@ -3550,12 +3593,18 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     setSelectedSoupSlot(null);
     setTooltipVisible(false);
 
-    await Promise.all([
-      AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(plan.bag)),
-      AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(plan.tableItems)),
-      AsyncStorage.setItem(SK.CRAFT_INGREDIENTS, JSON.stringify(plan.craftIngredients)),
-      AsyncStorage.setItem(SK.CRAFT_TOOL_SLOT, JSON.stringify(plan.craftTool)),
-    ]).catch(() => {});
+    try {
+      await Promise.all([
+        AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(plan.bag)),
+        AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(plan.tableItems)),
+        AsyncStorage.setItem(SK.CRAFT_INGREDIENTS, JSON.stringify(plan.craftIngredients)),
+        AsyncStorage.setItem(SK.CRAFT_TOOL_SLOT, JSON.stringify(plan.craftTool)),
+      ]);
+    } catch {
+      showPlayerBubble('"I could not store that safely. Please try again."');
+    } finally {
+      kitchenBagTransferBusyRef.current = false;
+    }
 
     audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
     if (plan.remainderQty > 0) {
@@ -4714,7 +4763,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
             </View>
           </View>
           <View ref={questBookTargetRef} collapsable={false}>
-            <QuestBookButton onBagUpdated={setPlayerBag} />
+            <QuestBookButton onBagUpdated={updatePlayerBagState} />
           </View>
           <View style={styles.rightHeaderColumn}>
             <View style={styles.rightHeader}>
@@ -5064,6 +5113,7 @@ if (enabledInDiningPrompt || enabledForTithe) {
       activeOpacity={0.8}
     >
       <Animated.View style={diningPulseStyle}>{renderLocContent(true)}</Animated.View>
+      <DiningGuestCountBadge count={guestCount} />
     </TouchableOpacity>
   );
 }
@@ -5131,6 +5181,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
               activeOpacity={0.8}
             >
               {renderLocContent(isEffectivelyActive)}
+              {isDiningBtn && <DiningGuestCountBadge count={guestCount} />}
               {isGardenBtn && harvestReady && <LocationStatusBadge kind="harvest" />}
               {loc.id === "dormitory" && sleepReady && <LocationStatusBadge kind="sleep" />}
               {loc.id === "mail" && mailboxUnread && <LocationStatusBadge kind="mail" />}
@@ -5699,8 +5750,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
         onClose={() => setBagOpen(false)}
         onTransferItem={(bagSlotIdx, item) => handleBagToTable(bagSlotIdx, item)}
         onBagUpdated={(nextBag) => {
-          setPlayerBag(nextBag);
-          playerBagRef.current = nextBag;
+          updatePlayerBagState(nextBag);
         }}
         onStatsUpdated={(nextStats) => {
           setPlayerStats(nextStats);
@@ -5932,7 +5982,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7, paddingVertical: 2, zIndex: 1000, elevation: 30,
   },
   plusFloatText: { color: "#FFF", fontSize: 12, fontFamily: "Oldenburg", fontWeight: "700" },
-  locationName: { color: "#F0E8D5", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 1, textAlign: "center", marginTop: 4 },
+  locationName: { color: "#F0E8D5", fontSize: 15, fontFamily: "Oldenburg", letterSpacing: 1, textAlign: "center", marginTop: 4 },
   rightHeaderColumn: { alignItems: "flex-end", alignSelf: "flex-start", gap: 4, marginLeft: 2, transform: [{ translateY: -2 }] },
   rightHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
   dayBadge: {

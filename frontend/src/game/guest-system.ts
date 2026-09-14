@@ -574,6 +574,53 @@ export function isGuestScheduled(
   return getGuestVisitDays(profile, favor).includes(normalizeWeekday(dayIndex));
 }
 
+/**
+ * Fixes the guest roster for the whole day before served guests are removed.
+ * This prevents lower-priority guests from moving into a slot later that day.
+ */
+function scheduledGuestRoster(
+  state: GuestState,
+  postGuestState: Awaited<ReturnType<typeof loadPostGuestTutorialState>>,
+  dayIndex: number,
+): GuestProfile[] {
+  const regularGuestsUnlocked = areRegularGuestsUnlockedForDay(postGuestState, state.calendarDaySerial);
+  const expandedGuestsUnlocked = areExpandedGuestsUnlockedForDay(postGuestState, state.calendarDaySerial);
+  const maximumGuests = expandedGuestsUnlocked ? CURRENT_MAX_DAILY_GUESTS + 1 : CURRENT_MAX_DAILY_GUESTS;
+  const favorFor = (profile: GuestProfile) => clampFavor(state.favors[profile.id] ?? profile.initialFavor);
+  const scheduled: GuestProfile[] = [OLD_FARMER_PROFILE].filter((profile) => (
+    isGuestScheduled(profile, dayIndex, favorFor(profile))
+  ));
+
+  if (regularGuestsUnlocked) {
+    if (isGuestScheduled(COACHMAN_PROFILE, dayIndex, favorFor(COACHMAN_PROFILE))) {
+      scheduled.push(COACHMAN_PROFILE);
+    }
+    if ((state.calendarDaySerial + 1) % 4 === 0) {
+      scheduled.push(MERCHANT_PROFILE);
+    }
+    if (scheduled.length < maximumGuests) {
+      scheduled.push(TRAVELER_PROFILE);
+    }
+    const rotatingGuest = state.calendarDaySerial % 2 === 0 ? CITY_GUARD_PROFILE : LOCAL_BOOZER_PROFILE;
+    if (expandedGuestsUnlocked && scheduled.length < maximumGuests) {
+      scheduled.push(rotatingGuest);
+    }
+  }
+
+  return scheduled.slice(0, maximumGuests);
+}
+
+/** Number of guests who are still present in the Dining Hall today. */
+export function countPresentGuests(
+  state: GuestState,
+  postGuestState: Awaited<ReturnType<typeof loadPostGuestTutorialState>>,
+  dayIndex: number,
+): number {
+  return scheduledGuestRoster(state, postGuestState, dayIndex).filter(
+    (profile) => state.servedDaySerial[profile.id] !== state.calendarDaySerial,
+  ).length;
+}
+
 export function rollExchangeOffer(
   pool: readonly GuestExchangeOffer[],
   randomValue = Math.random(),
@@ -641,32 +688,9 @@ function normalizePlayerBag(raw: string | null) {
 export async function prepareGuestsForDay(dayIndex: number): Promise<GuestVisitView[]> {
   let state = await syncGuestCalendar(dayIndex);
   const postGuestState = await loadPostGuestTutorialState();
-  const regularGuestsUnlocked = areRegularGuestsUnlockedForDay(postGuestState, state.calendarDaySerial);
-  const expandedGuestsUnlocked = areExpandedGuestsUnlockedForDay(postGuestState, state.calendarDaySerial);
-  const maximumGuests = expandedGuestsUnlocked ? CURRENT_MAX_DAILY_GUESTS + 1 : CURRENT_MAX_DAILY_GUESTS;
-
-  const favorFor = (profile: GuestProfile) => clampFavor(state.favors[profile.id] ?? profile.initialFavor);
-  const available = (profile: GuestProfile) => state.servedDaySerial[profile.id] !== state.calendarDaySerial;
-  const scheduled: GuestProfile[] = [OLD_FARMER_PROFILE].filter((profile) => (
-    isGuestScheduled(profile, dayIndex, favorFor(profile)) && available(profile)
-  ));
-  if (regularGuestsUnlocked) {
-    if (isGuestScheduled(COACHMAN_PROFILE, dayIndex, favorFor(COACHMAN_PROFILE)) && available(COACHMAN_PROFILE)) {
-      scheduled.push(COACHMAN_PROFILE);
-    }
-    // Day serial 0 is game day 1; the Merchant visits on game days 4, 8, 12, ...
-    if ((state.calendarDaySerial + 1) % 4 === 0 && available(MERCHANT_PROFILE)) {
-      scheduled.push(MERCHANT_PROFILE);
-    }
-    if (scheduled.length < maximumGuests && available(TRAVELER_PROFILE)) {
-      scheduled.push(TRAVELER_PROFILE);
-    }
-    const rotatingGuest = state.calendarDaySerial % 2 === 0 ? CITY_GUARD_PROFILE : LOCAL_BOOZER_PROFILE;
-    if (expandedGuestsUnlocked && scheduled.length < maximumGuests && available(rotatingGuest)) {
-      scheduled.push(rotatingGuest);
-    }
-  }
-  scheduled.splice(maximumGuests);
+  const scheduled = scheduledGuestRoster(state, postGuestState, dayIndex).filter(
+    (profile) => state.servedDaySerial[profile.id] !== state.calendarDaySerial,
+  );
   let changed = false;
 
   const scheduledIds = new Set(scheduled.map((profile) => profile.id));
@@ -691,7 +715,7 @@ export async function prepareGuestsForDay(dayIndex: number): Promise<GuestVisitV
       changed = true;
     }
 
-    const favor = favorFor(profile);
+    const favor = clampFavor(nextFavors[profile.id] ?? profile.initialFavor);
     const exchangePool = getGuestExchangePool(profile, favor);
     if (exchangePool.length === 0) {
       if (nextTrades[profile.id] !== undefined) {

@@ -7,6 +7,7 @@ import { useAudioManager } from "@/src/audio/AudioProvider";
 import { guestTutorialHasReached, loadGuestTutorialIntroStep } from "@/src/game/guest-tutorial";
 import { loadExploreNavigationUnlocked } from "@/src/game/travel-system";
 import {
+  DiningGuestCountBadge,
   LocationStatusBadge,
   useLocationStatusBadges,
 } from "@/src/components/location-status-badges";
@@ -30,7 +31,7 @@ type Props = {
 export default function TavernLocationBar({ current, mailboxUnread: mailboxUnreadOverride }: Props) {
   const router = useRouter();
   const audioManager = useAudioManager();
-  const { harvestReady, merchantPresent, mailboxUnread, receptionistPresent, sleepReady } = useLocationStatusBadges();
+  const { guestCount, harvestReady, merchantPresent, mailboxUnread, receptionistPresent, sleepReady } = useLocationStatusBadges();
   const showMailboxUnread = mailboxUnreadOverride ?? mailboxUnread;
   const [coreUnlocked, setCoreUnlocked] = useState(false);
   const [exploreUnlocked, setExploreUnlocked] = useState(false);
@@ -72,6 +73,7 @@ export default function TavernLocationBar({ current, mailboxUnread: mailboxUnrea
             }}
           >
             <Image source={location.image} style={[styles.image, !enabled && styles.imageLocked]} resizeMode="contain" />
+            {location.id === "dining" && <DiningGuestCountBadge count={guestCount} />}
             {location.id === "garden" && harvestReady && <LocationStatusBadge kind="harvest" />}
             {location.id === "dormitory" && sleepReady && <LocationStatusBadge kind="sleep" />}
             {location.id === "mail" && showMailboxUnread && <LocationStatusBadge kind="mail" />}

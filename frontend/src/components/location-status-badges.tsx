@@ -3,7 +3,7 @@ import { useFocusEffect } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 
-import { loadGuestState } from "@/src/game/guest-system";
+import { countPresentGuests, loadGuestState } from "@/src/game/guest-system";
 import {
   areRegularGuestsUnlockedForDay,
   loadPostGuestTutorialState,
@@ -21,6 +21,7 @@ const THIRD_GARDEN_PLOT_KEY = "@garden:plot_03_data";
 const FOURTH_GARDEN_PLOT_KEY = "@garden:plot_04_data";
 
 type LocationStatus = {
+  guestCount: number;
   harvestReady: boolean;
   merchantPresent: boolean;
   mailboxUnread: boolean;
@@ -34,6 +35,7 @@ type StoredGardenPlot = {
 };
 
 const DEFAULT_STATUS: LocationStatus = {
+  guestCount: 0,
   harvestReady: false,
   merchantPresent: false,
   mailboxUnread: false,
@@ -66,7 +68,7 @@ async function loadLocationStatus(): Promise<LocationStatus> {
   // player may be anywhere in the tavern. Process them before checking unread
   // mail so the badge does not wait until Courier's Chest is opened.
   await loadCityState();
-  const [primaryRaw, secondRaw, thirdRaw, fourthRaw, guestState, postGuestState, mailboxState, escortState, spentRaw] = await Promise.all([
+  const [primaryRaw, secondRaw, thirdRaw, fourthRaw, guestState, postGuestState, mailboxState, escortState, spentRaw, dayRaw] = await Promise.all([
     AsyncStorage.getItem(PRIMARY_GARDEN_PLOT_KEY),
     AsyncStorage.getItem(SECOND_GARDEN_PLOT_KEY),
     AsyncStorage.getItem(THIRD_GARDEN_PLOT_KEY),
@@ -76,6 +78,7 @@ async function loadLocationStatus(): Promise<LocationStatus> {
     loadMailboxState(),
     loadCoachmanEscortState(),
     AsyncStorage.getItem(STAMINA_SPENT_TODAY_KEY),
+    AsyncStorage.getItem("@game:day_index"),
   ]);
 
   // Match Outside the Tavern exactly. Serving the Merchant in Dining Hall must
@@ -83,6 +86,7 @@ async function loadLocationStatus(): Promise<LocationStatus> {
   const merchantDay = (guestState.calendarDaySerial + 1) % 4 === 0;
 
   return {
+    guestCount: countPresentGuests(guestState, postGuestState, Math.max(0, Number.parseInt(dayRaw ?? "0", 10) || 0)),
     harvestReady: [primaryRaw, secondRaw, thirdRaw, fourthRaw].some((raw) => plotIsReady(parsePlot(raw))),
     merchantPresent:
       merchantDay &&
@@ -144,6 +148,15 @@ export function LocationStatusBadge({ kind }: LocationStatusBadgeProps) {
   );
 }
 
+export function DiningGuestCountBadge({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <View pointerEvents="none" style={[styles.badge, styles.guestCountBadge]}>
+      <Text style={styles.badgeText}>{count}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   badge: {
     position: "absolute",
@@ -165,6 +178,9 @@ const styles = StyleSheet.create({
   },
   orangeBadge: {
     backgroundColor: "#D97706",
+  },
+  guestCountBadge: {
+    backgroundColor: "#2F9E44",
   },
   badgeText: {
     color: "#FFFFFF",

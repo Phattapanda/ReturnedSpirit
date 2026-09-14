@@ -135,7 +135,13 @@ export function normalizeBagItem(item: BagItem | null): BagItem | null {
   if (!item) return null;
   const id = normalizeItemId(item.id);
   const itemType = normalizeItemId(item.itemType);
-  const canonicalName = id === "white_meat" ? "White Meat" : id === "red_meat" ? "Red Meat" : item.name;
+  const canonicalName = id === "white_meat"
+    ? "White Meat"
+    : id === "red_meat"
+      ? "Red Meat"
+      : id === "monster_carcass" && item.monsterId === "wild_wolf"
+        ? "Wild Wolf Carcass"
+        : item.name;
   const normalized = { ...item, id, itemType, name: canonicalName };
   if (id === "tool_kitchen_knife") {
     const unlimited = { ...normalized };
@@ -440,8 +446,8 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
   fur: { name: "Fur", description: "Animal fur used in crafting.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   hide: { name: "Boar Hide", description: "A tough hide recovered from a Wild Boar.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   tusk: { name: "Boar Tusk", description: "A sturdy tusk recovered intact from a Wild Boar.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
-  wolf_pelt: { name: "Wolf Pelt", description: "A thick pelt from a forest wolf.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
-  fang: { name: "Large Fang", description: "A large fang preserved while processing a Forest Wolf.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  wolf_pelt: { name: "Wolf Pelt", description: "A thick pelt from a Wild Wolf.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  fang: { name: "Large Fang", description: "A large fang preserved while processing a Wild Wolf.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   slime_gel: { name: "Slime Gel", description: "Gel gathered from a defeated slime.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   weak_monster_core: { name: "Weak Monster Core", description: "A faintly glowing monster core.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   ember_feather: { name: "Ember Feather", description: "A warm feather from an Ember creature.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },

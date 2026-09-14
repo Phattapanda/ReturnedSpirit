@@ -209,7 +209,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5, borderColor: "rgba(196,148,58,0.38)", backgroundColor: "rgba(196,148,58,0.16)",
   },
   dayText: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 13 },
-  locationName: { color: "#F0E8D5", textAlign: "center", fontFamily: "Oldenburg", fontSize: 13, letterSpacing: 1, marginTop: 4 },
+  locationName: { color: "#F0E8D5", textAlign: "center", fontFamily: "Oldenburg", fontSize: 15, letterSpacing: 1, marginTop: 4 },
   portraitRow: {
     zIndex: 3, flexDirection: "row", justifyContent: "space-between", alignItems: "center",
     paddingHorizontal: 22, paddingVertical: 12,

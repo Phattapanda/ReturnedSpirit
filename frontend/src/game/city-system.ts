@@ -186,7 +186,7 @@ export async function loadCityState(): Promise<CityState> {
       await deliverMailboxMessage({
         id: `guild-processing-${entry.id}`, sender: "Adventurers' Guild", senderKind: "guild",
         subject: "Monster Processing Complete",
-        body: `The Guild Butcher has finished processing your ${definition?.carcassName ?? (wolf ? "Forest Wolf Carcass" : "Ember Chicken Carcass")}.`,
+        body: `The Guild Butcher has finished processing your ${definition?.carcassName ?? (wolf ? "Wild Wolf Carcass" : "Ember Chicken Carcass")}.`,
         rewards,
       });
       if (entry.id.startsWith("tutorial-wolf-")) {
@@ -729,6 +729,16 @@ export async function acceptQuest(id: QuestId): Promise<CityActionResult> {
 }
 
 function itemCount(bag: PlayerBagData, id: string): number { return bag.slots.reduce((sum, item) => sum + (item?.id === id ? item.quantity : 0), 0); }
+
+export function isQuestReadyToTurnIn(id: QuestId, state: CityState, bag: PlayerBagData): boolean {
+  const quest = state.quests[id];
+  if (quest.status !== "accepted" && quest.status !== "ready") return false;
+  if (id === "wolves") return quest.progress >= 2;
+  if (id === "feathers") return itemCount(bag, "mushroom") >= 2;
+  if (id === "camp") return itemCount(bag, "quest_hunters_documents") >= 1;
+  return id === "healing" && itemCount(bag, "potion_stamina_low_grade") >= 1;
+}
+
 function consumeItems(bag: PlayerBagData, id: string, quantity: number): PlayerBagData {
   let left = quantity; let next = bag;
   for (let i = 0; i < next.slots.length && left > 0; i += 1) { const item = next.slots[i]; if (item?.id !== id) continue; const used = Math.min(left, item.quantity); next = removeBagItem(next, i, used); left -= used; }
@@ -737,9 +747,9 @@ function consumeItems(bag: PlayerBagData, id: string, quantity: number): PlayerB
 
 export async function turnInQuest(id: QuestId): Promise<CityActionResult> {
   const state = await loadCityState(); const quest = state.quests[id]; if (quest.status !== "accepted" && quest.status !== "ready") return { ok: false, message: "That quest is not ready to turn in." };
-  let bag = await loadBag(); let requirementMet = id === "wolves" ? quest.progress >= 2 : false;
+  let bag = await loadBag(); const requirementMet = isQuestReadyToTurnIn(id, state, bag);
   const requirement = id === "feathers" ? ["mushroom", 2] as const : id === "camp" ? ["quest_hunters_documents", 1] as const : id === "healing" ? ["potion_stamina_low_grade", 1] as const : null;
-  if (requirement) { requirementMet = itemCount(bag, requirement[0]) >= requirement[1]; if (requirementMet) bag = consumeItems(bag, requirement[0], requirement[1]); }
+  if (requirementMet && requirement) bag = consumeItems(bag, requirement[0], requirement[1]);
   if (!requirementMet) return { ok: false, message: "The quest requirements are not complete yet." };
   const def = QUESTS[id]; state.guildReputation += def.reputation; state.quests[id] = { status: "completed", progress: quest.progress };
   await AsyncStorage.multiSet([[PLAYER_BAG_KEY, JSON.stringify(bag)], [CITY_STATE_KEY, JSON.stringify(state)]]);
@@ -858,7 +868,7 @@ export async function processTutorialWildWolf(): Promise<CityActionResult> {
   }
   const bag = await loadBag();
   const index = bag.slots.findIndex((item) => item?.id === "monster_carcass" && item.monsterId === "wild_wolf");
-  if (index < 0) return { ok: false, message: "I do not have the Forest Wolf Carcass." };
+  if (index < 0) return { ok: false, message: "I do not have the Wild Wolf Carcass." };
   const state = await loadCityState();
   const day = (await loadGuestState()).calendarDaySerial;
   const outputs = rollButcheringOutputs("wild_wolf", "tool_steel_butchering_knife", 0)

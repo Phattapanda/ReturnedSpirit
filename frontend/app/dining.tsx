@@ -37,6 +37,7 @@ import TavernLocationTransition from "@/src/components/tavern-location-transitio
 import CivilServantDialog from "@/src/components/CivilServantDialog";
 import RunEndingOverlay from "@/src/components/RunEndingOverlay";
 import {
+  DiningGuestCountBadge,
   LocationStatusBadge,
   notifyLocationStatusChanged,
   useLocationStatusBadges,
@@ -312,7 +313,7 @@ export default function DiningScreen() {
     clearManagedTimeout: clearTimeout,
   } = useManagedTimers();
   const router = useRouter();
-  const { harvestReady, mailboxUnread, merchantPresent, receptionistPresent, sleepReady } = useLocationStatusBadges();
+  const { guestCount, harvestReady, mailboxUnread, merchantPresent, receptionistPresent, sleepReady } = useLocationStatusBadges();
   const insets = useSafeAreaInsets();
   const { width: W, height: H } = useWindowDimensions();
   const audioManager = useAudioManager();
@@ -1750,6 +1751,7 @@ const locationAction = guestDormitoryBlocked
               activeOpacity={0.8}
             >
               {content}
+              {loc.id === "dining" && <DiningGuestCountBadge count={guestCount} />}
               {loc.id === "garden" && harvestReady && <LocationStatusBadge kind="harvest" />}
               {loc.id === "dormitory" && sleepReady && <LocationStatusBadge kind="sleep" />}
               {loc.id === "mail" && mailboxUnread && <LocationStatusBadge kind="mail" />}
@@ -1911,7 +1913,7 @@ const styles = StyleSheet.create({
   },
   lifeFill: { backgroundColor: "#CC2200" },
   statBarText: { color: "#F0E8D5", fontSize: 11, fontFamily: "Oldenburg", minWidth: 40, textAlign: "right" },
-  locationName: { color: "#F0E8D5", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 1, textAlign: "center", marginTop: 4 },
+  locationName: { color: "#F0E8D5", fontSize: 15, fontFamily: "Oldenburg", letterSpacing: 1, textAlign: "center", marginTop: 4 },
   rightHeaderColumn: { alignItems: "flex-end", alignSelf: "flex-start", gap: 4, marginLeft: 2, transform: [{ translateY: -2 }] },
   rightHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
   dayBadge: {

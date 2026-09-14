@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
-import { Animated, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions, type ImageSourcePropType } from "react-native";
+import { Animated, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions, type ImageSourcePropType } from "react-native";
 import Reanimated, { runOnJS, useAnimatedStyle, useSharedValue, withSequence, withTiming } from "react-native-reanimated";
 import { useEventListener } from "expo";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -17,8 +17,7 @@ import { useAudioManager } from "@/src/audio/AudioProvider";
 import { useHaptics } from "@/src/feedback/haptics-provider";
 import {
   FOREST_FLOOR_COUNT, FOREST_FORWARD_STAMINA_COST, FOREST_MONSTERS, FOREST_REST_FLOORS,
-  FOREST_SEARCH_BASE_SUCCESS, FOREST_SEARCH_PERCEPTION_BONUS,
-  getForestAttackPreview,
+  getForestAmbushCriticalChance, getForestAttackPreview, getForestHideChance, getForestSearchPreview,
   ambushHiddenForestMonster, attackForestMonster, bandageAtForestRestArea, defendAgainstForestMonster, escapeForestCombat,
   collectPendingForestCarcass, dismissPendingForestLoot, enterForestDungeon, forestAreaForFloor, goForwardInForest, hideFromForestMonster, leaveForestDungeon, letHiddenForestMonsterPass, searchForestArea,
   type DungeonActionResult, type ForestDungeonState, type ForestMonsterId,
@@ -44,6 +43,8 @@ const BACKGROUNDS: Record<ReturnType<typeof forestAreaForFloor>, ImageSourceProp
 const ELDER_EMBER_ROOSTER_BACKGROUND = require("../assets/images/forest_heart_boss.png");
 const HUNTERS_CAMP_BACKGROUND = require("../assets/images/hunters_camp.png");
 const EMBER_ROOSTER_ENCOUNTER_VIDEO = require("../assets/video/encounter_ember_rooster.mp4");
+const ELDER_EMBER_ROOSTER_ENCOUNTER_VIDEO = require("../assets/video/entrance_boss_elder_ember_rooster.mp4");
+const ENCOUNTER_SKIP_HOLD_MS = 900;
 const MONSTER_IMAGES: Record<ForestMonsterId, ImageSourcePropType> = {
   forest_slime: require("../assets/images/forest_slime.png"),
   feral_rabbit: require("../assets/images/feral_rabbit.png"),
@@ -124,10 +125,10 @@ export default function ForestEntranceScreen() {
   const [combatBag, setCombatBag] = useState<PlayerBagData>(DEFAULT_BAG);
   const [karmaPoints, setKarmaPoints] = useState(0);
   const [deathError, setDeathError] = useState<string | null>(null);
-  const [entryConfirmed, setEntryConfirmed] = useState(false);
   const [returnNarrationVisible, setReturnNarrationVisible] = useState(false);
   const [emberRoosterEncounterSeen, setEmberRoosterEncounterSeen] = useState<boolean | null>(null);
   const [encounterVideoVisible, setEncounterVideoVisible] = useState(false);
+  const [bossEncounterVideoVisible, setBossEncounterVideoVisible] = useState(false);
   const [supporter, setSupporter] = useState<Awaited<ReturnType<typeof activeSupporter>>>(null);
   const [supporterBag, setSupporterBag] = useState<PlayerBagData | null>(null);
   const [supporterBagOpen, setSupporterBagOpen] = useState(false);
@@ -158,7 +159,13 @@ export default function ForestEntranceScreen() {
   const floorBlackStyle = useAnimatedStyle(() => ({ opacity: floorBlackOpacity.value }));
   const encounterVideoVisibleRef = useRef(false);
   const encounterCompletionRef = useRef(false);
+  const bossEncounterVideoVisibleRef = useRef(false);
+  const bossEncounterCompletionRef = useRef(false);
+  const bossEncounterPlayedRef = useRef(false);
   const encounterVideoPlayer = useVideoPlayer(EMBER_ROOSTER_ENCOUNTER_VIDEO, (player) => {
+    player.loop = false;
+  });
+  const bossEncounterVideoPlayer = useVideoPlayer(ELDER_EMBER_ROOSTER_ENCOUNTER_VIDEO, (player) => {
     player.loop = false;
   });
 
@@ -183,8 +190,23 @@ export default function ForestEntranceScreen() {
     if (status === "error") void finishEmberRoosterEncounter();
   });
 
+  const finishBossEncounter = useCallback(() => {
+    if (!bossEncounterVideoVisibleRef.current || bossEncounterCompletionRef.current) return;
+    bossEncounterCompletionRef.current = true;
+    bossEncounterPlayedRef.current = true;
+    bossEncounterVideoVisibleRef.current = false;
+    try { bossEncounterVideoPlayer.pause(); } catch {}
+    setBossEncounterVideoVisible(false);
+  }, [bossEncounterVideoPlayer]);
+
+  useEventListener(bossEncounterVideoPlayer, "playToEnd", finishBossEncounter);
+
+  useEventListener(bossEncounterVideoPlayer, "statusChange", ({ status }) => {
+    // A decoding error must never block the boss battle.
+    if (status === "error") finishBossEncounter();
+  });
+
   useFocusEffect(useCallback(() => {
-    if (!entryConfirmed) return undefined;
     let active = true;
     Promise.all([enterForestDungeon(), AsyncStorage.getItem("@game:life"), loadProgressionState(), AsyncStorage.getItem(PLAYER_STATS_KEY), AsyncStorage.getItem(EMBER_ROOSTER_ENCOUNTER_SEEN_KEY), AsyncStorage.getItem(PLAYER_BAG_KEY)]).then(([loaded, rawLife, progression, rawStats, rawEncounterSeen, rawBag]) => {
       if (!active) return;
@@ -201,9 +223,11 @@ export default function ForestEntranceScreen() {
       active = false;
       encounterVideoVisibleRef.current = false;
       try { encounterVideoPlayer.pause(); } catch {}
+      bossEncounterVideoVisibleRef.current = false;
+      try { bossEncounterVideoPlayer.pause(); } catch {}
       stopGameplayMusic(600);
     };
-  }, [encounterVideoPlayer, entryConfirmed, stopGameplayMusic]));
+  }, [bossEncounterVideoPlayer, encounterVideoPlayer, stopGameplayMusic]));
 
   const floorNumber = state?.currentFloor ?? 1;
   const area = forestAreaForFloor(floorNumber);
@@ -220,11 +244,12 @@ export default function ForestEntranceScreen() {
   const locationName = `${area} - ${floorNumber}/${FOREST_FLOOR_COUNT}`;
   const monsterLifePercent = monsterState ? Math.max(0, Math.min(1, monsterState.life / monsterState.maximumLife)) : 0;
   const isEmberRoosterEncounter = monsterState?.id === "ember_rooster" && monsterState.phase !== "defeated";
+  const isBossEncounter = currentLife > 0 && monsterState?.id === "elder_ember_rooster" && monsterState.phase === "combat";
 
   useEffect(() => {
-    setGameplayBackBlocked(currentLife <= 0);
+    setGameplayBackBlocked(currentLife <= 0 || encounterVideoVisible || bossEncounterVideoVisible);
     return () => setGameplayBackBlocked(false);
-  }, [currentLife]);
+  }, [bossEncounterVideoVisible, currentLife, encounterVideoVisible]);
 
   useEffect(() => {
     if (!isEmberRoosterEncounter || emberRoosterEncounterSeen !== false || encounterVideoVisibleRef.current) return;
@@ -248,15 +273,40 @@ export default function ForestEntranceScreen() {
   }, [encounterVideoPlayer, encounterVideoVisible, finishEmberRoosterEncounter, stopGameplayMusic]);
 
   useEffect(() => {
+    if (!isBossEncounter) {
+      bossEncounterPlayedRef.current = false;
+      return;
+    }
+    if (bossEncounterPlayedRef.current || bossEncounterVideoVisibleRef.current) return;
+    bossEncounterCompletionRef.current = false;
+    bossEncounterVideoVisibleRef.current = true;
+    setBossEncounterVideoVisible(true);
+  }, [isBossEncounter]);
+
+  useEffect(() => {
+    if (!bossEncounterVideoVisible) return;
+    stopGameplayMusic(0);
+    try {
+      bossEncounterVideoPlayer.currentTime = 0;
+      bossEncounterVideoPlayer.play();
+    } catch {
+      finishBossEncounter();
+    }
+    return () => {
+      try { bossEncounterVideoPlayer.pause(); } catch {}
+    };
+  }, [bossEncounterVideoPlayer, bossEncounterVideoVisible, finishBossEncounter, stopGameplayMusic]);
+
+  useEffect(() => {
     if (currentLife <= 0) { stopGameplayMusic(500); return; }
-    if (encounterVideoVisible || (isEmberRoosterEncounter && emberRoosterEncounterSeen !== true)) { stopGameplayMusic(0); return; }
+    if (encounterVideoVisible || bossEncounterVideoVisible || (isEmberRoosterEncounter && emberRoosterEncounterSeen !== true) || (isBossEncounter && !bossEncounterPlayedRef.current)) { stopGameplayMusic(0); return; }
     if (isRestArea) { crossfadeTo("rest-area", 650); return; }
     if (monsterState?.phase === "combat") {
       crossfadeTo(monster?.boss ? "boss-battle" : currentLife * 2 >= maximumLife ? "battle-over50" : "battle-under50", 600);
       return;
     }
     stopGameplayMusic(600);
-  }, [crossfadeTo, currentLife, emberRoosterEncounterSeen, encounterVideoVisible, isEmberRoosterEncounter, isRestArea, maximumLife, monster?.boss, monsterState?.phase, stopGameplayMusic]);
+  }, [bossEncounterVideoVisible, crossfadeTo, currentLife, emberRoosterEncounterSeen, encounterVideoVisible, isBossEncounter, isEmberRoosterEncounter, isRestArea, maximumLife, monster?.boss, monsterState?.phase, stopGameplayMusic]);
 
   useEffect(() => { if (floor?.message) setMessage(floor.message); }, [floor?.message, floorNumber]);
 
@@ -415,6 +465,7 @@ export default function ForestEntranceScreen() {
       const progression = await loadProgressionState();
       setKarmaPoints(progression.karmaPoints);
       if (!result) { setDeathError("The fight cannot be repeated or there are not enough KP."); return; }
+      bossEncounterPlayedRef.current = false;
       setState({ ...result.state, floors: { ...result.state.floors } });
       setCurrentLife(result.life); setCombatBag(result.bag); setMessage(result.message); setHeaderRefreshKey((value) => value + 1);
     } finally { setBusy(false); }
@@ -508,6 +559,17 @@ export default function ForestEntranceScreen() {
     head: getForestAttackPreview(monsterState.id, "head", combatStats, combatBag),
     body: getForestAttackPreview(monsterState.id, "body", combatStats, combatBag),
   } : null, [combatBag, combatStats, monsterState]);
+  const searchPreview = useMemo(() => floor ? getForestSearchPreview(
+    floor.searchCost,
+    combatStats,
+    combatBag,
+    supporter?.definition.id === "botanist",
+  ) : null, [combatBag, combatStats, floor, supporter?.definition.id]);
+  const searchChanceLabel = searchPreview
+    ? Number.isInteger(searchPreview.successChance)
+      ? String(searchPreview.successChance)
+      : searchPreview.successChance.toFixed(1)
+    : "";
   const attackSubtitle = (target: "head" | "body") => {
     const preview = attackPreviews?.[target];
     if (!preview) return "";
@@ -526,7 +588,10 @@ export default function ForestEntranceScreen() {
       <ActionButton label="Continue" subtitle={`${FOREST_FORWARD_STAMINA_COST} Stamina`} disabled={busy} onPress={() => { void goForwardWithTransition(); }} />
       <ActionButton label="Leave Dungeon" disabled={busy} onPress={() => { void leaveSafely(); }} />
     </>;
-    if (monsterState?.phase === "noticed") return <ActionButton label="Hide" subtitle="50% + Luck chance to remain unseen" disabled={busy} onPress={() => { void perform(hideFromForestMonster); }} />;
+    if (monsterState?.phase === "noticed") return <View style={styles.combatGrid}>
+      <ActionButton label="Ambush" subtitle={`+50% damage · ${getForestAmbushCriticalChance(combatStats)}% critical chance`} disabled={busy} onPress={() => { void perform(ambushHiddenForestMonster); }} />
+      <ActionButton label="Hide" subtitle={`${getForestHideChance(combatStats)}% chance · Let the monster pass`} disabled={busy} onPress={() => { void perform(hideFromForestMonster); }} />
+    </View>;
     if (monsterState?.phase === "hidden") return <View style={styles.combatGrid}>
       <ActionButton label="Ambush" subtitle="Critical damage · Keep the initiative" disabled={busy} onPress={() => { void perform(ambushHiddenForestMonster); }} />
       <ActionButton label="Hide" subtitle="Let the monster pass · Search the area" disabled={busy} onPress={() => { void perform(letHiddenForestMonsterPass); }} />
@@ -543,12 +608,12 @@ export default function ForestEntranceScreen() {
     </View>;
     if (bossCleared) return <ActionButton label="Leave Cleared Dungeon" subtitle="Return safely to the tavern" disabled={busy} onPress={() => { void leaveSafely(); }} />;
     return <>
-      <ActionButton label="Search the area" subtitle={floor.searchAvailable && !floor.searched ? `${floor.searchCost} Stamina · ${FOREST_SEARCH_BASE_SUCCESS}% + ${FOREST_SEARCH_PERCEPTION_BONUS}% per Perception` : "Already searched"} disabled={busy || !floor.searchAvailable || floor.searched} onPress={() => { void perform(searchForestArea); }} />
+      <ActionButton label="Search the area" subtitle={floor.searchAvailable && !floor.searched && searchPreview ? `${searchPreview.staminaCost} Stamina · ${searchChanceLabel}% success chance` : "Already searched"} disabled={busy || !floor.searchAvailable || floor.searched} onPress={() => { void perform(searchForestArea); }} />
       <ActionButton label="Go forward" subtitle={`${FOREST_FORWARD_STAMINA_COST} Stamina`} disabled={busy} onPress={() => { void goForwardWithTransition(); }} />
     </>;
   // perform is intentionally bound to current screen state.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attackPreviews, bossCleared, busy, currentLife, floor, isRestArea, monsterState?.phase, router, state]);
+  }, [attackPreviews, bossCleared, busy, combatStats, currentLife, floor, isRestArea, monsterState?.phase, router, searchChanceLabel, searchPreview, state]);
 
   return <View style={styles.root}>
     <Reanimated.View pointerEvents="none" style={[StyleSheet.absoluteFill, floorBackgroundStyle]}>
@@ -625,22 +690,6 @@ export default function ForestEntranceScreen() {
         <TouchableOpacity onPress={() => setSupporterAction(null)}><Text style={styles.supporterHint}>Cancel</Text></TouchableOpacity>
       </View></View>
     </Modal>
-    <Modal visible={!entryConfirmed} transparent animationType="fade" onRequestClose={() => router.back()}>
-      <View style={styles.warningBackdrop}>
-        <View style={styles.warningPanel}>
-          <Text selectable style={styles.warningTitle}>Before you enter</Text>
-          <Text selectable style={styles.warningText}>When you return from the Forest Entrance, the day will end.</Text>
-          <View style={styles.warningButtons}>
-            <TouchableOpacity style={styles.warningCancel} onPress={() => router.back()} activeOpacity={0.8}>
-              <Text style={styles.warningButtonText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.warningEnter} onPress={() => setEntryConfirmed(true)} activeOpacity={0.8}>
-              <Text style={styles.warningButtonText}>Enter Dungeon</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    </Modal>
     {returnNarrationVisible ? (
       <Animated.View pointerEvents="auto" style={[StyleSheet.absoluteFill, styles.returnFade, { opacity: returnFade }]}>
         <Text selectable style={styles.returnNarration}>You fall into bed, dead tired.</Text>
@@ -657,6 +706,20 @@ export default function ForestEntranceScreen() {
         />
       </View>
     ) : null}
+    {bossEncounterVideoVisible ? (
+      <View style={[StyleSheet.absoluteFill, styles.encounterVideoOverlay]}>
+        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+          <VideoView
+            style={StyleSheet.absoluteFill}
+            player={bossEncounterVideoPlayer}
+            nativeControls={false}
+            contentFit="cover"
+            playsInline
+          />
+        </View>
+        <HoldToSkipEncounter onSkip={finishBossEncounter} />
+      </View>
+    ) : null}
     {floorTransitionActive ? (
       <Reanimated.View
         pointerEvents="auto"
@@ -664,6 +727,56 @@ export default function ForestEntranceScreen() {
       />
     ) : null}
   </View>;
+}
+
+function HoldToSkipEncounter({ onSkip }: { onSkip: () => void }) {
+  const insets = useSafeAreaInsets();
+  const [holdActive, setHoldActive] = useState(false);
+  const holdProgress = useRef(new Animated.Value(0)).current;
+  const skipTimerRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (skipTimerRef.current) globalThis.clearTimeout(skipTimerRef.current);
+    holdProgress.stopAnimation();
+  }, [holdProgress]);
+
+  function handlePressIn() {
+    if (skipTimerRef.current) globalThis.clearTimeout(skipTimerRef.current);
+    setHoldActive(true);
+    holdProgress.setValue(0);
+    Animated.timing(holdProgress, {
+      toValue: 1,
+      duration: ENCOUNTER_SKIP_HOLD_MS,
+      useNativeDriver: false,
+    }).start();
+    skipTimerRef.current = globalThis.setTimeout(() => {
+      skipTimerRef.current = null;
+      onSkip();
+    }, ENCOUNTER_SKIP_HOLD_MS);
+  }
+
+  function handlePressOut() {
+    if (skipTimerRef.current) {
+      globalThis.clearTimeout(skipTimerRef.current);
+      skipTimerRef.current = null;
+    }
+    setHoldActive(false);
+    holdProgress.stopAnimation();
+    Animated.timing(holdProgress, { toValue: 0, duration: 120, useNativeDriver: false }).start();
+  }
+
+  const holdWidth = holdProgress.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] });
+  return <Pressable
+    testID="boss-encounter-hold-to-skip"
+    style={StyleSheet.absoluteFill}
+    onPressIn={handlePressIn}
+    onPressOut={handlePressOut}
+  >
+    <View pointerEvents="none" style={[styles.skipWrap, { bottom: insets.bottom + 24 }]}>
+      <Text style={styles.skipText}>{holdActive ? "Keep holding..." : "Hold to skip"}</Text>
+      <View style={styles.skipTrack}><Animated.View style={[styles.skipProgress, { width: holdWidth }]} /></View>
+    </View>
+  </Pressable>;
 }
 
 const styles = StyleSheet.create({
@@ -710,4 +823,8 @@ const styles = StyleSheet.create({
   returnFade: { zIndex: 5000, alignItems: "center", justifyContent: "center", paddingHorizontal: 28, backgroundColor: "#000" },
   returnNarration: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 18, lineHeight: 27, textAlign: "center" },
   encounterVideoOverlay: { zIndex: 6000, backgroundColor: "#000" },
+  skipWrap: { position: "absolute", left: 28, right: 28, alignItems: "center" },
+  skipText: { color: "rgba(255,255,255,0.88)", fontSize: 13, letterSpacing: 0.4, marginBottom: 8, textShadowColor: "rgba(0,0,0,0.75)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
+  skipTrack: { width: 150, height: 3, borderRadius: 2, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.22)" },
+  skipProgress: { height: 3, borderRadius: 2, backgroundColor: "rgba(245,230,200,0.95)" },
 });

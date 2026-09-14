@@ -10,9 +10,10 @@ import TravelHeader from "@/src/components/travel-header";
 import StoryDialogOverlay, { type StoryDialogLine } from "@/src/components/story-dialog-overlay";
 import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
 import { useAudioManager } from "@/src/audio/AudioProvider";
-import { calculateIncomingPhysicalDamage, consumeArmorDurability, consumeWeaponDurability, getEquippedItem } from "@/src/game/equipment-system";
-import { DEFAULT_BAG, ITEM_ATTRIBUTE, ITEM_CATALOG, PLAYER_BAG_KEY, normalizePlayerBagData, planAddToBag, type BagItem, type PlayerBagData } from "@/src/game/item-system";
+import { calculateIncomingPhysicalDamage, consumeArmorDurability, consumeWeaponDurability, getEquippedItem, rollPlayerPhysicalDamage } from "@/src/game/equipment-system";
+import { DEFAULT_BAG, ITEM_ATTRIBUTE, PLAYER_BAG_KEY, normalizePlayerBagData, planAddToBag, type BagItem, type PlayerBagData } from "@/src/game/item-system";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
+import { FOREST_MONSTERS, getForestAttackPreview } from "@/src/game/forest-dungeon-system";
 import { setCoachmanEscortPhase } from "@/src/game/coachman-escort-system";
 import { unlockNextCityAfterEscort } from "@/src/game/travel-system";
 import { PLAYER_AVATAR_KEY, normalizePlayerAvatarId, type PlayerAvatarId } from "@/src/game/player-avatar";
@@ -26,6 +27,7 @@ import { beginChosenNextRun } from "@/src/game/death-angel-system";
 const COACHMAN = DIALOG_CHARACTER_ASSETS.coachman;
 const WOLF = require("../assets/images/wild_wolf.png");
 const SLASH = require("../assets/images/slash.png");
+const CRITICAL = require("../assets/images/critical.png");
 const PUNCH = require("../assets/images/punch.png");
 const CARCASS = require("../assets/images/monster_carcass.png");
 const BACKGROUND = require("../assets/images/battle_tutorial.png");
@@ -33,6 +35,10 @@ const WOLF_MAX_LIFE = 18;
 const AVATAR3_BATTLE_TUTORIAL_SCALE_MULTIPLIER = 1.1;
 
 type Phase = "journey" | "combat" | "victory" | "post" | "leaving";
+
+function rollPercentage(): number {
+  return Math.random() * 100;
+}
 
 function TutorialCombatMessage({ message }: { message: string }) {
   const sentences = message.match(/[^.!?]+[.!?]?/g) ?? [message];
@@ -60,14 +66,13 @@ function preBattleLines(playerName: string, playerPortrait: ImageSourcePropType,
 
 function postBattleLines(playerName: string, playerPortrait: ImageSourcePropType, playerScale: number, playerAspectRatio?: number): StoryDialogLine[] {
   return [
-    { speaker: "Coachman", portrait: COACHMAN, characterScale: COACHMAN_DIALOG_SCALE, text: "That was a close one… A wild wolf this close to the road? I’ll have to report this to the Adventurers’ Guild when we reach town." },
+    { speaker: "Coachman", portrait: COACHMAN, characterScale: COACHMAN_DIALOG_SCALE, text: "That was a close one… A Wild Wolf this close to the road?" },
     { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, characterAspectRatio: playerAspectRatio, text: "What about the carcass?" },
     { speaker: "Coachman", portrait: COACHMAN, characterScale: COACHMAN_DIALOG_SCALE, text: "Keep it. You earned it." },
     { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, characterAspectRatio: playerAspectRatio, text: "The whole thing?" },
     { speaker: "Coachman", portrait: COACHMAN, characterScale: COACHMAN_DIALOG_SCALE, text: "Of course. The Adventurers’ Guild has butchers who can process monster carcasses for you. They’ll extract whatever useful materials they can and send them to you afterward." },
     { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, characterAspectRatio: playerAspectRatio, text: "Sounds convenient." },
-    { speaker: "Coachman", portrait: COACHMAN, characterScale: COACHMAN_DIALOG_SCALE, text: "It is. Though you can always take the carcass home and butcher it yourself." },
-    { speaker: "Coachman", portrait: COACHMAN, characterScale: COACHMAN_DIALOG_SCALE, text: "You’ll need a Butchering Knife. A better knife usually means a better chance of getting more usable materials from the carcass." },
+    { speaker: "Coachman", portrait: COACHMAN, characterScale: COACHMAN_DIALOG_SCALE, text: "Though if you have a Butchering Knife you can butcher it yourself at home." },
     { speaker: playerName, portrait: playerPortrait, playerPortrait: true, characterScale: playerScale, characterAspectRatio: playerAspectRatio, text: "Good to know. I’ll take it with me for now." },
     { speaker: "Coachman", portrait: COACHMAN, characterScale: COACHMAN_DIALOG_SCALE, text: "Just don’t put it too close to my cargo." },
   ];
@@ -115,10 +120,11 @@ export default function CoachmanEscortScreen() {
   const [actionPanelHeight, setActionPanelHeight] = useState<number | null>(null);
   const [combatMessageHeight, setCombatMessageHeight] = useState(58);
   const [combatMessage, setCombatMessage] = useState("A Wild Wolf blocks the road.");
-  const [attackEffect, setAttackEffect] = useState<ImageSourcePropType>(SLASH);
   const [runTransitionBusy, setRunTransitionBusy] = useState(false);
   const wolfOpacity = useRef(new Animated.Value(1)).current;
   const slashOpacity = useRef(new Animated.Value(0)).current;
+  const criticalOpacity = useRef(new Animated.Value(0)).current;
+  const punchOpacity = useRef(new Animated.Value(0)).current;
   const redFlash = useRef(new Animated.Value(0)).current;
   const blackFade = useRef(new Animated.Value(1)).current;
   const carcassAnim = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
@@ -136,14 +142,16 @@ export default function CoachmanEscortScreen() {
   const postLines = useMemo(() => postBattleLines(playerName, playerPortrait, playerScale, playerAspectRatio), [playerAspectRatio, playerName, playerPortrait, playerScale]);
   const activeLines = phase === "journey" ? preLines : postLines;
   const wideBattleLayout = screenWidth >= 400;
-  const predictedAttackDamage = useMemo(() => {
-    const weapon = getEquippedItem(combatBag, "weapon");
-    const baseDamage = weapon
-      ? Math.max(1, (ITEM_CATALOG[weapon.id]?.damageMax ?? 1) + stats.strength - 3)
-      : Math.max(1, stats.strength);
-    return turn === 1 ? baseDamage * 2 : baseDamage;
-  }, [combatBag, stats.strength, turn]);
-  const attackSubtitle = (hitChance: number) => `${predictedAttackDamage} dmg · ${hitChance}% hit chance`;
+  const attackPreview = useMemo(() => {
+    return {
+      body: getForestAttackPreview("wild_wolf", "body", stats, combatBag),
+      head: getForestAttackPreview("wild_wolf", "head", stats, combatBag),
+    };
+  }, [combatBag, stats]);
+  const attackSubtitle = (target: "head" | "body") => {
+    const preview = attackPreview[target];
+    return `${preview.minimumDamage}–${preview.maximumDamage} dmg · ${preview.hitChance}% hit chance`;
+  };
 
   useEffect(() => {
     setActionPanelHeight(null);
@@ -282,12 +290,19 @@ export default function CoachmanEscortScreen() {
       showThought("I have no chance with my fist alone. I need to equip my weapon.", true);
       return;
     }
-    const baseDamage = weapon
-      ? Math.max(1, (ITEM_CATALOG[weapon.id]?.damageMax ?? 1) + stats.strength - 3)
-      : Math.max(1, stats.strength);
-    const damage = turn === 1 ? baseDamage * 2 : baseDamage;
+    const criticalHit = turn === 1;
+    if (!criticalHit && rollPercentage() >= attackPreview[target].hitChance) {
+      const missMessage = `My attack against the Wild Wolf's ${target} misses.`;
+      setCombatMessage(missMessage);
+      playSoundEffect("attack-miss", { maxDurationMs: 3000 });
+      setTimeout(() => { void wolfAttacks(bag, false, missMessage); }, 520);
+      return;
+    }
+    const rolledDamage = Math.max(1, rollPlayerPhysicalDamage(stats.strength, FOREST_MONSTERS.wild_wolf.physicalDefense, weapon));
+    const targetedDamage = target === "head" ? Math.ceil(rolledDamage * 1.5) : rolledDamage;
+    const damage = criticalHit ? targetedDamage * 2 : targetedDamage;
     const nextWolfLife = Math.max(0, wolfLife - damage);
-    const attackMessage = turn === 1
+    const attackMessage = criticalHit
       ? `I strike the Wild Wolf critically for ${damage} damage.`
       : `I hit the Wild Wolf's ${target} for ${damage} damage.`;
     if (weapon) bag = consumeWeaponDurability(bag);
@@ -296,11 +311,14 @@ export default function CoachmanEscortScreen() {
     setWolfLife(nextWolfLife); setHeaderRefreshKey((value) => value + 1);
     setCombatMessage(attackMessage);
     playSoundEffect(weapon ? "sword-hit" : "combat-impact", { maxDurationMs: 3000 });
-    setAttackEffect(weapon ? SLASH : PUNCH);
-    slashOpacity.setValue(1);
-    Animated.timing(slashOpacity, { toValue: 0, duration: 480, useNativeDriver: true }).start();
+    slashOpacity.setValue(0);
+    criticalOpacity.setValue(0);
+    punchOpacity.setValue(0);
+    const activeEffectOpacity = criticalHit ? criticalOpacity : weapon ? slashOpacity : punchOpacity;
+    activeEffectOpacity.setValue(1);
+    Animated.timing(activeEffectOpacity, { toValue: 0, duration: 480, useNativeDriver: true }).start();
     flashWolf();
-    if (nextWolfLife <= 0) { setBusy(false); setTimeout(() => { void finishWolf(bag); }, 280); return; }
+    if (nextWolfLife <= 0) { setBusy(false); setTimeout(() => { void finishWolf(bag, attackMessage); }, 480); return; }
     setTimeout(() => { void wolfAttacks(bag, false, attackMessage); }, 520);
   }
 
@@ -326,7 +344,7 @@ export default function CoachmanEscortScreen() {
 
   async function addWolfCarcass(sourceBag?: PlayerBagData): Promise<boolean> {
     const bag = sourceBag ?? await loadBag();
-    const carcass: BagItem = { id: "monster_carcass", itemType: "monster_carcass", name: "Forest Wolf Carcass", quantity: 1, monsterId: "wild_wolf", attributes: [ITEM_ATTRIBUTE.MATERIAL] };
+    const carcass: BagItem = { id: "monster_carcass", itemType: "monster_carcass", name: "Wild Wolf Carcass", quantity: 1, monsterId: "wild_wolf", attributes: [ITEM_ATTRIBUTE.MATERIAL] };
     const plan = planAddToBag(carcass, bag);
     if (!plan.canTransfer || plan.remainderQty > 0) return false;
     await AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify({ ...bag, slots: plan.updatedSlots }));
@@ -334,12 +352,12 @@ export default function CoachmanEscortScreen() {
     return true;
   }
 
-  async function finishWolf(bag: PlayerBagData) {
+  async function finishWolf(bag: PlayerBagData, finalAttackMessage: string) {
     if (!wolfKarmaGrantedRef.current) {
       wolfKarmaGrantedRef.current = true;
       await addKarmaPoints(3);
     }
-    setCombatMessage("I defeat the Wild Wolf.");
+    setCombatMessage(`${finalAttackMessage} I defeat the Wild Wolf.`);
     playSoundEffect("victory", { maxDurationMs: 8000 });
     setPhase("victory");
     Animated.timing(wolfOpacity, { toValue: 0, duration: 1000, useNativeDriver: true }).start(async () => {
@@ -418,7 +436,9 @@ export default function CoachmanEscortScreen() {
           <Reanimated.View style={[styles.wolfAttackWrapper, { height: wolfHeight }, wolfAttackStyle]}>
             <Animated.Image source={WOLF} style={[styles.wolf, { opacity: wolfOpacity }]} resizeMode="contain" />
           </Reanimated.View>
-          <Animated.Image source={attackEffect} style={[styles.slashEffect, { height: wolfHeight, opacity: slashOpacity }]} resizeMode="contain" />
+          <Animated.Image source={SLASH} style={[styles.slashEffect, { height: wolfHeight, opacity: slashOpacity }]} resizeMode="contain" />
+          <Animated.Image source={CRITICAL} style={[styles.slashEffect, { height: wolfHeight, opacity: criticalOpacity }]} resizeMode="contain" />
+          <Animated.Image source={PUNCH} style={[styles.slashEffect, { height: wolfHeight, opacity: punchOpacity }]} resizeMode="contain" />
           {phase === "victory" ? <Animated.Image source={CARCASS} style={[styles.carcass, { opacity: carcassOpacity, transform: carcassAnim.getTranslateTransform() }]} resizeMode="contain" /> : null}
           <View style={styles.lifeRow}><Text style={styles.monsterName}>Wild Wolf:</Text><View style={styles.lifeTrack}><View style={[styles.lifeFill, { width: `${wolfLife / WOLF_MAX_LIFE * 100}%` }]} /></View><Text style={styles.lifeText}>{wolfLife}/{WOLF_MAX_LIFE}</Text></View>
         </View>
@@ -435,14 +455,14 @@ export default function CoachmanEscortScreen() {
           }}>
             {wideBattleLayout ? (
               <View style={styles.actionRow}>
-                <Action label="Attack Head" subtitle={attackSubtitle(45)} onPress={() => { void playerAction("head"); }} disabled={busy} />
-                <Action label="Attack Body" subtitle={attackSubtitle(75)} onPress={() => { void playerAction("body"); }} disabled={busy} />
+                <Action label="Attack Head" subtitle={attackSubtitle("head")} onPress={() => { void playerAction("head"); }} disabled={busy} />
+                <Action label="Attack Body" subtitle={attackSubtitle("body")} onPress={() => { void playerAction("body"); }} disabled={busy} />
                 <Action label="Defend" subtitle="Prepare for the attack" onPress={() => { void defendAction(); }} disabled={busy} />
                 <Action label="Run" subtitle="Unavailable" onPress={runBlocked} disabled={busy} danger />
               </View>
             ) : (
               <>
-                <View style={styles.actionRow}><Action label="Attack Head" subtitle={attackSubtitle(45)} onPress={() => { void playerAction("head"); }} disabled={busy} /><Action label="Attack Body" subtitle={attackSubtitle(75)} onPress={() => { void playerAction("body"); }} disabled={busy} /></View>
+                <View style={styles.actionRow}><Action label="Attack Head" subtitle={attackSubtitle("head")} onPress={() => { void playerAction("head"); }} disabled={busy} /><Action label="Attack Body" subtitle={attackSubtitle("body")} onPress={() => { void playerAction("body"); }} disabled={busy} /></View>
                 <View style={styles.actionRow}><Action label="Defend" subtitle="Prepare for the attack" onPress={() => { void defendAction(); }} disabled={busy} /><Action label="Run" subtitle="Unavailable" onPress={runBlocked} disabled={busy} danger /></View>
               </>
             )}

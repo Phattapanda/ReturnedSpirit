@@ -54,6 +54,7 @@ import TavernLocationTransition from "@/src/components/tavern-location-transitio
 import { notifyLocationStatusChanged } from "@/src/components/location-status-badges";
 import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
+import { isRupertAlchemyIntroPending } from "@/src/game/rupert-alchemy-intro";
 import { setPlaytimePaused } from "@/src/game/playtime-tracker";
 import { loadGuestTutorialIntroStep } from "@/src/game/guest-tutorial";
 import { ELAPSED_DAYS_KEY, prepareTitheForDay } from "@/src/game/tithe-system";
@@ -240,6 +241,7 @@ export default function DormitoryScreen() {
   const [sleepTransitioning, setSleepTransitioning] = useState(false);
   const isDayTransitionRef = useRef(false);
   const downstairsLocked   = useRef(false);
+  const rupertAlchemyIntroPendingRef = useRef(false);
   const bagDropTargetRef = useRef<View>(null);
 
   // ── Animations
@@ -819,7 +821,13 @@ export default function DormitoryScreen() {
   // ─────────────────────────────────────────────────────────────────────────
   function afterDownstairsFade() {
     audioManager.stopSoundEffect('walking-on-wood');
-    router.replace({ pathname: "/kitchen", params: { stamina: String(staminaCurrent) } });
+    router.replace({
+      pathname: "/kitchen",
+      params: {
+        stamina: String(staminaCurrent),
+        ...(rupertAlchemyIntroPendingRef.current ? { rupertAlchemyIntro: "1" } : {}),
+      },
+    });
   }
 
   async function handleGoDownstairs() {
@@ -831,6 +839,7 @@ export default function DormitoryScreen() {
     }
     if (downstairsLocked.current || isDayTransitionRef.current) return;
     downstairsLocked.current = true;
+    rupertAlchemyIntroPendingRef.current = await isRupertAlchemyIntroPending().catch(() => false);
     setRS("LEAVING_ROOM");
 
     audioManager.playSoundEffect('walking-on-wood', { maxDurationMs: 5000 });
@@ -1435,46 +1444,48 @@ function UpgradeRow({ upgrade, resources, onTap }: UpgradeRowProps) {
     <View
       style={[styles.upgradeRow, unavailable && styles.upgradeRowUnavailable, upgrade.completed && styles.upgradeRowCompleted]}
     >
-      <View style={styles.upgradeDetails}>
-        <Text style={styles.upgradeName} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>{upgrade.displayName}</Text>
-        {/* Effects */}
-        <View style={styles.upgradeEffects}>
-          {upgrade.effects.sleepStaminaRecovery ? (
-            <Text style={styles.upgradeEffect}>⚡ +{upgrade.effects.sleepStaminaRecovery} Stamina Recovery</Text>
-          ) : null}
-          {upgrade.effects.sleepLifeRecovery ? (
-            <Text style={styles.upgradeEffect}>♥ +{upgrade.effects.sleepLifeRecovery} Life Recovery</Text>
-          ) : null}
-          {upgrade.effects.unlockRoomStorage ? (
-            <Text style={styles.upgradeEffect}>🗄 {upgrade.effects.unlockRoomStorage.rows} rows × {upgrade.effects.unlockRoomStorage.columns} slots</Text>
-          ) : null}
-        </View>
-        {/* Costs */}
-        <View style={styles.upgradeCosts}>
-          {(Object.entries(upgrade.costs) as [ResourceId, number][]).map(([res, qty]) => {
-            const have    = resources[res] ?? 0;
-            const missing = !upgrade.completed && have < qty;
-            return (
-              <Text key={res} style={[styles.upgradeCostItem, missing && styles.upgradeCostMissing]}>
-                {RESOURCE_NAMES[res]} {have}/{qty}
-              </Text>
-            );
-          })}
-        </View>
-        {!upgrade.completed && !affordable ? (
-          <View style={styles.upgradeNotAffordBadge}>
-            <Text style={styles.upgradeNotAffordText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Not enough resources.</Text>
+      <Text style={styles.upgradeName} numberOfLines={1}>{upgrade.displayName}</Text>
+      <View style={styles.upgradeBody}>
+        <View style={styles.upgradeDetails}>
+          {/* Effects */}
+          <View style={styles.upgradeEffects}>
+            {upgrade.effects.sleepStaminaRecovery ? (
+              <Text style={styles.upgradeEffect}>⚡ +{upgrade.effects.sleepStaminaRecovery} Stamina Recovery</Text>
+            ) : null}
+            {upgrade.effects.sleepLifeRecovery ? (
+              <Text style={styles.upgradeEffect}>♥ +{upgrade.effects.sleepLifeRecovery} Life Recovery</Text>
+            ) : null}
+            {upgrade.effects.unlockRoomStorage ? (
+              <Text style={styles.upgradeEffect}>🗄 {upgrade.effects.unlockRoomStorage.rows} rows × {upgrade.effects.unlockRoomStorage.columns} slots</Text>
+            ) : null}
           </View>
-        ) : null}
+          {/* Costs */}
+          <View style={styles.upgradeCosts}>
+            {(Object.entries(upgrade.costs) as [ResourceId, number][]).map(([res, qty]) => {
+              const have    = resources[res] ?? 0;
+              const missing = !upgrade.completed && have < qty;
+              return (
+                <Text key={res} style={[styles.upgradeCostItem, missing && styles.upgradeCostMissing]}>
+                  {RESOURCE_NAMES[res]} {have}/{qty}
+                </Text>
+              );
+            })}
+          </View>
+          {!upgrade.completed && !affordable ? (
+            <View style={styles.upgradeNotAffordBadge}>
+              <Text style={styles.upgradeNotAffordText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Not enough resources.</Text>
+            </View>
+          ) : null}
+        </View>
+        <TouchableOpacity
+          style={[styles.upgradeBuildButton, unavailable && styles.upgradeBuildButtonUnavailable, upgrade.completed && styles.upgradeBuildButtonCompleted]}
+          onPress={onTap}
+          disabled={upgrade.completed || !affordable}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.upgradeBuildButtonText}>{upgrade.completed ? "Completed" : "Build"}</Text>
+        </TouchableOpacity>
       </View>
-      <TouchableOpacity
-        style={[styles.upgradeBuildButton, unavailable && styles.upgradeBuildButtonUnavailable, upgrade.completed && styles.upgradeBuildButtonCompleted]}
-        onPress={onTap}
-        disabled={upgrade.completed || !affordable}
-        activeOpacity={0.8}
-      >
-        <Text style={styles.upgradeBuildButtonText}>{upgrade.completed ? "Completed" : "Build"}</Text>
-      </TouchableOpacity>
     </View>
   );
 }
@@ -1513,7 +1524,7 @@ const styles = StyleSheet.create({
   regenFloat:   { position: "absolute", right: -8, top: 12, zIndex: 1000, elevation: 30 },
   regenStaText: { color: "#C4943A", fontFamily: "Oldenburg", fontSize: 13, fontWeight: "700" },
   regenLifeText:{ color: "#CC2200", fontFamily: "Oldenburg", fontSize: 13, fontWeight: "700" },
-  locationName: { color: "#F0E8D5", fontSize: 13, fontFamily: "Oldenburg", letterSpacing: 1, textAlign: "center", marginTop: 4 },
+  locationName: { color: "#F0E8D5", fontSize: 15, fontFamily: "Oldenburg", letterSpacing: 1, textAlign: "center", marginTop: 4 },
   rightHeaderColumn: { alignItems: "flex-end", alignSelf: "flex-start", gap: 4, marginLeft: 2, transform: [{ translateY: -2 }] },
   rightHeader:  { flexDirection: "row", alignItems: "center", gap: 8 },
   dayBadge: {
@@ -1636,7 +1647,7 @@ const styles = StyleSheet.create({
     marginBottom: 10, borderRadius: 12,
     backgroundColor: "rgba(255,255,255,0.03)",
     borderWidth: 1, borderColor: "rgba(196,148,58,0.18)",
-    flexDirection: "row", alignItems: "center", gap: 12,
+    gap: 8,
   },
   menuPanel: {
     width: 264, backgroundColor: "#160B03", borderRadius: 20, padding: 24,
@@ -1655,7 +1666,8 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.20)",
   },
   upgradeDetails: { flex: 1, minWidth: 0 },
-  upgradeName:    { color: "#F5E6C8", fontSize: 14, fontFamily: "Oldenburg", marginBottom: 4, flexShrink: 1 },
+  upgradeBody: { flexDirection: "row", alignItems: "center", gap: 12 },
+  upgradeName:    { width: "100%", color: "#F5E6C8", fontSize: 15, fontFamily: "Oldenburg" },
   upgradeEffects: { flexDirection: "column", gap: 2, marginBottom: 6 },
   upgradeEffect:  { color: "rgba(196,148,58,0.80)", fontSize: 12 },
   upgradeCosts:   { flexDirection: "row", flexWrap: "wrap", gap: 8 },
