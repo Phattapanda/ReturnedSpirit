@@ -12,6 +12,7 @@ import {
   PLAYER_STATS_KEY,
   calcEffectiveStaminaCost,
   getActiveStaminaBuffReduction,
+  getEffectiveEndurance,
   normalizePlayerStats,
 } from "@/src/game/player-stats";
 import {
@@ -153,7 +154,7 @@ export function discountedCarriageCost(baseCost: number, discountPercent: number
 export async function getEffectiveWalkingCost(baseCost: number): Promise<number> {
   const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
   const stats = rawStats ? normalizePlayerStats(JSON.parse(rawStats)) : DEFAULT_PLAYER_STATS;
-  return calcEffectiveStaminaCost(baseCost, stats.endurance, getActiveStaminaBuffReduction(stats));
+  return calcEffectiveStaminaCost(baseCost, getEffectiveEndurance(stats), getActiveStaminaBuffReduction(stats));
 }
 
 export async function payForCarriage(costCopper: number): Promise<boolean> {

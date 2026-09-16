@@ -82,6 +82,7 @@ import {
   setActiveGuest,
   setCurrentGuestExchangeOffer,
   type GuestId,
+  type FavorRewardDialog,
   type GuestMealReaction,
   type GuestPreferenceDiscoveryResult,
   type GuestVisitView,
@@ -443,7 +444,9 @@ export default function DiningScreen() {
           setDepartingGuestId("old_farmer");
           setTimeout(async () => {
             await setActiveGuest(null);
+            await persistGuestServed("old_farmer");
             await saveGuestTutorialIntroStep("service_complete");
+            notifyLocationStatusChanged();
             const postState = await loadPostGuestTutorialState();
             if (active) {
               setTutorialStep("service_complete");
@@ -503,16 +506,17 @@ export default function DiningScreen() {
     thoughtTimer.current = setTimeout(() => setPlayerThought(null), 2600);
   }
 
-  const showFavorRewardDialog = useCallback((guest: GuestVisitView, text: string) => {
+  const showFavorRewardDialog = useCallback((guest: GuestVisitView, dialog: FavorRewardDialog) => {
     setFavorDialogLine({
       speaker: guest.profile.name,
       portrait: dialogPortraitForGuest(guest.profile.id),
-      text: `"${text}"`,
+      text: `"${dialog.text}"`,
+      highlightedPhrases: [dialog.itemName],
     });
     AsyncStorage.getItem(PLAYER_BAG_KEY).then((rawBag) => {
       if (rawBag) setPlayerBag(normalizePlayerBagData(JSON.parse(rawBag)));
     }).catch(() => {});
-    if (text.includes("Here, take this.")) {
+    if (dialog.text.includes("Take this")) {
       audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
     }
   }, [audioManager]);
@@ -647,7 +651,9 @@ export default function DiningScreen() {
       setDepartingGuestId("old_farmer");
       setTimeout(async () => {
         await setActiveGuest(null);
+        await persistGuestServed("old_farmer");
         await saveGuestTutorialIntroStep("service_complete");
+        notifyLocationStatusChanged();
         setTutorialStep("service_complete");
         setDepartingGuestId(null);
         const postState = await loadPostGuestTutorialState();
@@ -995,6 +1001,7 @@ export default function DiningScreen() {
 
         setMealState(nextMealState);
         if (result.playerBag) setPlayerBag(result.playerBag);
+        if (guestId === "merchant") await addGuestFavor("merchant", 1);
         await markGuestServed(guestId, "food");
         const target = result.destination === "garden_storage"
           ? await measureViewCenter(gardenNavButtonRef, { x: W * 0.25, y: H - insets.bottom - 42 })

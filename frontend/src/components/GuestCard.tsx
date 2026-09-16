@@ -19,6 +19,7 @@ import {
   setActiveGuest,
   subscribeFavorRewardDialog,
   type GuestId,
+  type FavorRewardDialog,
   type GuestPreferenceDiscoveryResult,
   type GuestVisitView,
 } from "@/src/game/guest-system";
@@ -438,7 +439,7 @@ type DiningGuestAreaProps = {
     source?: GuestServiceSourcePoint,
     preferenceDiscovery?: GuestPreferenceDiscoveryResult,
   ) => boolean | void | Promise<boolean | void>;
-  onFavorRewardDialog?: (guest: GuestVisitView, text: string) => void;
+  onFavorRewardDialog?: (guest: GuestVisitView, dialog: FavorRewardDialog) => void;
 };
 
 function coachmanRequestText(guest: GuestVisitView): string {
@@ -502,9 +503,9 @@ export default function DiningGuestArea({
     return () => { active = false; };
   }, [dayIndex, onFavorRewardDialog]);
 
-  useEffect(() => subscribeFavorRewardDialog((guestId, text) => {
+  useEffect(() => subscribeFavorRewardDialog((guestId, dialog) => {
     const guest = guests.find((entry) => entry.profile.id === guestId);
-    if (guest) onFavorRewardDialog?.(guest, text);
+    if (guest) onFavorRewardDialog?.(guest, dialog);
   }), [guests, onFavorRewardDialog]);
 
   async function handleSelect(guestId: GuestId) {

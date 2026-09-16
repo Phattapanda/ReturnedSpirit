@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View, type ImageSourcePropType } from "react-native";
+import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, type ImageSourcePropType } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -14,7 +14,7 @@ import StoryDialogOverlay, { type StoryDialogChoice, type StoryDialogLine } from
 import { COACHMAN_DIALOG_SCALE, DIALOG_CHARACTER_ASSETS, getDialogExpressionForStamina, getPlayerDialogAspectRatio, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
 import {
   BLACKSMITH_SMELTING_RECIPES, BLACKSMITH_TOOL_UPGRADE_RECIPES, CITY_BUY_PRICES, GUILD_PROCESSING_FEE_PER_CARCASS, MERCHANT_CONTRACTS, QUESTS, SUPPORTERS, acceptMerchantContract, acceptQuest, buyBulkShipment,
-  adventurerPromotionAvailable, adventurerRank, beginAdventurerPromotionExam, buyCityItem, buyTempleBlessing, completeAdventurerPromotionExam, completeMerchantAptitudeTest, fulfillMerchantContract, guildRank, hasMerchantAptitudePouch, hireSupporter,
+  adventurerPromotionAvailable, adventurerRank, beginAdventurerPromotionExam, buyCityItem, buyCityMarketItem, buyTempleBlessing, completeAdventurerPromotionExam, completeMerchantAptitudeTest, fulfillMerchantContract, guildRank, hasMerchantAptitudePouch, hireSupporter,
   markMerchantContractTierDialogSeen, markMerchantGuildIntroductionSeen,
   citySellPrice, isQuestReadyToTurnIn, loadCityState, merchantBulkQuantity, merchantContractDaysRemaining, merchantContractDuration, merchantContractLimit, merchantPrice, performBlacksmithRecipe, processGuildCarcasses, processTutorialWildWolf, receiveTempleTreatment, repairCityItem,
   sellCityItem, tanMaterial, turnInQuest, type CityState, type QuestId, type SupporterId,
@@ -31,6 +31,7 @@ import { unlockForestEntranceAfterRegistration } from "@/src/game/travel-system"
 import { loadTavernQuestState, markBrewQuestItemPurchased, type BrewQuestItemId, type TavernQuestState, DEFAULT_TAVERN_QUEST_STATE } from "@/src/game/tavern-quest-system";
 import { DEFAULT_MINSTREL_STATE, MINSTREL_SONGS, loadMinstrelState, markMinstrelIntroductionSeen, unlockMinstrelSong, type MinstrelSongId, type MinstrelState } from "@/src/game/minstrel-system";
 import { loadDiscoveredRecipes } from "@/src/game/cooking-system";
+import { DEFAULT_WORKSHOP_STATE, WORKSHOP_REQUIREMENTS, loadWorkshopOrderAvailability, loadWorkshopState, markWorkshopQuoteSeen, placeWorkshopOrder, type WorkshopOrderAvailability, type WorkshopState } from "@/src/game/workshop-system";
 
 const MARKET_BACKGROUND = require("../assets/images/market.png");
 const ARTISAN_BACKGROUND = require("../assets/images/artisans_district.png");
@@ -49,6 +50,8 @@ const SUPPORTER_IMAGES: Record<SupporterId, ImageSourcePropType> = {
 const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   potato: require("../assets/images/potato.png"), carrot: require("../assets/images/carrot.png"), onion: require("../assets/images/onion.png"),
   tomato: require("../assets/images/tomato.png"), cucumber: require("../assets/images/cucumber.png"), lettuce: require("../assets/images/lettuce.png"),
+  spinach: require("../assets/images/spinach.png"),
+  pumpkin: require("../assets/images/pumpkin.png"),
   egg: require("../assets/images/egg.png"), white_meat: require("../assets/images/meat_white.png"),
   red_meat: require("../assets/images/meat_red.png"), herbs: require("../assets/images/herbs.png"), mushroom: require("../assets/images/mushroom.png"),
   fish: require("../assets/images/meat_fish.png"), cloth: require("../assets/images/cloth.png"), empty_bottle: require("../assets/images/empty_bottle.png"), leather: require("../assets/images/leather.png"),
@@ -64,22 +67,26 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   ingot_silver: require("../assets/images/ingot_silver.png"), ingot_gold: require("../assets/images/ingot_gold.png"),
   coal: require("../assets/images/coal.png"), ore_iron: require("../assets/images/ore_iron.png"), ore_copper: require("../assets/images/ore_copper.png"),
   ore_silver: require("../assets/images/ore_silver.png"), ore_gold: require("../assets/images/ore_gold.png"),
-  snowberry: require("../assets/images/snowberry.png"), spices: require("../assets/images/spices.png"), shard_mana: require("../assets/images/shard_mana.png"),
+  snowberry: require("../assets/images/snowberry.png"), spices: require("../assets/images/spices.png"), scroll: require("../assets/images/scroll.png"), shard_mana: require("../assets/images/shard_mana.png"),
   monster_carcass: require("../assets/images/monster_carcass.png"),
   bag_herb: require("../assets/images/bag_herb.png"), bag_carrot: require("../assets/images/bag_carrot.png"), bag_onion: require("../assets/images/bag_onion.png"),
   soup_herb: require("../assets/images/soup_herb.png"), soup_carrot: require("../assets/images/soup_carrot.png"), soup_onion: require("../assets/images/soup_onion.png"),
   dried_hop_cones: require("../assets/images/quest_item.png"), malted_barley: require("../assets/images/quest_item.png"), brewers_yeast: require("../assets/images/quest_item.png"),
+  seed_lettuce: require("../assets/images/seed_salad.png"), seed_cucumber: require("../assets/images/seed_cucumber.png"),
+  seed_spinach: require("../assets/images/seed_spinach.png"), seed_tomato: require("../assets/images/seed_tomato.png"), seed_pumpkin: require("../assets/images/seed_pumpkin.png"),
 };
 
 type ViewId = "city" | "market" | "food" | "general" | "sell" | "fish" | "notice_board" | "minstrels" | "artisan" | "blacksmith" | "blacksmith_buy" | "smelting" | "tool_upgrades" | "repair" | "tannery" | "carpenter" | "guild" | "expedition_shop" | "support" | "processing" | "quests" | "merchant" | "bulk" | "imports" | "contracts" | "temple" | "healing" | "blessings" | "holy_goods" | "alchemy_recipes" | "holy_sister" | "side_alley";
 const PARENT: Partial<Record<ViewId, ViewId>> = { market: "city", food: "market", general: "market", sell: "general", fish: "market", notice_board: "market", minstrels: "market", artisan: "city", blacksmith: "artisan", blacksmith_buy: "blacksmith", smelting: "blacksmith", tool_upgrades: "blacksmith", repair: "blacksmith", tannery: "artisan", carpenter: "artisan", guild: "city", expedition_shop: "guild", support: "guild", processing: "guild", quests: "guild", merchant: "city", bulk: "merchant", imports: "merchant", contracts: "merchant", temple: "city", healing: "temple", blessings: "temple", holy_goods: "temple", alchemy_recipes: "temple", holy_sister: "temple", side_alley: "city" };
 const GENERAL = [{ id: "rope", price: 12 }, { id: "cloth", price: 22 }, { id: "empty_bottle", price: 12 }, { id: "bag3", price: 1000 }];
+const FARM_SHOP = ["egg", "fish", "white_meat", "red_meat", "seed_lettuce", "seed_cucumber", "seed_spinach", "seed_tomato", "seed_pumpkin"] as const;
 const EXPEDITION_SHOP = [{ id: "torch", price: 30 }, { id: "return_bell", price: 77 }];
 const BLACKSMITH = [{ id: "tool_rusty_butchering_knife", price: 50 }, { id: "tool_iron_butchering_knife", price: 70 }, { id: "tool_kitchen_knife", price: 80 }, { id: "weapon_iron_dagger", price: 45 }, { id: "weapon_iron_shortsword", price: 60 }, { id: "armor_leather_bracers", price: 50 }, { id: "armor_leather_armor", price: 90 }, { id: "frying_pan", price: 100 }];
 const BULK_SHIPMENTS = [{ id: "potato" as const, price: 40 }, { id: "carrot" as const, price: 30 }, { id: "onion" as const, price: 50 }];
 const IMPORTS = [
   { id: "snowberry", price: 35, reputation: 0, quantity: 1, requiresCraftedSpices: false },
   { id: "spices", price: 27, reputation: 0, quantity: 3, requiresCraftedSpices: true },
+  { id: "scroll", price: 10, reputation: 0, quantity: 1, requiresCraftedSpices: false },
   { id: "shard_mana", price: 100, reputation: 25, quantity: 1, requiresCraftedSpices: false },
 ] as const;
 const HOLY_GOODS = [{ id: "holy_herb", price: 25 }, { id: "medicinal_herb", price: 22 }, { id: "blessed_water", price: 30 }, { id: "incense", price: 20 }, { id: "purified_salt", price: 18 }];
@@ -234,6 +241,10 @@ export default function NextCityScreen() {
   const [activeMinstrelSong, setActiveMinstrelSong] = useState<MinstrelSongId | null>(null);
   const [minstrelPlayback, setMinstrelPlayback] = useState<"playing" | "paused" | "stopped">("stopped");
   const [spicesCrafted, setSpicesCrafted] = useState(false);
+  const [workshopState, setWorkshopState] = useState<WorkshopState>(DEFAULT_WORKSHOP_STATE);
+  const [workshopOrder, setWorkshopOrder] = useState<WorkshopOrderAvailability | null>(null);
+  const [workshopOrderOpen, setWorkshopOrderOpen] = useState(false);
+  const [carpenterDialogIndex, setCarpenterDialogIndex] = useState<number | null>(null);
   const previousCityTheme = useRef<ThemeKey>(null);
   const minstrelPurchasePending = useRef(false);
   const stopMinstrelTrack = audio.stopMinstrelTrack;
@@ -245,7 +256,7 @@ export default function NextCityScreen() {
     floatingMessageTimer.current = setTimeout(() => setFloatingMessage(null), 1000);
   }
   const refresh = useCallback(async () => {
-    const [state, rawBag, progression, escort, playerData, loadedTavernQuests, loadedMinstrels, guestState, discoveredRecipes] = await Promise.all([
+    const [state, rawBag, progression, escort, playerData, loadedTavernQuests, loadedMinstrels, guestState, discoveredRecipes, loadedWorkshop] = await Promise.all([
       loadCityState(),
       AsyncStorage.getItem(PLAYER_BAG_KEY),
       loadProgressionState(),
@@ -255,6 +266,7 @@ export default function NextCityScreen() {
       loadMinstrelState(),
       loadGuestState(),
       loadDiscoveredRecipes(),
+      loadWorkshopState(),
     ]);
     const avatarId = normalizePlayerAvatarId(playerData[1][1]);
     const stamina = Math.max(0, Number.parseInt(playerData[2][1] ?? "60", 10) || 0);
@@ -271,6 +283,7 @@ export default function NextCityScreen() {
     setMinstrelState(loadedMinstrels);
     setCurrentDay(guestState.calendarDaySerial);
     setSpicesCrafted(discoveredRecipes.includes("spices"));
+    setWorkshopState(loadedWorkshop);
     if (state.merchantRegistered && state.merchantContractTierUnlocked && !state.merchantContractTierDialogSeen) setMerchantTierDialogVisible(true);
     if (escort.phase === "city_arrival") setArrivalDialogIndex((current) => current ?? 0);
     if (params.arrival === "walk" && !escort.walkingArrivalGuardSeen) setCityGuardDialogIndex((current) => current ?? 0);
@@ -334,7 +347,7 @@ export default function NextCityScreen() {
     }).catch(() => showFloatingMessage("The action could not be completed."));
     return shopActionQueue.current;
   }
-  const repairable = useMemo(() => bag.slots.map((item, slot) => ({ item, slot })).filter(({ item }) => item?.maxDurability && item.durability !== item.maxDurability), [bag]);
+  const repairable = useMemo(() => bag.slots.map((item, slot) => ({ item, slot })).filter(({ item }) => item?.maxDurability && item.durability !== item.maxDurability && item.id !== "scroll" && !item.id.endsWith("_scroll")), [bag]);
   const carriedCarcasses = useMemo(() => bag.slots.flatMap((item, bagSlotIndex): CarriedCarcass[] => {
     if (item?.id !== "monster_carcass" || !item.monsterId || !getButcheringDefinition(item.monsterId)) return [];
     return Array.from({ length: item.quantity }, (_, unitIndex) => ({
@@ -382,7 +395,11 @@ export default function NextCityScreen() {
     }
   }
   const nav = (title: string, subtitle: React.ReactNode, target?: ViewId, closed = false) => <TouchableOpacity key={title} style={[styles.nav, closed && styles.disabled]} disabled={closed} onPress={() => target && open(target)} activeOpacity={0.8}><View style={styles.navText}><Text style={styles.navTitle}>{title}</Text>{typeof subtitle === "string" ? <Text style={styles.navSubtitle}>{subtitle}</Text> : subtitle}</View><Ionicons name={closed ? "lock-closed" : "chevron-forward"} size={20} color="#C4943A" /></TouchableOpacity>;
-  const buyRow = ({ id, price, quantity = 1 }: { id: string; price: number; quantity?: number }) => <View key={id} style={styles.stockRow}><View style={styles.iconBox}><ItemIcon id={id} /></View><View style={styles.stockText}><Text style={styles.stockName}>{quantity > 1 ? `${quantity}× ` : ""}{ITEM_CATALOG[id]?.name ?? id}</Text><Text style={styles.stockDescription} numberOfLines={3}>{ITEM_CATALOG[id]?.description}</Text></View><TouchableOpacity disabled={busy} style={styles.priceButton} onPress={() => { void action(() => buyCityItem(id, price, quantity)); }}><CurrencyPrice totalCopper={price} /></TouchableOpacity></View>;
+  const buyRow = ({ id, price, quantity = 1, shop, weeklyLimit }: { id: string; price: number; quantity?: number; shop?: "food" | "farm"; weeklyLimit?: number }) => {
+    const bought = shop ? city?.marketPurchases[shop][id] ?? 0 : 0;
+    const soldOut = weeklyLimit !== undefined && bought >= weeklyLimit;
+    return <View key={id} style={styles.stockRow}><View style={styles.iconBox}><ItemIcon id={id} /></View><View style={styles.stockText}><Text style={styles.stockName}>{quantity > 1 ? `${quantity}× ` : ""}{ITEM_CATALOG[id]?.name ?? id}</Text><Text style={styles.stockDescription} numberOfLines={3}>{ITEM_CATALOG[id]?.description}</Text>{weeklyLimit !== undefined ? <Text style={styles.stockDescription}>{Math.max(0, weeklyLimit - bought)}/{weeklyLimit} available this week</Text> : null}</View><TouchableOpacity disabled={busy || soldOut} style={[styles.priceButton, soldOut && styles.disabled]} onPress={() => { void action(() => shop && weeklyLimit !== undefined ? buyCityMarketItem(shop, id, price, weeklyLimit) : buyCityItem(id, price, quantity)); }}>{soldOut ? <Text style={styles.goldText}>Sold out</Text> : <CurrencyPrice totalCopper={price} />}</TouchableOpacity></View>;
+  };
   const brewQuestBuyRow = (id: BrewQuestItemId, price: number) => buyRowWithAction(id, price, async () => {
     const result = await buyCityItem(id, price);
     if (result.ok) await markBrewQuestItemPurchased(id);
@@ -589,17 +606,51 @@ export default function NextCityScreen() {
   const merchantViews: ViewId[] = ["merchant", "bulk", "imports", "contracts"];
   const templeViews: ViewId[] = ["temple", "healing", "blessings", "holy_goods", "alchemy_recipes", "holy_sister"];
   const background = artisanViews.includes(view) ? ARTISAN_BACKGROUND : guildViews.includes(view) ? ADVENTURERS_GUILD_BACKGROUND : merchantViews.includes(view) ? MERCHANT_GUILD_BACKGROUND : templeViews.includes(view) ? TEMPLE_BACKGROUND : MARKET_BACKGROUND;
+  const carpenterDialogLines: StoryDialogLine[] = [
+    { speaker: "Carpenter", text: "Hi, what can we do for you?" },
+    { speaker: playerName, text: "Good day. I heard I could commission you to create an alchemist's workspace.", portrait: playerDialogPortrait, playerPortrait: true, characterScale: playerDialogScale },
+    { speaker: "Carpenter", text: "Yes, you've come to the right place. Where should your new workplace be built?" },
+    { speaker: playerName, text: "Next to Rupert's Tavern, ‘The Spirit’.", portrait: playerDialogPortrait, playerPortrait: true, characterScale: playerDialogScale },
+    { speaker: "Carpenter", text: "Oh, the old tavern outside the town... Hmm, the price is about 1 gold coin, depending on your preferences, and it takes two weeks." },
+    { speaker: playerName, text: "That’s a lot. Could I get a discount if I provide the materials myself?", portrait: playerDialogPortrait, playerPortrait: true, characterScale: playerDialogScale },
+    { speaker: "Carpenter", text: "Sure, get 50x Wood, 20x Stone and 25x Nails and I will do it in 3 days for 20 Silver Coins. Just let me know when you have the materials." },
+  ];
+  async function openWorkshopService() {
+    if (workshopState.phase === "available") { setCarpenterDialogIndex(0); return; }
+    if (workshopState.phase === "quoted") {
+      setWorkshopOrder(await loadWorkshopOrderAvailability());
+      setWorkshopOrderOpen(true);
+    }
+  }
+  async function advanceCarpenterDialog() {
+    if (carpenterDialogIndex === null) return;
+    if (carpenterDialogIndex < carpenterDialogLines.length - 1) { setCarpenterDialogIndex(carpenterDialogIndex + 1); return; }
+    const next = await markWorkshopQuoteSeen();
+    setWorkshopState(next);
+    setCarpenterDialogIndex(null);
+    setWorkshopOrder(await loadWorkshopOrderAvailability());
+    setWorkshopOrderOpen(true);
+  }
+  async function confirmWorkshopOrder() {
+    setBusy(true);
+    try {
+      const result = await placeWorkshopOrder();
+      setWorkshopState(result.state);
+      setWorkshopOrder(result.availability);
+      if (result.ok) { setWorkshopOrderOpen(false); setMessage("The workshop has been ordered. Construction will take 3 days."); }
+    } finally { setBusy(false); }
+  }
 
   function content() {
     if (view === "city") return <>{nav("The Market Square", "Food, general goods, notices & Minstrels", "market")}{nav("The Artisan District", "Blacksmith, Tannery & Craftsmen's Quarter", "artisan")}{nav("Adventurers' Guild", adventurersGuildUnlocked ? "Bounties, supporters and monster processing" : "Report a monster incident to gain access", adventurersGuildUnlocked ? "guild" : undefined, !adventurersGuildUnlocked)}{nav("Merchant's Guild", guildIntroductionSeen ? "Bulk orders, imports and trade contracts" : "Visit the Adventurers' Guild first", guildIntroductionSeen ? "merchant" : undefined, !guildIntroductionSeen)}{nav("Temple", "Temple of the Returning Light", "temple")}{nav("Side Alley", "A dark and unwelcoming passage", "side_alley")}</>;
     if (view === "market") {
       const generalGoodsOpen = bag.bagId === "bag2" || bag.bagId === "bag3";
-      return <><Text style={styles.sectionTitle}>The Market Square</Text>{nav("Food Stall", "A variety of ingredients from the countryside.", "food")}{nav("General Goods", generalGoodsOpen ? "Tools, supplies and bag expansions" : "Currently closed", generalGoodsOpen ? "general" : undefined, !generalGoodsOpen)}{nav("Fishmonger", "Fresh Fish Meat", "fish")}{nav("Town Notice Board", "Notices and announcements from around the city", "notice_board")}{nav("Listening to the Minstrels", "Unlock songs and listen to music from distant cultures", "minstrels")}</>;
+      return <><Text style={styles.sectionTitle}>The Market Square</Text>{nav("Food Stall", "Fresh vegetables and herbs", "food")}{nav("General Goods", generalGoodsOpen ? "Tools, supplies and bag expansions" : "Currently closed", generalGoodsOpen ? "general" : undefined, !generalGoodsOpen)}{nav("Farm Shop", "Eggs, meat and seeds", "fish")}{nav("Town Notice Board", "Notices and announcements from around the city", "notice_board")}{nav("Listening to the Minstrels", "Unlock songs and listen to music from distant cultures", "minstrels")}</>;
     }
-    if (view === "food") return <><Text style={styles.sectionTitle}>Food Stall</Text><Text style={styles.note}>A variety of ingredients from the countryside. Up to 10 articles are offered, and the selection changes slightly each day.</Text>{wallet}{visibleFoodStock.map((id) => buyRow({ id, price: CITY_BUY_PRICES[id] ?? 10 }))}{driedHopConesAvailable ? brewQuestBuyRow("dried_hop_cones", 15) : null}</>;
+    if (view === "food") return <><Text style={styles.sectionTitle}>Food Stall</Text><Text style={styles.note}>Up to 9 of each product may be purchased per week. Stock resets every Monday.</Text>{wallet}{visibleFoodStock.map((id) => buyRow({ id, price: CITY_BUY_PRICES[id] ?? 10, shop: "food", weeklyLimit: 9 }))}{driedHopConesAvailable ? brewQuestBuyRow("dried_hop_cones", 15) : null}</>;
     if (view === "general") return <><Text style={styles.sectionTitle}>General Goods</Text>{GENERAL.filter((item) => item.id !== "bag3" || bag.bagId !== "bag3").map(buyRow)}{tavernQuests.claimed.serve_water && !tavernQuests.purchasedBrewItems.malted_barley ? brewQuestBuyRow("malted_barley", 30) : null}{nav("Sell Goods", "The merchant pays 50% of base value, rounded up.", "sell")}</>;
     if (view === "sell") return <><Text style={styles.sectionTitle}>Sell Goods</Text><Text style={styles.note}>Tap an item to sell one. Equipped and quest items cannot be sold.</Text>{wallet}{bag.slots.map((item, slot) => item ? <TouchableOpacity key={slot} style={styles.simpleRow} disabled={busy} onPress={() => { void action(() => sellCityItem(slot)); }}><Text style={styles.simpleName}>{item.quantity}× {item.name}</Text><View style={styles.sellOffer}><Text style={styles.goldText}>Sell 1</Text><View style={styles.sellPrice}><CurrencyPrice totalCopper={citySellPrice(item.id)} /></View></View></TouchableOpacity> : null)}</>;
-    if (view === "fish") return <><Text style={styles.sectionTitle}>Fishmonger</Text>{buyRow({ id: "fish", price: CITY_BUY_PRICES.fish ?? 18 })}<Text style={styles.note}>For now, Fish Meat must be bought here. Fishing can be added later.</Text></>;
+    if (view === "fish") return <><Text style={styles.sectionTitle}>Farm Shop</Text><Text style={styles.note}>Up to 5 of each product may be purchased per week. Stock resets every Tuesday.</Text>{wallet}{FARM_SHOP.map((id) => buyRow({ id, price: CITY_BUY_PRICES[id], shop: "farm", weeklyLimit: 5 }))}</>;
     if (view === "notice_board") return <><Text style={styles.sectionTitle}>Town Notice Board</Text><Text selectable style={styles.note}>{"There's nothing interesting written there."}</Text></>;
     if (view === "minstrels") return <>
       <Text style={styles.sectionTitle}>Listening to the Minstrels</Text>
@@ -625,14 +676,19 @@ export default function NextCityScreen() {
         </View>;
       })}
     </>;
-    if (view === "artisan") return <><Text style={styles.sectionTitle}>The Artisan District</Text>{nav("Blacksmith", "Buy and repair tools and equipment", "blacksmith")}{nav("Tannery", "Process monster pelts into Leather", "tannery")}{nav("Carpenter", "Construction and furnishing services — currently closed", "carpenter")}{nav("Craftsmen's Quarter", "Utility recipes and materials — currently closed", undefined, true)}</>;
+    if (view === "artisan") return <><Text style={styles.sectionTitle}>The Artisan District</Text>{nav("Blacksmith", "Buy and repair tools and equipment", "blacksmith")}{nav("Tannery", "Process monster pelts into Leather", "tannery")}{nav("Carpenter", workshopState.phase === "locked" ? "Construction and furnishing services — currently closed" : "Construction and furnishing services", "carpenter")}{nav("Craftsmen's Quarter", "Utility recipes and materials — currently closed", undefined, true)}</>;
     if (view === "blacksmith") return <><Text style={styles.sectionTitle}>Blacksmith</Text>{nav("Buy", "Tools, weapons and armor", "blacksmith_buy")}{nav("Ore Processing", "Refine three pieces of Ore into one Ingot", "smelting")}{nav("Tool Upgrades", "Improve cooking and butchering tools", "tool_upgrades")}{nav("Repair", <View style={styles.navPriceSubtitle}><Text style={styles.navSubtitle}>Restore tools and equipment for</Text><CurrencyPrice totalCopper={20} textStyle={styles.navSubtitle} /></View>, "repair")}</>;
     if (view === "blacksmith_buy") return <><Text style={styles.sectionTitle}>Blacksmith · Buy</Text>{wallet}{BLACKSMITH.map(buyRow)}</>;
     if (view === "smelting") return <><Text style={styles.sectionTitle}>Blacksmith · Ore Processing</Text><Text style={styles.note}>The Ore must be carried in your bag.</Text>{wallet}{BLACKSMITH_SMELTING_RECIPES.map(blacksmithRecipeRow)}</>;
     if (view === "tool_upgrades") return <><Text style={styles.sectionTitle}>Blacksmith · Tool Upgrades</Text><Text style={styles.note}>The tool and all required Ingots must be carried in your bag. Upgraded tools are returned at full Durability.</Text>{wallet}{BLACKSMITH_TOOL_UPGRADE_RECIPES.map(blacksmithRecipeRow)}</>;
     if (view === "repair") return <><Text style={styles.sectionTitle}>Repair</Text><View style={styles.notePriceRow}><Text style={styles.noteInline}>Every repair costs</Text><CurrencyPrice totalCopper={20} textStyle={styles.noteInline} /></View>{repairable.length ? repairable.map(({ item, slot }) => <TouchableOpacity key={slot} style={styles.simpleRow} onPress={() => { void action(() => repairCityItem(slot)); }}><View><Text style={styles.simpleName}>{item!.name}</Text><Text style={styles.small}>{item!.durability}/{item!.maxDurability} Durability</Text></View><CurrencyPrice totalCopper={20} textStyle={styles.goldText} /></TouchableOpacity>) : <Text style={styles.empty}>No damaged equipment in your bag.</Text>}</>;
     if (view === "tannery") return <><Text style={styles.sectionTitle}>Tannery</Text><Text style={styles.note}>The material must be carried in your bag. Each conversion costs 25 Copper Coins.</Text>{wallet}{tanneryRecipeRow("fur", 1)}{tanneryRecipeRow("wolf_pelt", 2)}<Text style={styles.note}>Leather will later be needed for bags and equipment.</Text></>;
-    if (view === "carpenter") return <><Text style={styles.sectionTitle}>Carpenter</Text><Text style={styles.carpenterClosed}>Currently closed</Text>{CARPENTER_SERVICES.map((service) => <View key={service.title} style={styles.carpenterService}><View style={styles.carpenterLock}><Ionicons name="lock-closed" size={20} color="#8E7651" /></View><View style={styles.stockText}><Text style={styles.carpenterTitle}>{service.title}</Text><Text style={styles.carpenterDescription}>{service.description}</Text></View></View>)}</>;
+    if (view === "carpenter") return <><Text style={styles.sectionTitle}>Carpenter</Text>{workshopState.phase === "locked" && <Text style={styles.carpenterClosed}>Currently closed</Text>}{CARPENTER_SERVICES.map((service) => {
+      const workshop = service.title === "Build Workshop";
+      const enabled = workshop && (workshopState.phase === "available" || workshopState.phase === "quoted");
+      const status = workshopState.phase === "building" ? `Under construction · ${Math.max(0, (workshopState.completionDaySerial ?? currentDay) - currentDay)} day(s) remaining` : workshopState.phase === "complete" ? "Completed" : service.description;
+      return <TouchableOpacity key={service.title} disabled={!enabled} style={[styles.carpenterService, enabled && styles.carpenterServiceReady]} onPress={() => { void openWorkshopService(); }}><View style={[styles.carpenterLock, enabled && styles.carpenterReadyIcon]}><Ionicons name={enabled ? "hammer" : workshopState.phase === "complete" && workshop ? "checkmark" : "lock-closed"} size={20} color={enabled ? "#FFF7E5" : "#8E7651"} /></View><View style={styles.stockText}><Text style={[styles.carpenterTitle, enabled && styles.carpenterReadyTitle]}>{service.title}</Text><Text style={styles.carpenterDescription}>{status}</Text></View></TouchableOpacity>;
+    })}</>;
     if (view === "guild") return <><Text style={styles.sectionTitle}>Adventurers’ Guild</Text><View style={styles.merchantReceptionistRow}><Image source={RECEPTIONIST_PORTRAIT} style={styles.merchantReceptionistPortrait} resizeMode="contain" /><View style={styles.stockText}><Text style={styles.stockName}>Receptionist</Text></View></View>{city && <Text style={styles.rank}>Adventurer Rank {adventurerRank(city)} - {city.guildReputation} Reputation</Text>}{city?.adventurerPromotionActive && !city.adventurerPromotionCompleted ? <View style={styles.quest}><Text style={styles.questType}>Promotion Examination · Rank G</Text><Text style={styles.stockName}>Defeat 5 Ember Roosters</Text><Text style={styles.progress}>Progress: {city.adventurerPromotionProgress}/5</Text><TouchableOpacity disabled={busy || city.adventurerPromotionProgress < 5} style={[styles.wideButton, (busy || city.adventurerPromotionProgress < 5) && styles.disabled]} onPress={() => { void action(completeAdventurerPromotionExam); }}><Text style={styles.wideButtonText}>Complete Promotion</Text></TouchableOpacity></View> : null}{nav("Expedition Shop", "Equipment for safer Dungeon Runs", "expedition_shop")}{nav("Expedition Hall", city?.supporter ? `${SUPPORTERS[city.supporter.id].name} · ${city.supporter.runsRemaining} runs remaining` : "Hire support for the next Dungeon Run", "support")}{nav("Monster Processing", "Send a carcass to the Guild Butcher", "processing")}{nav("Quest Board", "Accept quests and claim completed bounties", "quests")}</>;
     if (view === "expedition_shop") return <><Text style={styles.sectionTitle}>Expedition Shop</Text>{wallet}{EXPEDITION_SHOP.map(buyRow)}</>;
     if (view === "support") return <><Text style={styles.sectionTitle}>Expedition Hall</Text><View style={styles.notePriceRow}><CurrencyPrice totalCopper={100} textStyle={styles.noteInline} /><Text style={styles.noteInline}>per Dungeon Run. Choose up to three runs.</Text></View><View style={styles.stepper}><TouchableOpacity style={styles.stepButton} onPress={() => setRuns(Math.max(1, runs - 1))}><Text style={styles.stepText}>−</Text></TouchableOpacity><View style={styles.runCountRow}><Text style={styles.runCount}>{runs} Run{runs === 1 ? "" : "s"} ·</Text><CurrencyPrice totalCopper={runs * 100} textStyle={styles.runCount} /></View><TouchableOpacity style={styles.stepButton} onPress={() => setRuns(Math.min(3, runs + 1))}><Text style={styles.stepText}>+</Text></TouchableOpacity></View>{(Object.keys(SUPPORTERS) as SupporterId[]).map((id) => { const supporter = SUPPORTERS[id]; return <View key={id} style={styles.supporterRow}><Image source={SUPPORTER_IMAGES[id]} style={styles.supporterImage} /><View style={styles.stockText}><Text style={styles.stockName}>{supporter.name}</Text><Text style={styles.stockDescription}>{supporter.description}</Text></View><TouchableOpacity style={styles.hireButton} onPress={() => { void action(() => hireSupporter(id, runs)); }}><Text style={styles.hireText}>Hire</Text></TouchableOpacity></View>; })}</>;
@@ -640,7 +696,7 @@ export default function NextCityScreen() {
     if (view === "quests") return <><Text style={styles.sectionTitle}>Quest Board</Text><Text style={styles.note}>Accepted quests remain in your journal. Unaccepted quest categories are refreshed every Sunday.</Text>{(Object.keys(QUESTS) as QuestId[]).map((id) => { const def = QUESTS[id]; const status = city?.quests[id]; const readyToTurnIn = !!city && isQuestReadyToTurnIn(id, city, bag); return <View key={id} style={styles.quest}><Text style={styles.questType}>{def.type} · Rank {def.rank}</Text><Text style={styles.stockName}>{def.title}</Text><Text style={styles.stockDescription}>{def.detail}</Text><View style={styles.rewardRow}><CurrencyPrice totalCopper={def.rewardCopper} textStyle={styles.reward} /><Text style={styles.reward}>· +{def.reputation} Guild Reputation</Text></View>{id === "wolves" && status && status.status !== "offered" && <Text style={styles.progress}>Progress: {Math.min(2, status.progress)}/2</Text>}<TouchableOpacity disabled={busy || status?.status === "completed"} style={[styles.wideButton, readyToTurnIn && styles.turnInReady, status?.status === "completed" && styles.disabled]} onPress={() => { void action(() => !status || status.status === "offered" ? acceptQuest(id) : turnInQuest(id)); }}><Text style={styles.wideButtonText}>{!status || status.status === "offered" ? "Accept Quest" : status.status === "completed" ? "Completed" : "Turn In"}</Text></TouchableOpacity></View>; })}</>;
     if (view === "merchant") return <><Text style={styles.sectionTitle}>Merchant’s Guild</Text><View style={styles.merchantReceptionistRow}><Image source={MERCHANT_GUILD_RECEPTIONIST_PORTRAIT} style={styles.merchantReceptionistPortrait} resizeMode="contain" /><View style={styles.stockText}><Text style={styles.stockName}>Merchant Guild Receptionist</Text></View></View><Text style={styles.rank}>Merchant Rank {guildRank(merchantReputation)} - {merchantReputation} Reputation</Text>{!merchantRegistered ? <View style={styles.quest}><Text style={styles.questType}>Merchant Aptitude Test</Text><View style={styles.smithRecipeMain}><View style={styles.iconBox}><ItemIcon id="bag_herb" /></View><View style={styles.stockText}><Text style={styles.stockName}>Register as a Merchant</Text><Text style={styles.stockDescription}>Bring a herbal pouch containing exactly eleven herbs.</Text></View></View><TouchableOpacity disabled={busy || !merchantAptitudePouchReady} style={[styles.wideButton, (busy || !merchantAptitudePouchReady) && styles.disabled]} onPress={() => { void action(completeMerchantAptitudeTest); }}><Text style={styles.wideButtonText}>{merchantAptitudePouchReady ? "Hand Over Pouch" : "11 Herbs Required"}</Text></TouchableOpacity></View> : null}{nav("The Trade Hall", merchantRegistered ? "Large purchases and special commercial services" : "Merchant registration required", merchantRegistered ? "bulk" : undefined, !merchantRegistered)}{nav("Imported Goods", merchantRegistered ? "Goods and materials from other regions" : "Merchant registration required", merchantRegistered ? "imports" : undefined, !merchantRegistered)}{nav("Trade Contracts", merchantRegistered ? "Supply contracts for registered merchants" : "Merchant registration required", merchantRegistered ? "contracts" : undefined, !merchantRegistered)}</>;
     if (view === "bulk") return <><Text style={styles.sectionTitle}>Make an Order</Text><Text style={styles.note}>Orders arrive in shipment bags in the Courier’s Chest on the following day. Merchant Reputation may improve prices and quantities.</Text>{BULK_SHIPMENTS.map((shipment) => { const price = merchantPrice(shipment.price, merchantReputation); const quantity = merchantBulkQuantity(merchantReputation); return <View key={shipment.id} style={styles.stockRow}><View style={styles.iconBox}><ItemIcon id={shipment.id} /></View><View style={styles.stockText}><Text style={styles.stockName}>{ITEM_CATALOG[shipment.id]?.name} Shipment</Text><Text style={styles.stockDescription}>{quantity} {ITEM_CATALOG[shipment.id]?.name} · delivery tomorrow</Text></View><TouchableOpacity style={styles.priceButton} disabled={busy} onPress={() => { void action(() => buyBulkShipment(shipment.id, shipment.price)); }}><CurrencyPrice totalCopper={price} /></TouchableOpacity></View>; })}</>;
-    if (view === "imports") return <><Text style={styles.sectionTitle}>Imported Goods</Text><Text style={styles.note}>Higher Merchant Reputation opens rarer trade routes.</Text>{tavernQuests.claimed.serve_water && !tavernQuests.purchasedBrewItems.brewers_yeast ? brewQuestBuyRow("brewers_yeast", 40) : null}{IMPORTS.map((item) => item.requiresCraftedSpices && !spicesCrafted ? <View key={item.id} style={[styles.stockRow, styles.disabled]}><View style={styles.iconBox}><Ionicons name="lock-closed" size={25} color="#C4943A" /></View><View style={styles.stockText}><Text style={styles.stockName}>{item.quantity}× {ITEM_CATALOG[item.id]?.name}</Text><Text style={styles.stockDescription}>Craft Spices yourself first.</Text></View></View> : item.reputation <= merchantReputation ? buyRow({ id: item.id, price: merchantPrice(item.price, merchantReputation), quantity: item.quantity }) : <View key={item.id} style={[styles.stockRow, styles.disabled]}><View style={styles.iconBox}><Ionicons name="lock-closed" size={25} color="#C4943A" /></View><View style={styles.stockText}><Text style={styles.stockName}>{ITEM_CATALOG[item.id]?.name}</Text><Text style={styles.stockDescription}>Requires {item.reputation} Merchant Reputation</Text></View></View>)}</>;
+    if (view === "imports") return <><Text style={styles.sectionTitle}>Imported Goods</Text><Text style={styles.note}>Higher Merchant Reputation opens rarer trade routes.</Text>{tavernQuests.claimed.serve_water && !tavernQuests.purchasedBrewItems.brewers_yeast ? brewQuestBuyRow("brewers_yeast", 40) : null}{IMPORTS.map((item) => item.requiresCraftedSpices && !spicesCrafted ? <View key={item.id} style={[styles.stockRow, styles.disabled]}><View style={styles.iconBox}><Ionicons name="lock-closed" size={25} color="#C4943A" /></View><View style={styles.stockText}><Text style={styles.stockName}>{item.quantity}× {ITEM_CATALOG[item.id]?.name}</Text><Text style={styles.stockDescription}>Craft Spices yourself first.</Text></View></View> : item.reputation <= merchantReputation ? buyRow({ id: item.id, price: item.id === "scroll" ? 10 : merchantPrice(item.price, merchantReputation), quantity: item.quantity }) : <View key={item.id} style={[styles.stockRow, styles.disabled]}><View style={styles.iconBox}><Ionicons name="lock-closed" size={25} color="#C4943A" /></View><View style={styles.stockText}><Text style={styles.stockName}>{ITEM_CATALOG[item.id]?.name}</Text><Text style={styles.stockDescription}>Requires {item.reputation} Merchant Reputation</Text></View></View>)}</>;
     if (view === "contracts") {
       const active = city?.activeMerchantContracts ?? [];
       const offered = city?.merchantContractOfferIds ?? [];
@@ -688,6 +744,16 @@ export default function NextCityScreen() {
         {thought && <Text selectable style={styles.thought}>{thought}</Text>}
         {message && <Text selectable style={styles.message}>{message}</Text>}
       </ScrollView>
+      <Modal visible={workshopOrderOpen} transparent animationType="fade" onRequestClose={() => setWorkshopOrderOpen(false)}>
+        <View style={styles.orderOverlay}><View style={styles.orderPanel}>
+          <View style={styles.orderTitleRow}><Text style={styles.sectionTitle}>Build Workshop</Text><TouchableOpacity onPress={() => setWorkshopOrderOpen(false)}><Ionicons name="close" size={25} color="#F5E6C8" /></TouchableOpacity></View>
+          <Text style={styles.note}>The Carpenter needs the following materials and payment. Construction takes 3 in-game days.</Text>
+          {([['wood', 'Wood', 50], ['stone', 'Stone', 20], ['nails', 'Nails', 25]] as const).map(([id, name, needed]) => <View key={id} style={styles.requirementRow}><Text style={styles.stockName}>{name}</Text><Text style={(workshopOrder?.resources[id] ?? 0) >= needed ? styles.requirementReady : styles.requirementMissing}>{workshopOrder?.resources[id] ?? 0}/{needed}</Text></View>)}
+          <View style={styles.requirementRow}><Text style={styles.stockName}>Payment</Text><CurrencyPrice totalCopper={WORKSHOP_REQUIREMENTS.copper} /></View>
+          <TouchableOpacity disabled={busy || !workshopOrder?.canPlace} style={[styles.wideButton, workshopOrder?.canPlace && styles.turnInReady, (!workshopOrder?.canPlace || busy) && styles.disabled]} onPress={() => { void confirmWorkshopOrder(); }}><Text style={styles.wideButtonText}>Place an order.</Text></TouchableOpacity>
+        </View></View>
+      </Modal>
+      <StoryDialogOverlay visible={carpenterDialogIndex !== null} line={carpenterDialogIndex === null ? null : carpenterDialogLines[carpenterDialogIndex] ?? null} onContinue={() => { void advanceCarpenterDialog(); }} onSkip={() => { if (carpenterDialogIndex === carpenterDialogLines.length - 1) void advanceCarpenterDialog(); else setCarpenterDialogIndex(carpenterDialogLines.length - 1); }} />
       <StoryDialogOverlay
         visible={arrivalDialogIndex !== null}
         line={arrivalDialogIndex === null ? null : arrivalLines[arrivalDialogIndex] ?? null}
@@ -756,6 +822,8 @@ const styles = StyleSheet.create({
   carpenterLock: { width: 38, height: 38, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(12,8,4,0.62)", borderWidth: 1, borderColor: "rgba(142,118,81,0.38)" },
   carpenterTitle: { color: "#C7B99D", fontFamily: "Oldenburg", fontSize: 14 },
   carpenterDescription: { color: "rgba(214,200,168,0.58)", fontSize: 11, lineHeight: 16 },
+  carpenterServiceReady: { borderColor: "#70D98A", backgroundColor: "rgba(26,74,38,0.76)" }, carpenterReadyIcon: { backgroundColor: "#237A3B", borderColor: "#70D98A" }, carpenterReadyTitle: { color: "#F5E6C8" },
+  orderOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.78)", alignItems: "center", justifyContent: "center", padding: 20 }, orderPanel: { width: "100%", maxWidth: 430, borderRadius: 18, borderWidth: 1.5, borderColor: "#C4943A", backgroundColor: "#180D04", padding: 16, gap: 10 }, orderTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, requirementRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 10, borderRadius: 10, backgroundColor: "rgba(48,27,7,0.78)" }, requirementReady: { color: "#70D98A", fontFamily: "Oldenburg", fontSize: 13 }, requirementMissing: { color: "#EF6B4B", fontFamily: "Oldenburg", fontSize: 13 },
   walletCard: { minHeight: 48, paddingHorizontal: 13, paddingVertical: 9, borderRadius: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, backgroundColor: "rgba(10,5,1,0.82)", borderWidth: 1, borderColor: "rgba(196,148,58,0.38)" }, walletLabel: { color: "#E4C882", fontFamily: "Oldenburg", fontSize: 12 }, sellOffer: { minWidth: 58, alignItems: "center", gap: 5 }, sellPrice: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4 },
   simpleRow: { minHeight: 51, borderRadius: 11, backgroundColor: "rgba(48,27,7,0.72)", paddingHorizontal: 12, paddingVertical: 9, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }, simpleName: { flex: 1, color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 12 }, goldText: { color: "#E4C882", fontFamily: "Oldenburg", fontSize: 11 }, small: { color: "#BAA986", fontSize: 10, marginTop: 3 }, empty: { color: "#BAA986", textAlign: "center", padding: 18 }, recipe: { minHeight: 57, padding: 13, borderRadius: 12, justifyContent: "center", backgroundColor: "rgba(48,27,7,0.78)", borderWidth: 1, borderColor: "rgba(196,148,58,0.32)" }, rank: { color: "#E4C882", textAlign: "center", fontFamily: "Oldenburg", fontSize: 12, marginBottom: 4 },
   stepper: { flexDirection: "row", justifyContent: "center", alignItems: "center", gap: 14, marginBottom: 3 }, stepButton: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(112,73,18,0.9)", borderWidth: 1, borderColor: "#C4943A" }, stepText: { color: "#FFF", fontSize: 22 }, runCountRow: { flexDirection: "row", alignItems: "center", gap: 4 }, runCount: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 12 }, supporterRow: { flexDirection: "row", gap: 9, alignItems: "center", padding: 8, borderRadius: 13, backgroundColor: "rgba(48,27,7,0.76)" }, supporterImage: { width: 66, height: 66, borderRadius: 11, borderWidth: 1, borderColor: "#C4943A" }, hireButton: { paddingHorizontal: 11, paddingVertical: 10, borderRadius: 9, backgroundColor: "#79521D" }, hireText: { color: "#FFF", fontFamily: "Oldenburg", fontSize: 11 }, processingCard: { gap: 9, padding: 13, borderRadius: 13, backgroundColor: "rgba(48,27,7,0.78)" }, wideButton: { minHeight: 42, borderRadius: 10, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, backgroundColor: "#79521D", borderWidth: 1, borderColor: "#C4943A", marginTop: 5 }, wideButtonText: { color: "#FFF7E5", fontFamily: "Oldenburg", fontSize: 11 }, quest: { gap: 5, padding: 12, borderRadius: 13, backgroundColor: "rgba(48,27,7,0.78)", borderWidth: 1, borderColor: "rgba(196,148,58,0.3)" }, questType: { color: "#C4943A", fontFamily: "Oldenburg", fontSize: 10, textTransform: "uppercase" }, reward: { color: "#E4C882", fontSize: 11 }, progress: { color: "#F5E6C8", fontSize: 11 }, message: { color: "#F5E6C8", textAlign: "center", backgroundColor: "rgba(54,28,6,0.95)", borderRadius: 11, padding: 11, fontSize: 12 },

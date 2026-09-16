@@ -15,6 +15,8 @@ import {
   STAT_DESCRIPTIONS,
   UPGRADE_GP_COST,
   applyStatUpgrade,
+  getEffectiveEndurance,
+  getEffectiveStrength,
   type PlayerStats,
   type UpgradableField,
 } from "@/src/game/player-stats";
@@ -57,8 +59,8 @@ export default function StatusModal({
   const statRows: { label: string; field?: UpgradableField; value: string }[] = [
     { label: "Stamina",                                  value: `${currentStamina} / ${stats.maximumStamina}` },
     { label: "Life",           field: "maximumLife",    value: `${currentLife} / ${stats.maximumLife}` },
-    { label: "Strength",       field: "strength",       value: String(stats.strength) },
-    { label: "Endurance",      field: "endurance",      value: String(stats.endurance) },
+    { label: "Strength",       field: "strength",       value: getEffectiveStrength(stats) === stats.strength ? String(stats.strength) : `${stats.strength} (+${getEffectiveStrength(stats) - stats.strength} damage)` },
+    { label: "Endurance",      field: "endurance",      value: getEffectiveEndurance(stats) === stats.endurance ? String(stats.endurance) : `${stats.endurance} (+${getEffectiveEndurance(stats) - stats.endurance})` },
     { label: "Perception",     field: "perception",     value: String(stats.perception) },
     { label: "Accuracy",       field: "accuracy",       value: String(stats.accuracy) },
     { label: "Luck",           field: "luck",            value: String(stats.luck) },

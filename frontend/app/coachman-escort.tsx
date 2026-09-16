@@ -12,7 +12,7 @@ import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bub
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { calculateIncomingPhysicalDamage, consumeArmorDurability, consumeWeaponDurability, getEquippedItem, rollPlayerPhysicalDamage } from "@/src/game/equipment-system";
 import { DEFAULT_BAG, ITEM_ATTRIBUTE, PLAYER_BAG_KEY, normalizePlayerBagData, planAddToBag, type BagItem, type PlayerBagData } from "@/src/game/item-system";
-import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
+import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, getEffectiveEndurance, getEffectiveStrength, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
 import { FOREST_MONSTERS, getForestAttackPreview } from "@/src/game/forest-dungeon-system";
 import { setCoachmanEscortPhase } from "@/src/game/coachman-escort-system";
 import { unlockNextCityAfterEscort } from "@/src/game/travel-system";
@@ -251,7 +251,7 @@ export default function CoachmanEscortScreen() {
     playWolfAttackAnimation();
     await new Promise((resolve) => setTimeout(resolve, 105));
     if (turn === 0 || isWalking) {
-      const normalDamage = Math.max(1, calculateIncomingPhysicalDamage(9, stats.endurance, armor));
+      const normalDamage = Math.max(1, calculateIncomingPhysicalDamage(9, getEffectiveEndurance(stats), armor));
       const damage = defending ? Math.max(1, Math.ceil(normalDamage / 2)) : normalDamage;
       const nextLife = Math.max(isWalking ? 0 : 1, life - damage);
       const nextBag = damage > 0 && armor ? consumeArmorDurability(bag) : bag;
@@ -298,7 +298,7 @@ export default function CoachmanEscortScreen() {
       setTimeout(() => { void wolfAttacks(bag, false, missMessage); }, 520);
       return;
     }
-    const rolledDamage = Math.max(1, rollPlayerPhysicalDamage(stats.strength, FOREST_MONSTERS.wild_wolf.physicalDefense, weapon));
+    const rolledDamage = Math.max(1, rollPlayerPhysicalDamage(getEffectiveStrength(stats), FOREST_MONSTERS.wild_wolf.physicalDefense, weapon));
     const targetedDamage = target === "head" ? Math.ceil(rolledDamage * 1.5) : rolledDamage;
     const damage = criticalHit ? targetedDamage * 2 : targetedDamage;
     const nextWolfLife = Math.max(0, wolfLife - damage);

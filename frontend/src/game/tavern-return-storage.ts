@@ -33,7 +33,10 @@ export type TavernReturnStoragePlan = {
 };
 
 const CORE_MATERIAL_ID_SET = new Set<ResourceId>(CORE_MATERIAL_IDS);
-const GARDEN_RETURN_SEED_IDS = new Set(["seed_herb", "seed_carrot", "seed_potato", "seed_onion"]);
+const GARDEN_RETURN_SEED_IDS = new Set([
+  "seed_herb", "seed_carrot", "seed_potato", "seed_onion", "seed_lettuce",
+  "seed_cucumber", "seed_spinach", "seed_tomato", "seed_pumpkin",
+]);
 let storageQueue: Promise<void> = Promise.resolve();
 
 function isCoreMaterialId(id: string): id is ResourceId {

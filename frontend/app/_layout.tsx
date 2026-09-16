@@ -73,7 +73,7 @@ export default function RootLayout() {
                 contentStyle: { backgroundColor: GAME_BACKGROUND },
               }}
             >
-              {(["kitchen", "garden", "dining", "dormitory", "mail", "outside-tavern"] as const).map((name) => (
+              {(["kitchen", "garden", "dining", "dormitory", "mail", "outside-tavern", "workshop"] as const).map((name) => (
                 <Stack.Screen
                   key={name}
                   name={name}

@@ -156,6 +156,71 @@ const GARDEN_SEED_CONFIGS: Record<string, GardenSeedConfig> = {
       containedItem: "onion",
     },
   },
+  seed_spinach: {
+    seedItemId: "seed_spinach",
+    cropType: "spinach",
+    cropAsset: "seed_spinach",
+    totalGrowthDays: 3,
+    completedGrowthDaysAtPlanting: 1,
+    baseYield: 5,
+    yieldLabel: "spinach",
+    harvestBag: {
+      id: "bag_spinach", itemType: "bag_spinach", name: "Spinach Bag",
+      quantity: 1, containedItem: "spinach",
+    },
+  },
+  seed_tomato: {
+    seedItemId: "seed_tomato",
+    cropType: "tomato",
+    cropAsset: "seed_tomato",
+    totalGrowthDays: 4,
+    completedGrowthDaysAtPlanting: 1,
+    baseYield: 5,
+    yieldLabel: "tomatoes",
+    harvestBag: {
+      id: "bag_tomato", itemType: "bag_tomato", name: "Tomato Bag",
+      quantity: 1, containedItem: "tomato",
+    },
+  },
+  seed_lettuce: {
+    seedItemId: "seed_lettuce",
+    cropType: "lettuce",
+    cropAsset: "seed_lettuce",
+    totalGrowthDays: 3,
+    completedGrowthDaysAtPlanting: 1,
+    baseYield: 5,
+    yieldLabel: "lettuce",
+    harvestBag: {
+      id: "bag_lettuce", itemType: "bag_lettuce", name: "Lettuce Bag",
+      quantity: 1, containedItem: "lettuce",
+    },
+  },
+  seed_cucumber: {
+    seedItemId: "seed_cucumber",
+    cropType: "cucumber",
+    cropAsset: "seed_cucumber",
+    totalGrowthDays: 3,
+    completedGrowthDaysAtPlanting: 1,
+    baseYield: 5,
+    yieldLabel: "cucumbers",
+    harvestBag: {
+      id: "bag_cucumber", itemType: "bag_cucumber", name: "Cucumber Bag",
+      quantity: 1, containedItem: "cucumber",
+    },
+  },
+  seed_pumpkin: {
+    seedItemId: "seed_pumpkin",
+    cropType: "pumpkin",
+    cropAsset: "seed_pumpkin",
+    totalGrowthDays: 5,
+    completedGrowthDaysAtPlanting: 1,
+    baseYield: 5,
+    yieldLabel: "pumpkins",
+    harvestBag: {
+      id: "bag_pumpkin", itemType: "bag_pumpkin", name: "Pumpkin Bag",
+      quantity: 1, containedItem: "pumpkin",
+    },
+  },
 };
 
 /** Converts legacy save data to the canonical seed IDs. */
@@ -212,7 +277,7 @@ export function getCropYieldLabel(seedItemId: string | null): string {
 
 /**
  * Crops count the planting day as day 1. Watering advances them when the next
- * game day begins, so four-day crops are ready on day 4 and onions on day 5.
+ * game day begins, so every crop becomes ready on its configured growth day.
  */
 export function createCarrotPlot(): GardenPlotData {
   return createGardenPlotFromSeed(SECOND_GARDEN_PLOT_EMPTY, "seed_carrot")!;

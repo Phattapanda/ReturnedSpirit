@@ -12,20 +12,21 @@ import SceneBackground from "@/src/components/SceneBackground";
 import TravelHeader from "@/src/components/travel-header";
 import DeathAngelOverlay from "@/src/components/death-angel-overlay";
 import ItemDurabilityBadge from "@/src/components/item-durability-badge";
+import ScrollActivationOverlay from "@/src/components/scroll-activation-overlay";
 import { getItemImageSource } from "@/src/components/PlayerBag";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { useHaptics } from "@/src/feedback/haptics-provider";
 import {
   FOREST_FLOOR_COUNT, FOREST_FORWARD_STAMINA_COST, FOREST_MONSTERS, FOREST_REST_FLOORS,
   getForestAmbushCriticalChance, getForestAttackPreview, getForestHideChance, getForestSearchPreview,
-  ambushHiddenForestMonster, attackForestMonster, bandageAtForestRestArea, defendAgainstForestMonster, escapeForestCombat,
+  ambushHiddenForestMonster, attackForestMonster, castEquippedForestScroll, bandageAtForestRestArea, defendAgainstForestMonster, escapeForestCombat,
   collectPendingForestCarcass, dismissPendingForestLoot, enterForestDungeon, forestAreaForFloor, goForwardInForest, hideFromForestMonster, leaveForestDungeon, letHiddenForestMonsterPass, searchForestArea,
   type DungeonActionResult, type ForestDungeonState, type ForestMonsterId,
 } from "@/src/game/forest-dungeon-system";
 import { beginChosenNextRun, repeatForestFight, returnToTavernAfterForestDeath } from "@/src/game/death-angel-system";
 import { loadProgressionState } from "@/src/game/progression";
 import type { NextRunBonuses } from "@/src/game/next-run";
-import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats } from "@/src/game/player-stats";
+import { ACCURACY_HIT_CHANCE_PER_POINT, DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats } from "@/src/game/player-stats";
 import { completeDungeonDayTransition } from "@/src/game/dungeon-day-transition";
 import { EMBER_ROOSTER_ENCOUNTER_SEEN_KEY } from "@/src/game/encounter-cinematics";
 import { activeSupporter, discardSupporterItem, eatSupporterItem, loadSupporterBag, moveSupporterItemToPlayer, type SupporterId } from "@/src/game/city-system";
@@ -64,6 +65,10 @@ const ATTACK_IMAGES = {
   slash: require("../assets/images/slash.png"),
   critical: require("../assets/images/critical.png"),
   punch: require("../assets/images/punch.png"),
+  fire_bolt_scroll: require("../assets/images/fire_bolt_scroll.png"),
+  ice_field_scroll: require("../assets/images/ice_field_scroll.png"),
+  lightning_bolt_scroll: require("../assets/images/lightning_bolt_scroll.png"),
+  gravitas_scroll: require("../assets/images/gravitas_scroll.png"),
 } as const;
 
 function CombatMessage({ message }: { message: string }) {
@@ -71,7 +76,7 @@ function CombatMessage({ message }: { message: string }) {
   return <Text selectable style={styles.message}>{sentences.map((sentence, index) => {
     const cleanSentence = sentence.trim();
     const received = /hits me for \d+ damage|lose \d+ Life/i.test(cleanSentence);
-    const dealt = /I hit .* for \d+ damage|strike critically for \d+ damage|strikes for \d+ damage/i.test(cleanSentence);
+    const dealt = /I hit .* for \d+ damage|strike critically for \d+ damage|strikes for \d+ damage|Scroll hits .* for \d+/i.test(cleanSentence);
     return <Text key={`${index}-${cleanSentence}`} style={received ? styles.damageReceived : dealt ? styles.damageDealt : undefined}>{index > 0 ? " " : ""}{cleanSentence}</Text>;
   })}</Text>;
 }
@@ -136,6 +141,7 @@ export default function ForestEntranceScreen() {
   const [floorTransitionActive, setFloorTransitionActive] = useState(false);
   const [supporterAction, setSupporterAction] = useState<{ slot: number; item: BagItem } | null>(null);
   const [attackEffect, setAttackEffect] = useState<keyof typeof ATTACK_IMAGES | null>(null);
+  const [scrollActivationKey, setScrollActivationKey] = useState(0);
   const [defeatedMonsterVisible, setDefeatedMonsterVisible] = useState(false);
   const [lootFlights, setLootFlights] = useState<NonNullable<DungeonActionResult["lootFlights"]>>([]);
   const scrollRef = useRef<ScrollView>(null);
@@ -350,7 +356,7 @@ export default function ForestEntranceScreen() {
   async function playPlayerAttackAnimation(kind: keyof typeof ATTACK_IMAGES) {
     setAttackEffect(kind);
     monsterOpacity.value = 1;
-    playSoundEffect(kind === "punch" ? "combat-impact" : "sword-hit", { maxDurationMs: 2200 });
+    playSoundEffect(kind === "punch" || kind.endsWith("_scroll") ? "combat-impact" : "sword-hit", { maxDurationMs: 2200 });
     monsterOpacity.value = withSequence(
       withTiming(0.22, { duration: 70 }), withTiming(1, { duration: 70 }),
       withTiming(0.22, { duration: 70 }), withTiming(1, { duration: 70 }),
@@ -379,6 +385,10 @@ export default function ForestEntranceScreen() {
     setBusy(true); triggerHaptic("choice");
     try {
       const result = await action();
+      if (result.scrollActivated) {
+        setScrollActivationKey((current) => current + 1);
+        await new Promise((resolve) => setTimeout(resolve, 560));
+      }
       if (result.playerAttack) await playPlayerAttackAnimation(result.playerAttack.kind);
       const monsterAttacked = /hits me for|I evade|cannot get through/i.test(result.message);
       if (monsterAttacked) {
@@ -578,6 +588,15 @@ export default function ForestEntranceScreen() {
       : `${preview.minimumDamage}–${preview.maximumDamage} dmg`;
     return `${damage} · ${preview.hitChance}% hit chance`;
   };
+  const combatScroll = combatBag.slots.find((item) => item?.equipped && ["fire_bolt_scroll", "ice_field_scroll", "lightning_bolt_scroll", "gravitas_scroll"].includes(item.id));
+  const scrollStats: Record<string, { damage: number; accuracy: number }> = {
+    fire_bolt_scroll: { damage: 25, accuracy: 90 }, ice_field_scroll: { damage: 20, accuracy: 110 },
+    lightning_bolt_scroll: { damage: 45, accuracy: 85 }, gravitas_scroll: { damage: 40, accuracy: 95 },
+  };
+  const scrollPreview = combatScroll && monsterState ? scrollStats[combatScroll.id] : null;
+  const scrollSubtitle = combatScroll && scrollPreview && monsterState
+    ? `${combatScroll.name} · ${scrollPreview.damage} dmg · ${Math.max(0, Math.min(100, scrollPreview.accuracy + combatStats.accuracy * ACCURACY_HIT_CHANCE_PER_POINT - (FOREST_MONSTERS[monsterState.id].agility ?? 0)))}% hit · ${combatScroll.usesRemaining ?? combatScroll.maxUses}/${combatScroll.maxUses} uses`
+    : "Consumes one use, even on a miss";
 
   const actionContent = useMemo(() => {
     if (!state || !floor) return null;
@@ -599,6 +618,7 @@ export default function ForestEntranceScreen() {
     if (monsterState?.phase === "combat") return <View style={styles.combatGrid}>
       <ActionButton label="Attack Head" subtitle={attackSubtitle("head")} disabled={busy} onPress={() => { void perform(() => attackForestMonster("head")); }} />
       <ActionButton label="Attack Body" subtitle={attackSubtitle("body")} disabled={busy} onPress={() => { void perform(() => attackForestMonster("body")); }} />
+      {combatScroll ? <ActionButton label="Cast Scroll" subtitle={scrollSubtitle} disabled={busy} onPress={() => { void perform(castEquippedForestScroll); }} /> : null}
       <ActionButton label="Defend" subtitle="30% + Luck dodge" disabled={busy} onPress={() => { void perform(defendAgainstForestMonster); }} />
       <ActionButton label="Escape" subtitle="50% + Luck chance" danger disabled={busy} onPress={() => { void perform(escapeForestCombat); }} />
     </View>;
@@ -726,6 +746,7 @@ export default function ForestEntranceScreen() {
         style={[StyleSheet.absoluteFill, styles.floorTransitionBlack, floorBlackStyle]}
       />
     ) : null}
+    <ScrollActivationOverlay activationKey={scrollActivationKey} />
   </View>;
 }
 

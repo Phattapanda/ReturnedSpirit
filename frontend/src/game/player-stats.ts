@@ -82,6 +82,14 @@ export function getEffectiveLuck(stats: PlayerStats): number {
   return stats.luck + getStatusModifiers(stats.statusEffects).luck;
 }
 
+export function getEffectiveStrength(stats: PlayerStats): number {
+  return stats.strength + getStatusModifiers(stats.statusEffects).physicalDamageBonus;
+}
+
+export function getEffectiveEndurance(stats: PlayerStats): number {
+  return stats.endurance + getStatusModifiers(stats.statusEffects).endurance;
+}
+
 /** Central cost formula: Endurance and active effects can reduce an action to zero. */
 export function calcEffectiveStaminaCost(
   baseCost: number,

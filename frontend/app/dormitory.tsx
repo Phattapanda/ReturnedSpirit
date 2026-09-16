@@ -667,6 +667,7 @@ export default function DormitoryScreen() {
       const slotNum = await updateSaveSlot(newDay, newSta, newLife);
       if (slotNum > 0) {
         await createSnapshot(slotNum, "day_transition");
+        notifyLocationStatusChanged();
         const rawUpdatedStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
         if (rawUpdatedStats) setPlayerStats(normalizePlayerStats(JSON.parse(rawUpdatedStats)));
       }

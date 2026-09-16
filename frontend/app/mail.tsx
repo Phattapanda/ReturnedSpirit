@@ -287,19 +287,24 @@ export default function MailScreen() {
                   const selected = selectedMessageId === message.id;
                   return (
                     <SwipeToDelete key={message.id} enabled={message.read && (message.claimed || message.rewards.length === 0)} onDelete={() => { void deleteMessage(message.id); }}>
-                    <View style={[styles.messageCard, !message.read && styles.messageCardUnread]}>
+                    <View style={[
+                      styles.messageCard,
+                      !message.read && styles.messageCardUnread,
+                      message.read && styles.messageCardRead,
+                      message.claimed && styles.messageCardClaimed,
+                    ]}>
                       <TouchableOpacity style={styles.messageHeader} onPress={() => openMessage(message.id)} activeOpacity={0.8}>
                         <View style={styles.senderIcon}>
-                          <Ionicons name={senderIcon(message.senderKind)} size={22} color="#E7C77A" />
+                          <Ionicons name={senderIcon(message.senderKind)} size={22} color={message.read ? "#8E877A" : "#E7C77A"} />
                         </View>
                         <View style={styles.messageHeaderText}>
                           <View style={styles.senderRow}>
-                            <Text style={styles.sender}>{message.sender}</Text>
+                            <Text style={[styles.sender, message.read && styles.messageHeaderTextRead]}>{message.sender}</Text>
                             {!message.read && <View style={styles.unreadDot} />}
                           </View>
-                          <Text style={styles.subject}>{message.subject}</Text>
+                          <Text style={[styles.subject, message.read && styles.messageHeaderTextRead]}>{message.subject}</Text>
                         </View>
-                        <Ionicons name={selected ? "chevron-up" : "chevron-down"} size={20} color="#C4943A" />
+                        <Ionicons name={selected ? "chevron-up" : "chevron-down"} size={20} color={message.read ? "#81796C" : "#C4943A"} />
                       </TouchableOpacity>
                       {selected && (
                         <View style={styles.messageBody}>
@@ -435,6 +440,8 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(48,27,7,0.68)", overflow: "hidden",
   },
   messageCardUnread: { borderColor: "rgba(231,199,122,0.72)", backgroundColor: "rgba(68,39,9,0.80)" },
+  messageCardRead: { borderColor: "rgba(150,145,135,0.24)", backgroundColor: "rgba(36,32,27,0.72)" },
+  messageCardClaimed: { borderColor: "rgba(128,124,117,0.18)", backgroundColor: "rgba(29,27,24,0.66)", opacity: 0.76 },
   swipeClip: { borderRadius: 13, overflow: "hidden" },
   swipeHint: { color: "rgba(240,232,213,0.48)", fontSize: 11, textAlign: "center", paddingTop: 4 },
   messageHeader: { minHeight: 68, flexDirection: "row", alignItems: "center", gap: 10, padding: 10 },
@@ -446,6 +453,7 @@ const styles = StyleSheet.create({
   senderRow: { flexDirection: "row", alignItems: "center", gap: 7 },
   sender: { color: "#C4943A", fontFamily: "Oldenburg", fontSize: 11 },
   subject: { color: "#F0E8D5", fontFamily: "Oldenburg", fontSize: 13, lineHeight: 18 },
+  messageHeaderTextRead: { color: "rgba(190,185,176,0.68)" },
   unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#69C56D" },
   messageBody: { paddingHorizontal: 12, paddingBottom: 12, gap: 11 },
   bodyText: { color: "rgba(240,232,213,0.82)", fontSize: 13, lineHeight: 20 },

@@ -23,6 +23,7 @@ import { MERCHANT_STOCK, prepareMerchantShop, purchaseMerchantItem, type Merchan
 import { finalizeCoachmanEscortDecline, hasCompletedCityRoadEncounter, loadCoachmanEscortState, prepareCoachmanEscortDeparture, reconsiderCoachmanEscort } from "@/src/game/coachman-escort-system";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
 import { QUESTS, isQuestReadyToTurnIn, loadCityState, turnInQuest, type CityState, type QuestId } from "@/src/game/city-system";
+import { loadWorkshopState } from "@/src/game/workshop-system";
 
 const BACKGROUND = require("../assets/images/outsidetavern1.png");
 const COACHMAN = require("../assets/images/coachman.png");
@@ -35,9 +36,11 @@ const DIALOGUE_RECEPTIONIST = require("../assets/images/dialog/dialogue_receptio
 const STOCK_IMAGES: Partial<Record<MerchantStockId, ReturnType<typeof require>>> = {
   bucket: BUCKET,
   egg: require("../assets/images/egg.png"),
-  chicken: require("../assets/images/meat_white.png"),
+  white_meat: require("../assets/images/meat_white.png"),
   fish: require("../assets/images/meat_fish.png"),
-  beef: require("../assets/images/meat_red.png"),
+  red_meat: require("../assets/images/meat_red.png"),
+  mushroom: require("../assets/images/mushroom.png"),
+  mushroom_rare: require("../assets/images/mushroom_rare.png"),
   bag2: BACKPACK,
   crate1: SMALL_CRATE,
   seed_herb: require("../assets/images/seed_herb.png"),
@@ -52,6 +55,7 @@ const STOCK_IMAGES: Partial<Record<MerchantStockId, ReturnType<typeof require>>>
   armor_leather_bracers: require("../assets/images/armor_leather_bracers.png"),
   weapon_iron_dagger: require("../assets/images/weapon_iron_dagger.png"),
   weapon_iron_shortsword: require("../assets/images/weapon_iron_shortsword.png"),
+  mortar_and_pestle: require("../assets/images/mortar_and_pestle.png"),
 };
 
 type OutsideView = "menu" | "coachman" | "merchant" | "walk" | "receptionist";
@@ -96,18 +100,20 @@ export default function OutsideTavernScreen() {
   const [forestTravelConfirmationMode, setForestTravelConfirmationMode] = useState<"coachman" | "walk" | null>(null);
   const [forestTravelBusy, setForestTravelBusy] = useState(false);
   const [coachmanReoffer, setCoachmanReoffer] = useState<"question" | "accepted" | "declined" | null>(null);
+  const [workshopComplete, setWorkshopComplete] = useState(false);
 
   useFocusEffect(useCallback(() => {
     let active = true;
     setForestTravelConfirmationMode(null);
     setForestTravelBusy(false);
     (async () => {
-      const [rawDay, guestState, postGuestState, escortState, travelState] = await Promise.all([
+      const [rawDay, guestState, postGuestState, escortState, travelState, workshopState] = await Promise.all([
         AsyncStorage.getItem("@game:day_index"),
         loadGuestState(),
         loadPostGuestTutorialState(),
         loadCoachmanEscortState(),
         loadTravelState(),
+        loadWorkshopState(),
       ]);
       const day = Math.max(0, Number.parseInt(rawDay ?? "0", 10) || 0) % 7;
       const coachman = await getCoachmanTravelStatus(day);
@@ -127,6 +133,7 @@ export default function OutsideTavernScreen() {
       setForestEntranceUnlocked(
         escortState.phase === "complete" && travelState.unlockedDestinations.includes("forest_entrance"),
       );
+      setWorkshopComplete(workshopState.phase === "complete");
       const [loadedCityState, rawBag] = await Promise.all([
         loadCityState(),
         AsyncStorage.getItem(PLAYER_BAG_KEY),
@@ -305,6 +312,7 @@ export default function OutsideTavernScreen() {
         {receptionistPresent && optionButton("Talk to Guild Receptionist", RECEPTIONIST, () => chooseView("receptionist"))}
         {coachmanAvailable && optionButton("Talk to Coachman", COACHMAN, () => { void chooseCoachmanView(); })}
         {merchantAvailable && optionButton("Talk to Merchant", MERCHANT, () => { void openMerchant(); })}
+        {workshopComplete && optionButton("Enter the Workshop", null, () => router.push("/workshop"))}
         {optionButton("Travel on foot", null, () => chooseView("walk"))}
       </View>}
       {view === "receptionist" && <View style={styles.panel}>

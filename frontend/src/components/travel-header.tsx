@@ -5,7 +5,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
+import PlayerBag, { BagIconButton, type BagContext } from "@/src/components/PlayerBag";
 import CurrencyHud from "@/src/components/CurrencyHud";
 import StatusModal from "@/src/components/StatusModal";
 import QuestBookButton from "@/src/components/quest-book";
@@ -29,9 +29,11 @@ type Props = {
   onStatsUpdated?: (stats: PlayerStats) => void;
   externalUseItemIds?: readonly string[];
   onUseItem?: (slotIdx: number, item: BagItem) => void | Promise<void>;
+  bagContext?: BagContext;
+  onBagTransferItem?: (slotIdx: number, item: BagItem) => void | Promise<void>;
 };
 
-export default function TravelHeader({ locationName, showPortraitRow = false, onHeaderHeightChange, onPortraitBottomChange, refreshKey = 0, bagAttention = false, supporterImage, onSupporterPress, onBagUpdated, onStatsUpdated, externalUseItemIds, onUseItem }: Props) {
+export default function TravelHeader({ locationName, showPortraitRow = false, onHeaderHeightChange, onPortraitBottomChange, refreshKey = 0, bagAttention = false, supporterImage, onSupporterPress, onBagUpdated, onStatsUpdated, externalUseItemIds, onUseItem, bagContext = "none", onBagTransferItem }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [stamina, setStamina] = useState(0);
@@ -127,10 +129,10 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
       <PlayerBag
         bag={bag}
         visible={bagOpen}
-        context="none"
+        context={bagContext}
         dayIdx={dayIdx}
         onClose={() => setBagOpen(false)}
-        onTransferItem={() => {}}
+        onTransferItem={async (slotIdx, item) => { await onBagTransferItem?.(slotIdx, item); }}
         onBagUpdated={(nextBag) => { setBag(nextBag); onBagUpdated?.(nextBag); }}
         onStatsUpdated={(nextStats) => { setStats(nextStats); onStatsUpdated?.(nextStats); }}
         onStaminaUpdated={setStamina}

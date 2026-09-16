@@ -42,7 +42,7 @@ import {
 import { DEFAULT_PROGRESSION_STATE, PROGRESSION_STATE_KEY } from "@/src/game/progression";
 import { flushPlaytime } from "@/src/game/playtime-tracker";
 import { DEFAULT_TRAVEL_STATE, TRAVEL_STATE_KEY } from "@/src/game/travel-system";
-import { DISCOVERED_RECIPES_KEY } from "@/src/game/cooking-system";
+import { DISCOVERED_RECIPES_KEY, RUPERT_MORTAR_RECIPE_DIALOG_SEEN_KEY } from "@/src/game/cooking-system";
 import { MERCHANT_SHOP_KEY } from "@/src/game/merchant-shop";
 import { DEFAULT_MAILBOX_STATE, MAILBOX_STATE_KEY, deliverDailyBonusLetters } from "@/src/game/mailbox-system";
 import { KITCHEN_SMALL_CRATE_KEY } from "@/src/game/kitchen-small-crate";
@@ -52,6 +52,7 @@ import { EMBER_ROOSTER_ENCOUNTER_SEEN_KEY } from "@/src/game/encounter-cinematic
 import { RUPERT_ALCHEMY_INTRO_PENDING_KEY, RUPERT_ALCHEMY_INTRO_SEEN_KEY } from "@/src/game/rupert-alchemy-intro";
 import { DEFAULT_MINSTREL_STATE, MINSTREL_STATE_KEY } from "@/src/game/minstrel-system";
 import { CITY_STATE_KEY, SUPPORTER_BAG_KEY } from "@/src/game/city-system";
+import { advanceWorkshopConstruction, DEFAULT_WORKSHOP_STATE, WORKSHOP_CRAFT_INGREDIENTS_KEY, WORKSHOP_CRAFT_RESULT_KEY, WORKSHOP_CRAFT_TOOL_KEY, WORKSHOP_STATE_KEY, WORKSHOP_STORAGE_KEY } from "@/src/game/workshop-system";
 import {
   DEFAULT_TITHE_STATE,
   ELAPSED_DAYS_KEY,
@@ -93,6 +94,11 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   MINSTREL_STATE_KEY,
   CITY_STATE_KEY,
   SUPPORTER_BAG_KEY,
+  WORKSHOP_STATE_KEY,
+  WORKSHOP_STORAGE_KEY,
+  WORKSHOP_CRAFT_INGREDIENTS_KEY,
+  WORKSHOP_CRAFT_TOOL_KEY,
+  WORKSHOP_CRAFT_RESULT_KEY,
   // Kitchen tutorial flags
   "@tutorial:kitchen_done",
   "@kitchen:has_seen_post_garden_dialog",
@@ -111,6 +117,7 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   EMBER_ROOSTER_ENCOUNTER_SEEN_KEY,
   RUPERT_ALCHEMY_INTRO_PENDING_KEY,
   RUPERT_ALCHEMY_INTRO_SEEN_KEY,
+  RUPERT_MORTAR_RECIPE_DIALOG_SEEN_KEY,
   DISCOVERED_RECIPES_KEY,
   // Garden state
   "@garden:has_entered",
@@ -181,6 +188,11 @@ export async function createSnapshot(
         [DISCOVERED_RECIPES_KEY, JSON.stringify([])],
         [MAILBOX_STATE_KEY, JSON.stringify(DEFAULT_MAILBOX_STATE)],
         [MINSTREL_STATE_KEY, JSON.stringify(DEFAULT_MINSTREL_STATE)],
+        [WORKSHOP_STATE_KEY, JSON.stringify(DEFAULT_WORKSHOP_STATE)],
+        [WORKSHOP_STORAGE_KEY, JSON.stringify(Array(12).fill(null))],
+        [WORKSHOP_CRAFT_INGREDIENTS_KEY, JSON.stringify(Array(3).fill(null))],
+        [WORKSHOP_CRAFT_TOOL_KEY, JSON.stringify(null)],
+        [WORKSHOP_CRAFT_RESULT_KEY, JSON.stringify(null)],
       ]);
     }
 
@@ -192,6 +204,7 @@ export async function createSnapshot(
       const newDay = rawDay !== null ? parseInt(rawDay, 10) : 0;
       const guestState = await advanceGuestCalendar(newDay);
       await deliverDailyBonusLetters(guestState.calendarDaySerial);
+      await advanceWorkshopConstruction(guestState.calendarDaySerial);
       await advanceSecondGardenPlotDay();
       const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
       const stats = normalizePlayerStats(rawStats ? JSON.parse(rawStats) : null);

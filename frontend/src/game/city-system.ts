@@ -13,7 +13,7 @@ import { loadGuestState } from "@/src/game/guest-system";
 import {
   DEFAULT_BAG, ITEM_ATTRIBUTE, ITEM_CATALOG, PLAYER_BAG_KEY,
   applyLifeRecovery, applyStaminaRecovery, canConsumeForStamina, isConsumable, isEdible,
-  hasItemAttribute, normalizePlayerBagData, planAddToBag, planAddToNextFreeBagSlot, removeBagItem,
+  hasItemAttribute, isItemDiscardable, normalizePlayerBagData, planAddToBag, planAddToNextFreeBagSlot, removeBagItem,
   upgradeToBigBackpack, type BagItem, type PlayerBagData,
 } from "@/src/game/item-system";
 import { deliverMailboxMessage, type MailReward } from "@/src/game/mailbox-system";
@@ -21,6 +21,7 @@ import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats } from "@/
 import { loadCoachmanEscortState, setCoachmanEscortPhase } from "@/src/game/coachman-escort-system";
 import { getButcheringDefinition, rollButcheringOutputs } from "@/src/game/butchering-system";
 import { addKarmaPoints } from "@/src/game/progression";
+import { GARDEN_INVENTORY_KEY, normalizeGardenInventory } from "@/src/game/tavern-return-storage";
 
 export const CITY_STATE_KEY = "@game:next_city";
 export const SUPPORTER_BAG_KEY = "@game:supporter_bag";
@@ -71,9 +72,11 @@ export const QUESTS = {
 const RANK_H_QUEST_KARMA_POINTS = 3;
 
 export type CityState = {
-  version: 2;
+  version: 3;
   foodStockDay: number;
   foodStock: string[];
+  marketPurchasePeriods: { food: number; farm: number };
+  marketPurchases: { food: Record<string, number>; farm: Record<string, number> };
   supporter: { id: SupporterId; runsRemaining: number; announcedRunSerial: number | null } | null;
   guildReputation: number;
   adventurerRankIndex: number;
@@ -106,11 +109,16 @@ const DEFAULT_QUESTS: CityState["quests"] = {
   camp: { status: "offered", progress: 0 }, healing: { status: "offered", progress: 0 },
 };
 
-const FOOD_STALL_ITEMS = ["potato", "carrot", "onion", "tomato", "cucumber", "lettuce", "egg", "white_meat", "red_meat", "herbs", "mushroom"];
+const FOOD_STALL_ITEMS = ["herbs", "carrot", "potato", "onion", "tomato", "cucumber", "lettuce", "spinach", "pumpkin", "mushroom"];
 
 function foodStock(day: number): string[] {
-  const omitted = ((Math.floor(day) % FOOD_STALL_ITEMS.length) + FOOD_STALL_ITEMS.length) % FOOD_STALL_ITEMS.length;
-  return FOOD_STALL_ITEMS.filter((_, index) => index !== omitted);
+  void day;
+  return [...FOOD_STALL_ITEMS];
+}
+
+function marketPeriod(day: number, weekday: number, resetWeekday: number): number {
+  const daysSinceReset = ((weekday - resetWeekday) % 7 + 7) % 7;
+  return Math.floor(day - daysSinceReset);
 }
 
 function merchantWeek(day: number, weekday: number): number {
@@ -128,12 +136,21 @@ function normalizeCityState(raw: unknown, day: number, weekday: number): CitySta
   const currentMerchantWeek = merchantWeek(day, weekday);
   const validContract = (id: unknown): id is MerchantContractId => typeof id === "string" && id in MERCHANT_CONTRACTS;
   const normalizedMerchantReputation = Math.max(0, Math.floor(value.merchantReputation ?? 0));
+  const foodPeriod = marketPeriod(day, weekday, 0);
+  const farmPeriod = marketPeriod(day, weekday, 1);
+  const savedPeriods = value.marketPurchasePeriods;
+  const savedPurchases = value.marketPurchases;
   return {
-    version: 2,
+    version: 3,
     foodStockDay: value.foodStockDay === day ? day : day,
-    foodStock: value.version === 2 && value.foodStockDay === day && Array.isArray(value.foodStock)
+    foodStock: value.version === 3 && value.foodStockDay === day && Array.isArray(value.foodStock)
       ? value.foodStock.filter((id) => FOOD_STALL_ITEMS.includes(id)).slice(0, 10)
       : foodStock(day),
+    marketPurchasePeriods: { food: foodPeriod, farm: farmPeriod },
+    marketPurchases: {
+      food: savedPeriods?.food === foodPeriod && savedPurchases?.food ? savedPurchases.food : {},
+      farm: savedPeriods?.farm === farmPeriod && savedPurchases?.farm ? savedPurchases.farm : {},
+    },
     supporter: value.supporter && SUPPORTERS[value.supporter.id]
       ? { id: value.supporter.id, runsRemaining: Math.max(0, Math.min(3, Math.floor(value.supporter.runsRemaining))), announcedRunSerial: value.supporter.announcedRunSerial ?? null }
       : null,
@@ -438,6 +455,58 @@ export async function buyCityItem(id: string, priceCopper: number, quantity = 1)
   return { ok: true, message: `${item.quantity > 1 ? `${item.quantity}× ` : ""}${item.name} added to my bag.` };
 }
 
+export type CityMarketShop = "food" | "farm";
+
+export async function buyCityMarketItem(
+  shop: CityMarketShop,
+  id: string,
+  priceCopper: number,
+  weeklyLimit: number,
+): Promise<CityActionResult> {
+  const state = await loadCityState();
+  const bought = Math.max(0, Math.floor(state.marketPurchases[shop][id] ?? 0));
+  if (bought >= weeklyLimit) {
+    return { ok: false, message: `The weekly purchase limit for ${ITEM_CATALOG[id]?.name ?? id} has been reached.` };
+  }
+  if (id.startsWith("seed_")) {
+    const bag = await loadBag();
+    if (!bag.unlocked) return { ok: false, message: "I need my bag first." };
+    const balance = await loadCurrencyCopper();
+    if (balance < priceCopper) return { ok: false, message: "I do not have enough coins." };
+    const rawGardenInventory = await AsyncStorage.getItem(GARDEN_INVENTORY_KEY);
+    const inventory = normalizeGardenInventory(rawGardenInventory);
+    const existing = inventory.find((item) => item.id === id && item.itemType === "seed");
+    if (existing) existing.quantity += 1;
+    else inventory.push({ id, itemType: "seed", name: ITEM_CATALOG[id]?.name ?? id, quantity: 1 });
+    state.marketPurchases[shop] = { ...state.marketPurchases[shop], [id]: bought + 1 };
+    await AsyncStorage.multiSet([
+      [GARDEN_INVENTORY_KEY, JSON.stringify(inventory)],
+      [CITY_STATE_KEY, JSON.stringify(state)],
+      [CURRENCY_KEY, String(balance - priceCopper)],
+    ]);
+    notifyCurrencyChanged(balance - priceCopper);
+    return { ok: true, message: `${ITEM_CATALOG[id]?.name ?? id} sent to Garden Storage. ${weeklyLimit - bought - 1} remaining until the weekly reset.` };
+  }
+  const bag = await loadBag();
+  if (!bag.unlocked) return { ok: false, message: "I need my bag first." };
+  const item = createItem(id);
+  const plan = item.maxDurability === undefined || id === "torch"
+    ? planAddToBag(item, bag)
+    : planAddToNextFreeBagSlot(item, bag);
+  const fits = "ok" in plan ? plan.ok : plan.canTransfer && plan.remainderQty === 0;
+  if (!fits) return { ok: false, message: "My bag is full." };
+  const balance = await loadCurrencyCopper();
+  if (balance < priceCopper) return { ok: false, message: "I do not have enough coins." };
+  state.marketPurchases[shop] = { ...state.marketPurchases[shop], [id]: bought + 1 };
+  await AsyncStorage.multiSet([
+    [PLAYER_BAG_KEY, JSON.stringify({ ...bag, slots: plan.updatedSlots })],
+    [CITY_STATE_KEY, JSON.stringify(state)],
+    [CURRENCY_KEY, String(balance - priceCopper)],
+  ]);
+  notifyCurrencyChanged(balance - priceCopper);
+  return { ok: true, message: `${item.name} added to my bag. ${weeklyLimit - bought - 1} remaining until the weekly reset.` };
+}
+
 export function merchantPrice(basePrice: number, reputation: number): number {
   const discountPercent = Math.min(20, Math.floor(Math.max(0, reputation) / 10));
   return Math.max(1, Math.floor(basePrice * (100 - discountPercent) / 100));
@@ -542,8 +611,13 @@ export async function completeTempleBlessingExpedition(): Promise<void> {
   state.blessing = null; await saveCityState(state);
 }
 
-const BASE_PRICES: Record<string, number> = { potato: 6, carrot: 6, onion: 7, tomato: 8, cucumber: 8, lettuce: 8, egg: 8, white_meat: 14, red_meat: 18, herbs: 7, mushroom: 9, fish: 14, rope: 9, cloth: 17, empty_bottle: 9 };
-export const CITY_BUY_PRICES = Object.fromEntries(Object.entries(BASE_PRICES).map(([id, price]) => [id, Math.floor(price * 1.2)]));
+const BASE_PRICES: Record<string, number> = { potato: 6, carrot: 6, onion: 7, tomato: 8, cucumber: 8, lettuce: 8, spinach: 14, pumpkin: 17, egg: 8, white_meat: 14, red_meat: 18, herbs: 7, mushroom: 9, fish: 14, rope: 9, cloth: 17, empty_bottle: 9 };
+export const CITY_BUY_PRICES: Record<string, number> = {
+  ...Object.fromEntries(Object.entries(BASE_PRICES).map(([id, price]) => [id, Math.floor(price * 1.2)])),
+  herbs: 6, carrot: 8, potato: 10, onion: 12, tomato: 18, cucumber: 16, lettuce: 14, spinach: 17, pumpkin: 20,
+  egg: 14, fish: 25, white_meat: 23, red_meat: 28,
+  seed_lettuce: 24, seed_cucumber: 28, seed_spinach: 30, seed_tomato: 32, seed_pumpkin: 36,
+};
 export function citySellPrice(id: string): number { return Math.ceil((BASE_PRICES[id] ?? ITEM_CATALOG[id]?.baseSellPriceCopper ?? 2) * 0.5); }
 
 export async function sellCityItem(slot: number): Promise<CityActionResult> {
@@ -557,6 +631,7 @@ export async function sellCityItem(slot: number): Promise<CityActionResult> {
 
 export async function repairCityItem(slot: number): Promise<CityActionResult> {
   const bag = await loadBag(); const item = bag.slots[slot];
+  if (item?.id === "scroll" || item?.id.endsWith("_scroll")) return { ok: false, message: "Scrolls cannot be repaired by the Blacksmith." };
   if (!item?.maxDurability || item.durability === item.maxDurability) return { ok: false, message: "That item does not need repairs." };
   const balance = await loadCurrencyCopper(); if (balance < 20) return { ok: false, message: `I need ${formatCurrencyAmount(20)} for the repair.` };
   const slots = [...bag.slots]; slots[slot] = { ...item, durability: item.maxDurability };
@@ -621,7 +696,7 @@ export async function moveSupporterItemToPlayer(slot: number): Promise<CityActio
 export async function discardSupporterItem(slot: number): Promise<CityActionResult> {
   const bag = await loadSupporterBag(); const item = bag?.slots[slot];
   if (!bag || !item) return { ok: false, message: "That Supporter Bag slot is empty." };
-  if (hasItemAttribute(item, ITEM_ATTRIBUTE.QUEST_ITEM)) return { ok: false, message: "Quest Items cannot be discarded." };
+  if (!isItemDiscardable(item)) return { ok: false, message: hasItemAttribute(item, ITEM_ATTRIBUTE.QUEST_ITEM) ? "Quest Items cannot be discarded." : "This tool cannot be discarded." };
   await AsyncStorage.setItem(SUPPORTER_BAG_KEY, JSON.stringify(removeBagItem(bag, slot, item.quantity)));
   return { ok: true, message: `${item.name} discarded.` };
 }

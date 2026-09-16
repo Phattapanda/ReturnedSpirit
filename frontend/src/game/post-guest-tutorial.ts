@@ -32,6 +32,7 @@ import {
   PLAYER_STATS_KEY,
   calcEffectiveStaminaCost,
   getActiveStaminaBuffReduction,
+  getEffectiveEndurance,
   normalizePlayerStats,
 } from "@/src/game/player-stats";
 import { loadTavernQuestState } from "@/src/game/tavern-quest-system";
@@ -636,7 +637,7 @@ export async function cleanGuestAreaOnce(): Promise<CleanGuestAreaResult> {
   }
   const staminaCost = calcEffectiveStaminaCost(
     GUEST_AREA_CLEAN_STAMINA_COST,
-    stats.endurance,
+    getEffectiveEndurance(stats),
     getActiveStaminaBuffReduction(stats),
   );
 

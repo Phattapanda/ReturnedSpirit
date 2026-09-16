@@ -26,6 +26,7 @@ import Animated, {
 import {
   ITEM_CATALOG,
   ITEM_ATTRIBUTE,
+  CONSUMABLE_CATEGORY,
   PLAYER_BAG_KEY,
   applyLifeRecovery,
   applyStaminaRecovery,
@@ -33,7 +34,11 @@ import {
   isEdible,
   isConsumable,
   hasItemAttribute,
+  isItemDiscardable,
   getItemDurability,
+  getConsumableCategory,
+  getGrantedStatusEffectId,
+  planAddToBag,
   removeBagItem,
   normalizeItemId,
   type PlayerBagData,
@@ -47,6 +52,8 @@ import {
   type PlayerStats,
   type StaminaBuffItemId,
 } from "@/src/game/player-stats";
+import { applyTemporaryEffect, hasTemporaryEffect } from "@/src/game/status-effect-system";
+import { potionBuffPotency, potionRecoveryBonus } from "@/src/game/potion-effectiveness";
 import { useKitchenRuntime } from "@/src/game/kitchen-runtime-context";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { getEquipmentKind, saveEquippedBag, toggleEquippedItem } from "@/src/game/equipment-system";
@@ -56,7 +63,14 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   bag_carrot:  require("../../assets/images/bag_carrot.png"),
   bag_onion:   require("../../assets/images/bag_onion.png"),
   bag_potato:  require("../../assets/images/bag_potato.png"),
+  bag_lettuce: require("../../assets/images/bag_lettuce.png"),
+  bag_cucumber: require("../../assets/images/bag_cucumber.png"),
+  bag_spinach: require("../../assets/images/bag_spinach.png"),
+  bag_tomato: require("../../assets/images/bag_tomato.png"),
+  bag_pumpkin: require("../../assets/images/bag_pumpkin.png"),
   carrot:      require("../../assets/images/carrot.png"),
+  spinach:     require("../../assets/images/spinach.png"),
+  pumpkin:     require("../../assets/images/pumpkin.png"),
   onion:       require("../../assets/images/onion.png"),
   egg:         require("../../assets/images/egg.png"),
   white_meat:  require("../../assets/images/meat_white.png"),
@@ -119,6 +133,26 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   seed_carrot: require("../../assets/images/seed_carrot.png"),
   herbs:       require("../../assets/images/herbs.png"),
   spices:      require("../../assets/images/spices.png"),
+  scroll: require("../../assets/images/scroll.png"),
+  fire_bolt_scroll: require("../../assets/images/fire_bolt_scroll.png"),
+  ice_field_scroll: require("../../assets/images/ice_field_scroll.png"),
+  lightning_bolt_scroll: require("../../assets/images/lightning_bolt_scroll.png"),
+  bountiful_harvest_scroll: require("../../assets/images/bountiful_harvest_scroll.png"),
+  gravitas_scroll: require("../../assets/images/gravitas_scroll.png"),
+  weapon_enhancement_scroll: require("../../assets/images/weapon_enhancement_scroll.png"),
+  armor_enhancement_scroll: require("../../assets/images/armor_enhancement_scroll.png"),
+  syrup:       require("../../assets/images/syrup.png"),
+  alchemy_powder_yellow: require("../../assets/images/alchemy_powder_yellow.png"),
+  alchemy_powder_red: require("../../assets/images/alchemy_powder_red.png"),
+  alchemy_powder_green: require("../../assets/images/alchemy_powder_green.png"),
+  alchemy_powder_blue: require("../../assets/images/alchemy_powder_blue.png"),
+  alchemy_powder_brown: require("../../assets/images/alchemy_powder_brown.png"),
+  alchemy_powder_white: require("../../assets/images/alchemy_powder_white.png"),
+  alchemy_powder_black: require("../../assets/images/alchemy_powder_black.png"),
+  mortar_and_pestle: require("../../assets/images/mortar_and_pestle.png"),
+  distiller: require("../../assets/images/distiller.png"),
+  hammer_and_anvil: require("../../assets/images/hammer_and_anvil.png"),
+  tailoring: require("../../assets/images/tailoring.png"),
   soup_herb:    require("../../assets/images/soup_herb.png"),
   soup_carrot:  require("../../assets/images/soup_carrot.png"),
   soup_potato:  require("../../assets/images/soup_potato.png"),
@@ -152,6 +186,9 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   goldenapple: require("../../assets/images/golden apple.png"),
   potion_healing_low_grade: require("../../assets/images/potion_healing_low_grade.png"),
   potion_stamina_low_grade: require("../../assets/images/potion_stamina_low_grade.png"),
+  potion_energy_low_grade: require("../../assets/images/potion_energy_low_grade.png"),
+  potion_strength: require("../../assets/images/potion_strength.png"),
+  potion_defense: require("../../assets/images/potion_defense.png"),
   antidote: require("../../assets/images/antidote.png"),
   coal: require("../../assets/images/coal.png"),
   ingot_iron: require("../../assets/images/ingot_iron.png"),
@@ -216,12 +253,17 @@ export default function PlayerBag({
   const [selectedCarrotBagSlot, setSelectedCarrotBagSlot] = useState<number | null>(null);
   const [carrotBagOverride, setCarrotBagOverride] = useState<PlayerBagData | null>(null);
   const [buffResetTarget, setBuffResetTarget] = useState<{ slotIdx: number; item: BagItem } | null>(null);
+  const [bottleDiscardTarget, setBottleDiscardTarget] = useState<{ slotIdx: number; item: BagItem } | null>(null);
+  const [effectiveness, setEffectiveness] = useState(1);
   const carrotEditsPending = useRef(false);
   const longPressDidFire = useRef(false);
   const transferLocked = useRef(false);
 
   useEffect(() => {
     if (visible) {
+      void AsyncStorage.getItem(PLAYER_STATS_KEY).then((raw) => {
+        setEffectiveness(normalizePlayerStats(raw ? JSON.parse(raw) : null).effectiveness);
+      }).catch(() => setEffectiveness(1));
       setCarrotBagOverride(null);
       setSelectedCarrotBagSlot(null);
       setActionTarget(null);
@@ -288,7 +330,7 @@ export default function PlayerBag({
       }
       if (transferLocked.current) return;
       transferLocked.current = true;
-      onTransferItem(slotIdx, item);
+      onTransferItem(slotIdx, { ...item, equipped: false });
       setTimeout(() => { transferLocked.current = false; }, 400);
       return;
     }
@@ -301,7 +343,8 @@ export default function PlayerBag({
     try {
       const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
       const stats = normalizePlayerStats(rawStats ? JSON.parse(rawStats) : null);
-      if ((item.id === "energydrink" || item.id === "energypill") && hasStaminaBuff(stats, item.id)) {
+      const effectId = getGrantedStatusEffectId(item);
+      if (((item.id === "energydrink" || item.id === "energypill") && hasStaminaBuff(stats, item.id)) || (effectId && hasTemporaryEffect(stats.statusEffects, effectId))) {
         setBuffResetTarget({ slotIdx, item });
         return;
       }
@@ -311,7 +354,7 @@ export default function PlayerBag({
     }
   }
 
-  async function consumeItem(slotIdx: number, item: BagItem, loadedStats?: PlayerStats) {
+  async function consumeItem(slotIdx: number, item: BagItem, loadedStats?: PlayerStats, discardReturnedBottle = false) {
     const sourceBag = carrotBagOverride ?? bag;
     const sourceItem = sourceBag.slots[slotIdx];
     if (!sourceItem || sourceItem.id !== item.id || sourceItem.quantity <= 0) return;
@@ -325,6 +368,7 @@ export default function PlayerBag({
     let nextStats = stats;
     let nextStamina = currentStamina;
     let nextLife = currentLife;
+    const grantedEffectId = getGrantedStatusEffectId(item);
 
     if (!canConsumeForStamina(item, currentStamina, stats.maximumStamina)) {
       onShowThoughtBubble?.(isEdible(item) ? '"I\'m not hungry."' : '"I don\'t need this right now."');
@@ -333,10 +377,13 @@ export default function PlayerBag({
 
     if (item.id === "energydrink" || item.id === "energypill") {
       nextStats = activateStaminaBuff(stats, item.id as StaminaBuffItemId);
-    } else if (ITEM_CATALOG[item.id]?.staminaRecovery || ITEM_CATALOG[item.id]?.lifeRecovery) {
-      nextStamina = applyStaminaRecovery(item, currentStamina, stats.maximumStamina);
-      nextLife = applyLifeRecovery(item, currentLife, stats.maximumLife);
-      if (nextStamina === currentStamina && nextLife === currentLife) {
+    } else if (ITEM_CATALOG[item.id]?.staminaRecovery || ITEM_CATALOG[item.id]?.lifeRecovery || grantedEffectId) {
+      if (ITEM_CATALOG[item.id]?.staminaRecovery || ITEM_CATALOG[item.id]?.lifeRecovery) {
+        nextStamina = applyStaminaRecovery(item, currentStamina, stats.maximumStamina, stats.effectiveness);
+        nextLife = applyLifeRecovery(item, currentLife, stats.maximumLife, stats.effectiveness);
+      }
+      if (grantedEffectId) nextStats = { ...stats, statusEffects: applyTemporaryEffect(stats.statusEffects, grantedEffectId, undefined, potionBuffPotency(item.id, stats.effectiveness)) };
+      if (!grantedEffectId && nextStamina === currentStamina && nextLife === currentLife) {
         onShowThoughtBubble?.('"I don\'t need this right now."');
         return;
       }
@@ -344,7 +391,17 @@ export default function PlayerBag({
       return;
     }
 
-    const nextBag = removeBagItem(sourceBag, slotIdx, 1);
+    let nextBag = removeBagItem(sourceBag, slotIdx, 1);
+    if (getConsumableCategory(item) === CONSUMABLE_CATEGORY.POTION) {
+      const bottle: BagItem = { id: "empty_bottle", itemType: "empty_bottle", name: ITEM_CATALOG.empty_bottle.name, quantity: 1 };
+      const bottlePlan = planAddToBag(bottle, nextBag);
+      if ((!bottlePlan.canTransfer || bottlePlan.remainderQty > 0) && !discardReturnedBottle) {
+        setBuffResetTarget(null);
+        setBottleDiscardTarget({ slotIdx, item });
+        return;
+      }
+      if (bottlePlan.canTransfer && bottlePlan.remainderQty === 0) nextBag = { ...nextBag, slots: bottlePlan.updatedSlots };
+    }
     await AsyncStorage.multiSet([
       [PLAYER_BAG_KEY, JSON.stringify(nextBag)],
       [PLAYER_STATS_KEY, JSON.stringify(nextStats)],
@@ -353,6 +410,7 @@ export default function PlayerBag({
     ]);
     setCarrotBagOverride(nextBag);
     setBuffResetTarget(null);
+    setBottleDiscardTarget(null);
     onBagUpdated?.(nextBag);
     onStatsUpdated?.(nextStats);
     onStaminaUpdated?.(nextStamina);
@@ -366,9 +424,9 @@ export default function PlayerBag({
 
   async function handleDiscardYes() {
     if (!discardTarget) return;
-    if (hasItemAttribute(discardTarget.item, ITEM_ATTRIBUTE.QUEST_ITEM)) {
+    if (!isItemDiscardable(discardTarget.item)) {
       setDiscardTarget(null);
-      onShowThoughtBubble?.("I should keep this Quest Item.");
+      onShowThoughtBubble?.(hasItemAttribute(discardTarget.item, ITEM_ATTRIBUTE.QUEST_ITEM) ? "I should keep this Quest Item." : "I should keep this tool.");
       return;
     }
     if (discardLocked) {
@@ -464,10 +522,10 @@ export default function PlayerBag({
                 {ITEM_IMAGES[infoItem.id] && (
                   <View style={styles.infoImageWrap}>
                     <Image source={ITEM_IMAGES[infoItem.id]} style={styles.infoImg} resizeMode="contain" resizeMethod="resize" />
-                    <SeasonedItemBadge visible={infoItem.seasonedStage !== undefined} />
+                    <SeasonedItemBadge visible={infoItem.seasonedStage !== undefined || !!infoItem.weaponEnhanced || !!infoItem.armorEnhanced} />
                   </View>
                 )}
-                <Text style={styles.infoName}>{infoItem.seasonedStage !== undefined || infoItem.id === "monster_carcass" ? infoItem.name : (ITEM_CATALOG[infoItem.id]?.name ?? infoItem.name)}</Text>
+                <Text style={styles.infoName}>{infoItem.seasonedStage !== undefined || infoItem.weaponEnhanced || infoItem.armorEnhanced || infoItem.id === "monster_carcass" ? infoItem.name : (ITEM_CATALOG[infoItem.id]?.name ?? infoItem.name)}</Text>
                 {infoItem.containedItem && infoItem.containedQuantity != null && (
                   <Text style={styles.infoContents}>
                     Contains: {infoItem.containedQuantity} {infoItem.containedItem}
@@ -478,6 +536,8 @@ export default function PlayerBag({
                   const durability = getItemDurability(infoItem);
                   return durability ? <Text style={styles.infoContents}>Durability: {durability.current}/{durability.maximum}</Text> : null;
                 })()}
+                {infoItem.maxUses !== undefined ? <Text style={styles.infoContents}>Uses: {infoItem.usesRemaining ?? infoItem.maxUses}/{infoItem.maxUses}</Text> : null}
+                {infoItem.equipped ? <Text style={{ color: "#7EC87E", fontFamily: "Oldenburg" }}>Equipped</Text> : null}
                 {getEquipmentKind(infoItem) && (
                   <TouchableOpacity style={styles.equipButton} onPress={() => { void handleToggleEquipment(); }} activeOpacity={0.8}>
                     <Text style={styles.equipButtonText}>{infoItem.equipped ? "Unequip" : "Equip"}</Text>
@@ -514,17 +574,20 @@ export default function PlayerBag({
         const equipmentKind = getEquipmentKind(item);
         const externallyUsable = !!onUseItem && externalUseItemIds?.includes(item.id) === true;
         const usable = isConsumable(item) || isEdible(item) || externallyUsable;
-        const discardable = !hasItemAttribute(item, ITEM_ATTRIBUTE.QUEST_ITEM);
+        const useVerb = getConsumableCategory(item) === CONSUMABLE_CATEGORY.POTION ? "Drink" : "Eat";
+        const discardable = isItemDiscardable(item);
         const durability = getItemDurability(item);
         const effects = [
-          catalog?.staminaRecovery ? `Restores ${catalog.staminaRecovery} Stamina` : null,
-          catalog?.lifeRecovery ? `Restores ${catalog.lifeRecovery} Life Points` : null,
-          catalog?.grantedStatusEffectId ? `Effect: ${catalog.grantedStatusEffectId.replaceAll("_", " ")}` : null,
+          catalog?.staminaRecovery ? `Restores ${catalog.staminaRecovery + (item.id === "potion_stamina_low_grade" ? potionRecoveryBonus(effectiveness) : 0)} Stamina` : null,
+          catalog?.lifeRecovery ? `Restores ${catalog.lifeRecovery + (item.id === "potion_healing_low_grade" ? potionRecoveryBonus(effectiveness) : 0)} Life Points` : null,
+          catalog?.grantedStatusEffectId ? item.id === "potion_strength" ? `Damage +${potionBuffPotency(item.id, effectiveness)} for 1 day` : item.id === "potion_defense" ? `Endurance +${potionBuffPotency(item.id, effectiveness)} for 1 day` : `Effect: ${catalog.grantedStatusEffectId.replaceAll("_", " ")}` : null,
         ].filter((effect): effect is string => !!effect);
         const equipmentValues = equipmentKind === "weapon"
-          ? [`Damage: ${catalog?.damageMin ?? 0}–${catalog?.damageMax ?? 0}`, `Basic Accuracy: ${catalog?.basicAccuracyPercent ?? 100}%`, ...(durability ? [`Durability: ${durability.current}/${durability.maximum}`] : [])]
+          ? [`Damage: ${item.weaponEnhanced ? Math.ceil((catalog?.damageMin ?? 0) * 1.2) : catalog?.damageMin ?? 0}–${item.weaponEnhanced ? Math.ceil((catalog?.damageMax ?? 0) * 1.2) : catalog?.damageMax ?? 0}`, `Basic Accuracy: ${catalog?.basicAccuracyPercent ?? 100}%`, ...(durability ? [`Durability: ${durability.current}/${durability.maximum}`] : [])]
           : equipmentKind === "armor"
-          ? [`Physical Defense: ${catalog?.physicalDefense ?? 0}`, ...(durability ? [`Durability: ${durability.current}/${durability.maximum}`] : [])]
+          ? [`Physical Defense: ${item.armorEnhanced ? Math.ceil((catalog?.physicalDefense ?? 0) * 1.2) : catalog?.physicalDefense ?? 0}`, ...(durability ? [`Durability: ${durability.current}/${durability.maximum}`] : [])]
+          : equipmentKind === "scroll"
+          ? [`Uses: ${item.usesRemaining ?? item.maxUses ?? 0}/${item.maxUses ?? 0}`]
           : [];
         return <Modal visible transparent animationType="fade" onRequestClose={() => setActionTarget(null)}>
           <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setActionTarget(null)}>
@@ -532,13 +595,13 @@ export default function PlayerBag({
               <View style={styles.actionPanel}>
                 <TouchableOpacity style={styles.actionClose} onPress={() => setActionTarget(null)}><Text style={styles.closeText}>✕</Text></TouchableOpacity>
                 {ITEM_IMAGES[item.id] ? <Image source={ITEM_IMAGES[item.id]} style={styles.actionImage} resizeMode="contain" /> : null}
-                <Text selectable style={styles.actionName}>{item.id === "monster_carcass" ? item.name : (catalog?.name ?? item.name)}</Text>
+                <Text selectable style={styles.actionName}>{item.id === "monster_carcass" || item.weaponEnhanced || item.armorEnhanced ? item.name : (catalog?.name ?? item.name)}</Text>
                 {(effects.length > 0 ? effects : equipmentValues).map((value) => <Text selectable key={value} style={styles.actionValue}>{value}</Text>)}
                 {effects.length === 0 && equipmentValues.length === 0 ? <Text selectable style={styles.actionDescription}>{catalog?.description ?? "No usable effect."}</Text> : null}
-                <Text style={styles.actionQuestion}>{discardable ? (usable ? "Eat or Discard?" : equipmentKind ? `${item.equipped ? "Unequip" : "Equip"} or Discard?` : "Discard this item?") : "Quest Items cannot be discarded."}</Text>
+                <Text style={styles.actionQuestion}>{discardable ? (usable ? `${useVerb} or Discard?` : equipmentKind ? `${item.equipped ? "Unequip" : "Equip"} or Discard?` : "Discard this item?") : hasItemAttribute(item, ITEM_ATTRIBUTE.QUEST_ITEM) ? "Quest Items cannot be discarded." : "This tool cannot be discarded."}</Text>
                 <View style={styles.actionButtons}>
-                  {usable ? <TouchableOpacity style={[styles.actionChoice, styles.useChoice]} onPress={() => { setActionTarget(null); if (externallyUsable) void onUseItem?.(slotIdx, item); else void handleConsumablePress(slotIdx, item); }}><Text style={styles.useChoiceText}>{externallyUsable ? "Use" : "Eat"}</Text></TouchableOpacity> : null}
-                  {equipmentKind ? <TouchableOpacity style={[styles.actionChoice, styles.useChoice]} onPress={() => { setActionTarget(null); void toggleEquipmentAt(slotIdx); }}><Text style={styles.useChoiceText}>{item.equipped ? "Unequip" : "Equip"}</Text></TouchableOpacity> : null}
+                  {usable ? <TouchableOpacity style={[styles.actionChoice, styles.useChoice]} onPress={() => { setActionTarget(null); if (externallyUsable) void onUseItem?.(slotIdx, item); else void handleConsumablePress(slotIdx, item); }}><Text style={styles.useChoiceText}>{externallyUsable ? "Use" : useVerb}</Text></TouchableOpacity> : null}
+                  {equipmentKind ? <TouchableOpacity style={styles.actionChoice} onPress={() => { setActionTarget(null); void toggleEquipmentAt(slotIdx); }}><Text style={styles.actionValue}>{item.equipped ? "Unequip" : "Equip"}</Text></TouchableOpacity> : null}
                   {discardable ? <TouchableOpacity style={[styles.actionChoice, styles.discardChoice]} onPress={() => { setActionTarget(null); setDiscardTarget({ slotIdx, item }); }}><Text style={styles.discardChoiceText}>Discard</Text></TouchableOpacity> : null}
                 </View>
               </View>
@@ -598,6 +661,23 @@ export default function PlayerBag({
           </TouchableOpacity>
         </Modal>
       )}
+
+      {bottleDiscardTarget && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setBottleDiscardTarget(null)}>
+          <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={() => setBottleDiscardTarget(null)}>
+            <TouchableOpacity activeOpacity={1} onPress={() => {}}>
+              <View style={styles.discardPanel}>
+                <Text selectable style={styles.discardTitle}>No room for the Empty Bottle</Text>
+                <Text selectable style={styles.discardMsg}>Your bag has no free space for the bottle left after drinking this potion. Drink it and throw the Empty Bottle away?</Text>
+                <View style={styles.discardBtns}>
+                  <TouchableOpacity style={[styles.discardBtn, styles.discardBtnNo]} onPress={() => setBottleDiscardTarget(null)}><Text style={styles.discardBtnNoText}>No</Text></TouchableOpacity>
+                  <TouchableOpacity style={[styles.discardBtn, styles.discardBtnYes]} onPress={() => { void consumeItem(bottleDiscardTarget.slotIdx, bottleDiscardTarget.item, undefined, true); }}><Text style={styles.discardBtnYesText}>Drink & Discard</Text></TouchableOpacity>
+                </View>
+              </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </Modal>
+      )}
     </Modal>
   );
 }
@@ -627,7 +707,7 @@ function BagSlot({ item, size, selected, onPressIn, onLongPress, onPress }: Slot
       {imgSrc ? (
         <>
           <Image source={imgSrc} style={styles.slotImg} resizeMode="contain" resizeMethod="resize" />
-          <SeasonedItemBadge visible={item?.seasonedStage !== undefined} />
+          <SeasonedItemBadge visible={item?.seasonedStage !== undefined || !!item?.weaponEnhanced || !!item?.armorEnhanced} />
           <ItemDurabilityBadge item={item} />
           {item?.containedQuantity != null && item.containedQuantity > 0 && (
             <View style={styles.contentsCircle}>
@@ -742,8 +822,8 @@ const styles = StyleSheet.create({
   attribTagText: { color: "#C4943A", fontSize: 11, fontFamily: "Oldenburg" },
   infoDismiss: { marginTop: 6, paddingHorizontal: 20, paddingVertical: 8, borderRadius: 8, backgroundColor: "rgba(196,148,58,0.18)", borderWidth: 1, borderColor: "rgba(196,148,58,0.4)" },
   infoDismissText: { color: "#C4943A", fontSize: 13, fontFamily: "Oldenburg" },
-  equipButton: { marginTop: 4, minWidth: 126, alignItems: "center", paddingHorizontal: 18, paddingVertical: 9, borderRadius: 9, backgroundColor: "rgba(126,200,126,0.18)", borderWidth: 1.5, borderColor: "#7EC87E" },
-  equipButtonText: { color: "#DDF5DD", fontSize: 13, fontFamily: "Oldenburg" },
+  equipButton: { marginTop: 4, minWidth: 126, alignItems: "center", paddingHorizontal: 18, paddingVertical: 9, borderRadius: 9, backgroundColor: "rgba(196,148,58,0.12)", borderWidth: 1.5, borderColor: "#C4943A" },
+  equipButtonText: { color: "#F0E8D5", fontSize: 13, fontFamily: "Oldenburg" },
   actionPanel: { minWidth: 270, maxWidth: 320, alignItems: "center", gap: 7, backgroundColor: "#1A0E05", borderRadius: 17, borderCurve: "continuous", borderWidth: 1.5, borderColor: "rgba(196,148,58,0.58)", paddingHorizontal: 20, paddingTop: 18, paddingBottom: 20 },
   actionClose: { position: "absolute", right: 10, top: 8, padding: 5, zIndex: 2 },
   actionImage: { width: 72, height: 72 },

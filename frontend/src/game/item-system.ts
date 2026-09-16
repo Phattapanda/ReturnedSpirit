@@ -1,4 +1,5 @@
 // ─── Central Item & Bag System ────────────────────────────────────────────────
+import { potionRecoveryBonus } from "@/src/game/potion-effectiveness";
 
 export const ITEM_ATTRIBUTE = {
   EDIBLE: "edible",
@@ -60,6 +61,11 @@ export type BagItem = {
   monsterId?: string;
   /** The cooking stage whose seasoning bonus is attached to this concrete dish. */
   seasonedStage?: 1 | 2 | 3;
+  /** Scroll charges are separate from repairable equipment durability. */
+  usesRemaining?: number;
+  maxUses?: number;
+  weaponEnhanced?: boolean;
+  armorEnhanced?: boolean;
 };
 
 export type PlayerBagData = {
@@ -107,8 +113,6 @@ const LEGACY_ITEM_IDS: Readonly<Record<string, string>> = {
   carrotsoup: "soup_carrot",
   carrotpotatosoup: "soup_carrot_potato",
   beefstew: "stew_beef",
-  chicken: "white_meat",
-  beef: "red_meat",
 };
 
 export type ItemDurability = {
@@ -223,6 +227,7 @@ function sameOptionalTagSet<T extends string>(a?: readonly T[], b?: readonly T[]
 
 /** Returns true only when all stack-relevant properties are identical. */
 export function canStack(a: BagItem, b: BagItem): boolean {
+  if (a.id === "scroll" || b.id === "scroll" || a.id.endsWith("_scroll") || b.id.endsWith("_scroll")) return false;
   return (
     normalizeItemId(a.itemType) === normalizeItemId(b.itemType) &&
     normalizeItemId(a.id)       === normalizeItemId(b.id) &&
@@ -258,7 +263,7 @@ export function planAddToNextFreeBagSlot(
   item: BagItem,
   bag: PlayerBagData,
 ): AddToNextFreeSlotResult {
-  const canonicalItem = normalizeBagItem(item)!;
+  const canonicalItem = { ...normalizeBagItem(item)!, equipped: false };
   const updatedSlots = bag.slots.map(normalizeBagItem);
   if (!bag.unlocked) return { ok: false, reason: "bag_locked", updatedSlots };
 
@@ -271,7 +276,7 @@ export function planAddToNextFreeBagSlot(
 
 /** Plan + execute adding one item stack to the bag, respecting maxStackSize */
 export function planAddToBag(item: BagItem, bag: PlayerBagData): AddToBagResult {
-  const canonicalItem = normalizeBagItem(item)!;
+  const canonicalItem = { ...normalizeBagItem(item)!, equipped: false };
   const maxStack = bag.maxStackSize;
   const newSlots = bag.slots.map(normalizeBagItem);
   let remaining = canonicalItem.quantity;
@@ -289,7 +294,7 @@ export function planAddToBag(item: BagItem, bag: PlayerBagData): AddToBagResult 
   // 2. Fill empty slots
   for (let i = 0; i < newSlots.length && remaining > 0; i++) {
     if (newSlots[i] === null) {
-      const qty = Math.min(remaining, maxStack);
+      const qty = canonicalItem.id === "scroll" || canonicalItem.id.endsWith("_scroll") ? 1 : Math.min(remaining, maxStack);
       newSlots[i] = { ...canonicalItem, quantity: qty };
       remaining -= qty;
     }
@@ -431,7 +436,7 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
   bag2: { name: "Backpack", description: "A roomy 3 × 3 upgrade for the Shoulder Bag.", attributes: [ITEM_ATTRIBUTE.STORAGE] },
   bag3: { name: "Big Backpack", description: "A spacious 4 × 4 backpack upgrade sold in the city.", attributes: [ITEM_ATTRIBUTE.STORAGE] },
   crate1: { name: "Small Crate", description: "A finished 2 × 3 Kitchen storage crate.", attributes: [ITEM_ATTRIBUTE.STORAGE] },
-  monster_carcass: { name: "Monster Carcass", description: "A defeated monster. Process it in the Kitchen with a Butchering Knife.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  monster_carcass: { name: "Monster Carcass", description: "A defeated monster. Process it in the Kitchen with a Butchering Knife.", attributes: [ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 1 },
   malted_barley: { name: "Malted Barley", description: "Quest item.", attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] },
   brewers_yeast: { name: "Brewer's Yeast", description: "Quest item.", attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] },
   dried_hop_cones: { name: "Dried Hop Cones", description: "Quest item.", attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] },
@@ -440,39 +445,58 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
   grown_cinnamon_stalks_cloves: { name: "Grown Cinnamon Stalks & Cloves", description: "Quest item.", attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] },
   yeast_nutrients: { name: "Yeast Nutrients", description: "Quest item.", attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] },
   standard_ale: { name: "Standard Ale", description: "The tavern's unlimited standard alcoholic drink, served for 5 Copper Coins.", attributes: [] },
-  wild_berries: { name: "Wild Berries", description: "Forest berries. Restores 5 Stamina and can be used as an ingredient.", attributes: [ITEM_ATTRIBUTE.EDIBLE, ITEM_ATTRIBUTE.INGREDIENT], staminaRecovery: 5 },
+  wild_berries: { name: "Wild Berries", description: "Forest berries. Restores 5 Stamina and can be used as an ingredient.", attributes: [ITEM_ATTRIBUTE.EDIBLE, ITEM_ATTRIBUTE.INGREDIENT], staminaRecovery: 5, baseSellPriceCopper: 1 },
   white_meat: { name: "White Meat", description: "Common light meat used in everyday cooking.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   red_meat: { name: "Red Meat", description: "Common red meat used in everyday cooking.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
-  fur: { name: "Fur", description: "Animal fur used in crafting.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
-  hide: { name: "Boar Hide", description: "A tough hide recovered from a Wild Boar.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
-  tusk: { name: "Boar Tusk", description: "A sturdy tusk recovered intact from a Wild Boar.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
-  wolf_pelt: { name: "Wolf Pelt", description: "A thick pelt from a Wild Wolf.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
-  fang: { name: "Large Fang", description: "A large fang preserved while processing a Wild Wolf.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
-  slime_gel: { name: "Slime Gel", description: "Gel gathered from a defeated slime.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
-  weak_monster_core: { name: "Weak Monster Core", description: "A faintly glowing monster core.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
-  ember_feather: { name: "Ember Feather", description: "A warm feather from an Ember creature.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
-  rooster_comb: { name: "Rooster Comb", description: "A rare comb recovered from an Ember Rooster.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
-  elder_ember_comb: { name: "Elder Ember Rooster Comb", description: "A rare, flame-touched boss material from an Elder Ember Rooster.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
-  beetle_shell: { name: "Beetle Shell", description: "A sturdy shell left behind by a Thorn Beetle.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  fur: { name: "Fur", description: "Animal fur used in crafting.", attributes: [ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 15 },
+  hide: { name: "Boar Hide", description: "A tough hide recovered from a Wild Boar.", attributes: [ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 25 },
+  tusk: { name: "Boar Tusk", description: "A sturdy tusk recovered intact from a Wild Boar.", attributes: [ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 30 },
+  wolf_pelt: { name: "Wolf Pelt", description: "A thick pelt from a Wild Wolf.", attributes: [ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 40 },
+  fang: { name: "Large Fang", description: "A large fang preserved while processing a Wild Wolf.", attributes: [ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 45 },
+  slime_gel: { name: "Slime Gel", description: "Gel gathered from a defeated slime.", attributes: [ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 10 },
+  weak_monster_core: { name: "Weak Monster Core", description: "A faintly glowing monster core.", attributes: [ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 15 },
+  ember_feather: { name: "Ember Feather", description: "A warm feather from an Ember creature.", attributes: [ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 10 },
+  rooster_comb: { name: "Rooster Comb", description: "A rare comb recovered from an Ember Rooster.", attributes: [ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 50 },
+  elder_ember_comb: { name: "Elder Ember Rooster Comb", description: "A rare, flame-touched boss material from an Elder Ember Rooster.", attributes: [ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 300 },
+  beetle_shell: { name: "Beetle Shell", description: "A sturdy shell left behind by a Thorn Beetle.", attributes: [ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 18 },
   mushroom: { name: "Mushroom", description: "A common forest mushroom used as a cooking ingredient.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
-  mushroom_rare: { name: "Rare Mushroom", description: "An unusual purple mushroom prized as a rare cooking ingredient.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
-  nuts: { name: "Nuts", description: "A handful of forest nuts used as a cooking ingredient.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
-  bark: { name: "Bark", description: "Strips of sturdy tree bark used in crafting.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
-  charred_wood: { name: "Charred Wood", description: "Fire-blackened wood that still holds traces of heat.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  mushroom_rare: { name: "Rare Mushroom", description: "An unusual purple mushroom prized as a rare cooking ingredient.", attributes: [ITEM_ATTRIBUTE.INGREDIENT], baseSellPriceCopper: 30 },
+  nuts: { name: "Nuts", description: "A handful of forest nuts used as a cooking ingredient.", attributes: [ITEM_ATTRIBUTE.INGREDIENT], baseSellPriceCopper: 1 },
+  bark: { name: "Bark", description: "Strips of sturdy tree bark used in crafting.", attributes: [ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 1 },
+  charred_wood: { name: "Charred Wood", description: "Fire-blackened wood that still holds traces of heat.", attributes: [ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 1 },
   leather: { name: "Leather", description: "Processed animal hide used to craft durable equipment.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
-  sap: { name: "Sap", description: "Sticky tree sap used in crafting and alchemy.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
-  spices: { name: "Spices", description: "A fragrant blend crafted from Herbs and a Mana Shard. Used to season cooked dishes.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
-  wine: { name: "Wine", description: "Imported regional wine for drinks and refined recipes.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
-  alchemical_ingredients: { name: "Alchemical Ingredients", description: "An assortment of imported reagents for alchemy.", attributes: [ITEM_ATTRIBUTE.INGREDIENT, ITEM_ATTRIBUTE.MATERIAL] },
+  sap: { name: "Sap", description: "Sticky tree sap used in crafting and alchemy.", attributes: [ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 5 },
+  syrup: { name: "Syrup", description: "A sweet ingredient made from boiled Sap for use in desserts.", attributes: [ITEM_ATTRIBUTE.INGREDIENT], baseSellPriceCopper: 33 },
+  alchemy_powder_yellow: { name: "Yellow Alchemy Powder", description: "A processed alchemical ingredient ground with a Mortar and Pestle.", attributes: [ITEM_ATTRIBUTE.INGREDIENT, ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 22 },
+  alchemy_powder_red: { name: "Red Alchemy Powder", description: "A processed alchemical ingredient ground with a Mortar and Pestle.", attributes: [ITEM_ATTRIBUTE.INGREDIENT, ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 22 },
+  alchemy_powder_green: { name: "Green Alchemy Powder", description: "A processed alchemical ingredient ground with a Mortar and Pestle.", attributes: [ITEM_ATTRIBUTE.INGREDIENT, ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 22 },
+  alchemy_powder_blue: { name: "Blue Alchemy Powder", description: "A processed alchemical ingredient ground with a Mortar and Pestle.", attributes: [ITEM_ATTRIBUTE.INGREDIENT, ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 22 },
+  alchemy_powder_brown: { name: "Brown Alchemy Powder", description: "A processed alchemical ingredient ground with a Mortar and Pestle.", attributes: [ITEM_ATTRIBUTE.INGREDIENT, ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 22 },
+  alchemy_powder_white: { name: "White Alchemy Powder", description: "A processed alchemical ingredient ground with a Mortar and Pestle.", attributes: [ITEM_ATTRIBUTE.INGREDIENT, ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 22 },
+  alchemy_powder_black: { name: "Black Alchemy Powder", description: "A processed alchemical ingredient ground with a Mortar and Pestle.", attributes: [ITEM_ATTRIBUTE.INGREDIENT, ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 22 },
+  spices: { name: "Spices", description: "A fragrant blend crafted from Herbs and Nuts. Used to season cooked dishes.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  scroll: { name: "Scroll", description: "A blank, non-stackable scroll for crafting magic and enhancement scrolls.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
+  fire_bolt_scroll: { name: "Fire Bolt Scroll", description: "Fire magic: 25 damage, 90% accuracy. Ignores Defense; Fire Resistance and Immunity apply. 5 uses.", attributes: [ITEM_ATTRIBUTE.WEAPON], baseSellPriceCopper: 100 },
+  ice_field_scroll: { name: "Ice Field Scroll", description: "Ice magic: 20 damage, 110% accuracy. Ignores Defense; Ice Resistance and Immunity apply. 7 uses.", attributes: [ITEM_ATTRIBUTE.WEAPON], baseSellPriceCopper: 100 },
+  lightning_bolt_scroll: { name: "Lightning Bolt Scroll", description: "Lightning magic: 45 damage, 85% accuracy. Ignores Defense; Lightning Resistance and Immunity apply. 3 uses.", attributes: [ITEM_ATTRIBUTE.WEAPON], baseSellPriceCopper: 100 },
+  bountiful_harvest_scroll: { name: "Bountiful Harvest Scroll", description: "Adds +2 yield to every currently planted Garden Plot per use. Empty and future plots are unaffected. 2 uses.", attributes: [ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 100 },
+  gravitas_scroll: { name: "Gravitas Scroll", description: "Physical magic: 40 damage, 95% accuracy. Monster Defense applies. 4 uses.", attributes: [ITEM_ATTRIBUTE.WEAPON], baseSellPriceCopper: 100 },
+  weapon_enhancement_scroll: { name: "Weapon Enhancement Scroll", description: "Permanently improves one weapon's attack by 20% with Hand. Cannot be applied twice. 1 use.", attributes: [ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 100 },
+  armor_enhancement_scroll: { name: "Armor Enhancement Scroll", description: "Permanently improves one armor's Defense by 20% with Hand. Cannot be applied twice. 1 use.", attributes: [ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 100 },
   holy_herb: { name: "Holy Herb", description: "A carefully cultivated temple herb used in sacred remedies.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   medicinal_herb: { name: "Medicinal Herb", description: "A potent healing herb selected by the temple sisters.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   blessed_water: { name: "Blessed Water", description: "Purified water blessed at the Temple of the Returning Light.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   incense: { name: "Incense", description: "Aromatic temple incense used in purification recipes.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   purified_salt: { name: "Purified Salt", description: "Ritually purified salt used for protection and alchemy.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
-  bag_herb:    { name: "Herb Bag",         description: "A small bag filled with harvested herbs.", attributes: [] },
-  bag_carrot:  { name: "Carrot Bag",       description: "A small bag filled with harvested carrots.", attributes: [] },
-  bag_onion:   { name: "Onion Bag",        description: "A small bag filled with harvested onions.", attributes: [] },
-  bag_potato:  { name: "Potato Bag",       description: "A small bag filled with harvested potatoes.", attributes: [] },
+  bag_herb:    { name: "Herb Bag",         description: "A small bag filled with harvested herbs.", attributes: [], baseSellPriceCopper: 1 },
+  bag_carrot:  { name: "Carrot Bag",       description: "A small bag filled with harvested carrots.", attributes: [], baseSellPriceCopper: 30 },
+  bag_onion:   { name: "Onion Bag",        description: "A small bag filled with harvested onions.", attributes: [], baseSellPriceCopper: 50 },
+  bag_potato:  { name: "Potato Bag",       description: "A small bag filled with harvested potatoes.", attributes: [], baseSellPriceCopper: 40 },
+  bag_lettuce: { name: "Lettuce Bag",      description: "A small bag filled with harvested lettuce.", attributes: [] },
+  bag_cucumber: { name: "Cucumber Bag",    description: "A small bag filled with harvested cucumbers.", attributes: [] },
+  bag_spinach: { name: "Spinach Bag",      description: "A small bag filled with harvested spinach.", attributes: [] },
+  bag_tomato:  { name: "Tomato Bag",       description: "A small bag filled with harvested tomatoes.", attributes: [] },
+  bag_pumpkin: { name: "Pumpkin Bag",      description: "A small bag filled with harvested pumpkins.", attributes: [] },
   soup_herb: {
     name: "Herb Soup",
     description: "A warm soup made from fresh herbs. Restores 15 Stamina.",
@@ -627,36 +651,42 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
     description: "A cold snowberry dessert. Recipe and effects will be added later.",
     attributes: [ITEM_ATTRIBUTE.EDIBLE],
     mealTags: [MEAL_TAG.SWEET, MEAL_TAG.COLD],
+    baseSellPriceCopper: 108,
   },
   herbs:       { name: "Herbs",            description: "Fresh herbs picked from the garden.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   carrot:      { name: "Carrot",           description: "A fresh carrot harvested from the garden.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   potato:      { name: "Potato",           description: "A sturdy potato used in many warm meals.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   onion:       { name: "Onion",            description: "A pungent onion used as a cooking ingredient.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   egg:         { name: "Egg",              description: "A fresh egg used for cooking.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
-  chicken:     { name: "White Meat",       description: "Common light meat used in everyday cooking.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
-  beef:        { name: "Red Meat",         description: "Common red meat used in everyday cooking.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   fish:        { name: "Fish Meat",        description: "Fresh fish meat used for cooking.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   tomato:      { name: "Tomato",           description: "A ripe tomato used for cooking.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   lettuce:     { name: "Lettuce",          description: "Crisp lettuce used for salads and cold dishes.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   cucumber:    { name: "Cucumber",         description: "A fresh cucumber used for salads and cold dishes.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   spinach:     { name: "Spinach",          description: "Fresh leafy spinach used as a cooking ingredient.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  pumpkin:     { name: "Pumpkin",          description: "A ripe pumpkin used as a cooking ingredient.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   snowberry:   { name: "Snowberry",        description: "A pale winter berry.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
-  ember_chicken_meat: { name: "Ember Chicken Meat", description: "Rare monster meat radiating heat.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
-  ember_chicken_egg:  { name: "Ember Chicken Egg",  description: "A rare monster egg radiating heat.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  ember_chicken_meat: { name: "Ember Chicken Meat", description: "Rare monster meat radiating heat.", attributes: [ITEM_ATTRIBUTE.INGREDIENT], baseSellPriceCopper: 48 },
+  ember_chicken_egg:  { name: "Ember Chicken Egg",  description: "A rare monster egg radiating heat.", attributes: [ITEM_ATTRIBUTE.INGREDIENT], baseSellPriceCopper: 30 },
   bucket:      { name: "Empty Bucket",     description: "A sturdy wooden bucket. It needs to be filled.", attributes: [ITEM_ATTRIBUTE.VESSEL] },
-  bucketwater: { name: "Bucket of Water", description: "A bucket filled with fresh water from the well.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  bucketwater: { name: "Bucket of Water", description: "A bucket filled with fresh water from the well.", attributes: [ITEM_ATTRIBUTE.INGREDIENT], baseSellPriceCopper: 20 },
   seed_herb:   { name: "Herb Seed",        description: "Seeds for growing herbs.", attributes: [] },
   seed_carrot: { name: "Carrot Seed",      description: "Seeds for growing carrots.", attributes: [] },
   seed_potato: { name: "Potato Seed",      description: "Seeds for growing potatoes.", attributes: [] },
   seed_onion:  { name: "Onion Seed",       description: "Seeds for growing onions.", attributes: [] },
+  seed_lettuce: { name: "Lettuce Seed",    description: "Seeds for growing lettuce.", attributes: [] },
+  seed_cucumber: { name: "Cucumber Seeds", description: "Seeds for growing cucumbers.", attributes: [] },
+  seed_spinach: { name: "Spinach Seed",    description: "Seeds for growing spinach.", attributes: [] },
+  seed_tomato: { name: "Tomato Seed",      description: "Seeds for growing tomatoes.", attributes: [] },
+  seed_pumpkin: { name: "Pumpkin Seed",    description: "Seeds for growing pumpkins.", attributes: [] },
   standard_fertilizer: { name: "Standard Fertilizer", description: "Basic fertilizer for improving a crop.", attributes: [] },
-  premium_fertilizer:  { name: "Premium Fertilizer",  description: "High-quality fertilizer for improving a crop.", attributes: [] },
+  premium_fertilizer:  { name: "Premium Fertilizer",  description: "High-quality fertilizer for improving a crop.", attributes: [], baseSellPriceCopper: 25 },
   healthymuffin: {
     name: "Healthy Muffin",
     description: "Restores 50 Stamina, up to your normal maximum.",
     attributes: [ITEM_ATTRIBUTE.CONSUMABLE],
     consumableCategory: CONSUMABLE_CATEGORY.OTHER,
     staminaRecovery: 50,
+    baseSellPriceCopper: 62,
   },
   goldenapple: {
     name: "Golden Apple",
@@ -665,6 +695,7 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
     consumableCategory: CONSUMABLE_CATEGORY.OTHER,
     staminaRecovery: 50,
     allowsStaminaOverflow: true,
+    baseSellPriceCopper: 200,
   },
   energydrink: {
     name: "Energy Drink",
@@ -679,18 +710,39 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
     consumableCategory: CONSUMABLE_CATEGORY.PILL,
   },
   potion_healing_low_grade: {
-    name: "Low Quality Healing Potion",
-    description: "A basic healing potion. Restores 30 Life, up to the normal maximum.",
+    name: "Low Grade Healing Potion",
+    description: "A basic healing potion. Restores 30 Life, up to the normal maximum, and leaves an Empty Bottle.",
     attributes: [ITEM_ATTRIBUTE.CONSUMABLE],
     consumableCategory: CONSUMABLE_CATEGORY.POTION,
     lifeRecovery: 30,
   },
   potion_stamina_low_grade: {
     name: "Low Grade Stamina Potion",
-    description: "A basic stamina potion. Restores 60 Stamina, up to the normal maximum.",
+    description: "A basic stamina potion. Restores 60 Stamina, up to the normal maximum, and leaves an Empty Bottle.",
     attributes: [ITEM_ATTRIBUTE.CONSUMABLE],
     consumableCategory: CONSUMABLE_CATEGORY.POTION,
     staminaRecovery: 60,
+  },
+  potion_energy_low_grade: {
+    name: "Low Grade Energy Potion",
+    description: "Reduces Stamina costs by 1 for 1 day. Leaves an Empty Bottle after use.",
+    attributes: [ITEM_ATTRIBUTE.CONSUMABLE],
+    consumableCategory: CONSUMABLE_CATEGORY.POTION,
+    grantedStatusEffectId: "low_grade_energy_potion",
+  },
+  potion_strength: {
+    name: "Strength Potion",
+    description: "Increases physical damage by 5 for 1 day. The effect cannot stack.",
+    attributes: [ITEM_ATTRIBUTE.CONSUMABLE],
+    consumableCategory: CONSUMABLE_CATEGORY.POTION,
+    grantedStatusEffectId: "strength_potion",
+  },
+  potion_defense: {
+    name: "Defense Potion",
+    description: "Increases Endurance by 5 for 1 day. The effect cannot stack.",
+    attributes: [ITEM_ATTRIBUTE.CONSUMABLE],
+    consumableCategory: CONSUMABLE_CATEGORY.POTION,
+    grantedStatusEffectId: "defense_potion",
   },
   antidote: {
     name: "Antidote",
@@ -792,6 +844,10 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
   oldpot:      { name: "Old Pot",          description: "An old iron pot. Perfect for brewing herbal concoctions.", attributes: [ITEM_ATTRIBUTE.TOOL] },
   cooking_pot: { name: "Cooking Pot",      description: "A permanent Stage 2 kitchen upgrade.", attributes: [ITEM_ATTRIBUTE.TOOL] },
   frying_pan:  { name: "Frying Pan",       description: "A planned specialist tool for eggs and pan-fried dishes.", attributes: [ITEM_ATTRIBUTE.TOOL] },
+  mortar_and_pestle: { name: "Mortar and Pestle", description: "A permanent kitchen tool for grinding herbs and magical ingredients.", attributes: [ITEM_ATTRIBUTE.TOOL] },
+  distiller: { name: "Distiller", description: "A workshop apparatus for distilling alchemical mixtures.", attributes: [ITEM_ATTRIBUTE.TOOL] },
+  hammer_and_anvil: { name: "Hammer and Anvil", description: "A workshop station for metalworking.", attributes: [ITEM_ATTRIBUTE.TOOL] },
+  tailoring: { name: "Tailoring", description: "A workshop kit for sewing and textile work.", attributes: [ITEM_ATTRIBUTE.TOOL] },
   fine_cooking_pot: { name: "Fine Cooking Pot", description: "A finely crafted cooking pot for advanced recipes.", attributes: [ITEM_ATTRIBUTE.TOOL] },
 };
 
@@ -824,6 +880,19 @@ export function getItemAttributes(itemOrId: BagItem | string): ItemAttribute[] {
 
 export function hasItemAttribute(itemOrId: BagItem | string, attribute: ItemAttribute): boolean {
   return getItemAttributes(itemOrId).includes(attribute);
+}
+
+const NON_DISCARDABLE_ITEM_IDS = new Set([
+  "oldpot",
+  "cooking_pot",
+  "fine_cooking_pot",
+  "mortar_and_pestle",
+  "distiller",
+]);
+
+/** Quest items and permanent kitchen tools must never be destroyed by inventory actions. */
+export function isItemDiscardable(item: BagItem): boolean {
+  return !hasItemAttribute(item, ITEM_ATTRIBUTE.QUEST_ITEM) && !NON_DISCARDABLE_ITEM_IDS.has(normalizeItemId(item.id));
 }
 
 /**
@@ -902,10 +971,12 @@ export function applyStaminaRecovery(
   itemOrId: BagItem | string,
   currentStamina: number,
   maximumStamina: number,
+  effectiveness = 1,
 ): number {
   const effect = getStaminaRecoveryEffect(itemOrId);
   if (!effect) return currentStamina;
-  const recovered = currentStamina + effect.amount;
+  const bonus = itemId(itemOrId) === "potion_stamina_low_grade" ? potionRecoveryBonus(effectiveness) : 0;
+  const recovered = currentStamina + effect.amount + bonus;
   return effect.allowsOverflow ? recovered : Math.min(maximumStamina, recovered);
 }
 
@@ -914,7 +985,9 @@ export function applyLifeRecovery(
   itemOrId: BagItem | string,
   currentLife: number,
   maximumLife: number,
+  effectiveness = 1,
 ): number {
   const recovery = ITEM_CATALOG[itemId(itemOrId)]?.lifeRecovery ?? 0;
-  return Math.min(maximumLife, Math.max(0, currentLife) + Math.max(0, recovery));
+  const bonus = itemId(itemOrId) === "potion_healing_low_grade" ? potionRecoveryBonus(effectiveness) : 0;
+  return Math.min(maximumLife, Math.max(0, currentLife) + Math.max(0, recovery) + bonus);
 }

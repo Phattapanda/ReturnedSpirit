@@ -27,9 +27,11 @@ export const MERCHANT_SHOP_KEY = "@game:merchant_shop";
 export type MerchantStockId =
   | "bucket"
   | "egg"
-  | "chicken"
+  | "white_meat"
   | "fish"
-  | "beef"
+  | "red_meat"
+  | "mushroom"
+  | "mushroom_rare"
   | "bag2"
   | "crate1"
   | "seed_herb"
@@ -40,6 +42,7 @@ export type MerchantStockId =
   | "nails"
   | "cloth"
   | "paint"
+  | "mortar_and_pestle"
   | "tool_rusty_butchering_knife"
   | "armor_leather_bracers"
   | "weapon_iron_dagger"
@@ -49,24 +52,28 @@ export type MerchantStockDefinition = {
   id: MerchantStockId;
   priceCopper: number;
   maxPurchases: number;
+  oncePerRun?: boolean;
 };
 
 export const MERCHANT_STOCK: Record<MerchantStockId, MerchantStockDefinition> = {
-  bucket: { id: "bucket", priceCopper: 25, maxPurchases: 2 },
-  egg: { id: "egg", priceCopper: 14, maxPurchases: 2 },
-  chicken: { id: "chicken", priceCopper: 23, maxPurchases: 2 },
-  fish: { id: "fish", priceCopper: 44, maxPurchases: 2 },
-  beef: { id: "beef", priceCopper: 29, maxPurchases: 2 },
+  bucket: { id: "bucket", priceCopper: 20, maxPurchases: 2 },
+  egg: { id: "egg", priceCopper: 15, maxPurchases: 2 },
+  white_meat: { id: "white_meat", priceCopper: 25, maxPurchases: 2 },
+  fish: { id: "fish", priceCopper: 27, maxPurchases: 2 },
+  red_meat: { id: "red_meat", priceCopper: 30, maxPurchases: 2 },
+  mushroom: { id: "mushroom", priceCopper: 10, maxPurchases: 2 },
+  mushroom_rare: { id: "mushroom_rare", priceCopper: 33, maxPurchases: 1 },
   bag2: { id: "bag2", priceCopper: 100, maxPurchases: 1 },
-  crate1: { id: "crate1", priceCopper: 40, maxPurchases: 3 },
-  seed_herb: { id: "seed_herb", priceCopper: 8, maxPurchases: 3 },
-  seed_carrot: { id: "seed_carrot", priceCopper: 12, maxPurchases: 3 },
-  seed_potato: { id: "seed_potato", priceCopper: 16, maxPurchases: 3 },
-  seed_onion: { id: "seed_onion", priceCopper: 20, maxPurchases: 3 },
+  crate1: { id: "crate1", priceCopper: 60, maxPurchases: 3 },
+  seed_herb: { id: "seed_herb", priceCopper: 9, maxPurchases: 3 },
+  seed_carrot: { id: "seed_carrot", priceCopper: 13, maxPurchases: 3 },
+  seed_potato: { id: "seed_potato", priceCopper: 17, maxPurchases: 3 },
+  seed_onion: { id: "seed_onion", priceCopper: 21, maxPurchases: 3 },
   standard_fertilizer: { id: "standard_fertilizer", priceCopper: 5, maxPurchases: 5 },
-  nails: { id: "nails", priceCopper: 15, maxPurchases: 2 },
-  cloth: { id: "cloth", priceCopper: 25, maxPurchases: 2 },
-  paint: { id: "paint", priceCopper: 40, maxPurchases: 2 },
+  nails: { id: "nails", priceCopper: 16, maxPurchases: 2 },
+  cloth: { id: "cloth", priceCopper: 23, maxPurchases: 2 },
+  paint: { id: "paint", priceCopper: 30, maxPurchases: 2 },
+  mortar_and_pestle: { id: "mortar_and_pestle", priceCopper: 150, maxPurchases: 1, oncePerRun: true },
   tool_rusty_butchering_knife: { id: "tool_rusty_butchering_knife", priceCopper: 50, maxPurchases: 1 },
   armor_leather_bracers: { id: "armor_leather_bracers", priceCopper: 50, maxPurchases: 1 },
   weapon_iron_dagger: { id: "weapon_iron_dagger", priceCopper: 45, maxPurchases: 1 },
@@ -78,11 +85,18 @@ export type MerchantShopState = {
   daySerial: number;
   stockIds: MerchantStockId[];
   purchased: Partial<Record<MerchantStockId, number>>;
+  purchasedOnce: Partial<Record<MerchantStockId, true>>;
 };
 
-function rollStock(count: number, randomValue = Math.random, keep: readonly MerchantStockId[] = []): MerchantStockId[] {
-  const kept = [...new Set(keep.filter((id) => id !== "bag2" && !!MERCHANT_STOCK[id]))];
-  const ids = (Object.keys(MERCHANT_STOCK) as MerchantStockId[]).filter((id) => id !== "bag2" && !kept.includes(id));
+function rollStock(
+  count: number,
+  randomValue = Math.random,
+  keep: readonly MerchantStockId[] = [],
+  exclude: readonly MerchantStockId[] = [],
+): MerchantStockId[] {
+  const excluded = new Set(exclude);
+  const kept = [...new Set(keep.filter((id) => id !== "bag2" && !excluded.has(id) && !!MERCHANT_STOCK[id]))];
+  const ids = (Object.keys(MERCHANT_STOCK) as MerchantStockId[]).filter((id) => id !== "bag2" && !excluded.has(id) && !kept.includes(id));
   for (let index = ids.length - 1; index > 0; index -= 1) {
     const swapIndex = Math.floor(randomValue() * (index + 1));
     [ids[index], ids[swapIndex]] = [ids[swapIndex], ids[index]];
@@ -90,24 +104,35 @@ function rollStock(count: number, randomValue = Math.random, keep: readonly Merc
   return [...kept, ...ids].slice(0, count);
 }
 
+const MERCHANT_STOCK_FAVOR_THRESHOLDS = [25, 50, 75, 99, 100] as const;
+
+export function merchantOfferCount(favor: number): number {
+  const normalizedFavor = Math.max(0, Math.min(100, Math.floor(favor)));
+  return 5 + MERCHANT_STOCK_FAVOR_THRESHOLDS.filter((threshold) => normalizedFavor >= threshold).length;
+}
+
 export async function prepareMerchantShop(): Promise<MerchantShopState> {
   const guestState = await loadGuestState();
+  const totalOfferCount = merchantOfferCount(guestState.favors.merchant ?? 0);
   const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
   const bag = rawBag ? normalizePlayerBagData(JSON.parse(rawBag)) : DEFAULT_BAG;
   const backpackOwned = bag.bagId === "bag2" || bag.bagId === "bag3";
   const raw = await AsyncStorage.getItem(MERCHANT_SHOP_KEY);
+  let purchasedOnce: Partial<Record<MerchantStockId, true>> = {};
   if (raw) {
     try {
       const parsed = JSON.parse(raw) as MerchantShopState;
+      purchasedOnce = parsed.purchasedOnce ?? {};
+      const unavailable = (Object.keys(purchasedOnce) as MerchantStockId[]).filter((id) => MERCHANT_STOCK[id]?.oncePerRun);
       if (parsed.daySerial === guestState.calendarDaySerial && Array.isArray(parsed.stockIds)) {
-        const rotatingCount = backpackOwned ? 5 : 4;
+        const rotatingCount = totalOfferCount - (backpackOwned ? 0 : 1);
         const previousRotating = parsed.stockIds.filter((id) => id !== "bag2" && !!MERCHANT_STOCK[id]);
         const stockIds = [
           ...(!backpackOwned ? ["bag2" as const] : []),
-          ...rollStock(rotatingCount, Math.random, previousRotating.slice(0, rotatingCount)),
+          ...rollStock(rotatingCount, Math.random, previousRotating.slice(0, rotatingCount), unavailable),
         ];
-        const normalized = { ...parsed, stockIds };
-        if (JSON.stringify(normalized.stockIds) !== JSON.stringify(parsed.stockIds)) await AsyncStorage.setItem(MERCHANT_SHOP_KEY, JSON.stringify(normalized));
+        const normalized: MerchantShopState = { ...parsed, stockIds, purchasedOnce };
+        if (JSON.stringify(normalized) !== JSON.stringify(parsed)) await AsyncStorage.setItem(MERCHANT_SHOP_KEY, JSON.stringify(normalized));
         return normalized;
       }
     } catch { /* roll a clean shop */ }
@@ -115,8 +140,9 @@ export async function prepareMerchantShop(): Promise<MerchantShopState> {
   const next: MerchantShopState = {
     version: 1,
     daySerial: guestState.calendarDaySerial,
-    stockIds: [...(!backpackOwned ? ["bag2" as const] : []), ...rollStock(backpackOwned ? 5 : 4)],
+    stockIds: [...(!backpackOwned ? ["bag2" as const] : []), ...rollStock(totalOfferCount - (backpackOwned ? 0 : 1), Math.random, [], Object.keys(purchasedOnce) as MerchantStockId[])],
     purchased: {},
+    purchasedOnce,
   };
   await AsyncStorage.setItem(MERCHANT_SHOP_KEY, JSON.stringify(next));
   return next;
@@ -134,6 +160,7 @@ export function purchaseMerchantItem(stockId: MerchantStockId): Promise<Merchant
       const shop = await prepareMerchantShop();
       const definition = MERCHANT_STOCK[stockId];
       if (!shop.stockIds.includes(stockId)) return { ok: false, reason: "not_offered" };
+      if (definition.oncePerRun && shop.purchasedOnce[stockId]) return { ok: false, reason: "already_owned" };
       const bought = shop.purchased[stockId] ?? 0;
       if (bought >= definition.maxPurchases) return { ok: false, reason: "sold_out" };
 
@@ -199,7 +226,7 @@ export function purchaseMerchantItem(stockId: MerchantStockId): Promise<Merchant
           durability: maximumDurability,
           maxDurability: maximumDurability,
         };
-        const isUnique = maximumDurability !== undefined;
+        const isUnique = maximumDurability !== undefined || stockId === "mortar_and_pestle";
         const addPlan = isUnique ? planAddToNextFreeBagSlot(item, bag) : planAddToBag(item, bag);
         const canAdd = "ok" in addPlan ? addPlan.ok : addPlan.canTransfer && addPlan.remainderQty === 0;
         if (!canAdd) return { ok: false, reason: "bag_full" };
@@ -208,12 +235,22 @@ export function purchaseMerchantItem(stockId: MerchantStockId): Promise<Merchant
 
       const balanceBefore = await loadCurrencyCopper();
       if (await spendCurrencyCopper(definition.priceCopper) === null) return { ok: false, reason: "insufficient_copper" };
+      const nextPurchasedOnce = definition.oncePerRun
+        ? { ...shop.purchasedOnce, [stockId]: true as const }
+        : shop.purchasedOnce;
+      const nextBackpackOwned = nextBag.bagId === "bag2" || nextBag.bagId === "bag3";
+      const totalOfferCount = merchantOfferCount((await loadGuestState()).favors.merchant ?? 0);
+      const rerollStock = stockId === "bag2" || definition.oncePerRun;
       const nextShop: MerchantShopState = {
         ...shop,
-        stockIds: stockId === "bag2"
-          ? rollStock(5, Math.random, shop.stockIds.filter((id) => id !== "bag2"))
+        stockIds: rerollStock
+          ? [
+            ...(!nextBackpackOwned ? ["bag2" as const] : []),
+            ...rollStock(totalOfferCount - (nextBackpackOwned ? 0 : 1), Math.random, shop.stockIds.filter((id) => id !== "bag2" && id !== stockId), Object.keys(nextPurchasedOnce) as MerchantStockId[]),
+          ]
           : shop.stockIds,
         purchased: { ...shop.purchased, [stockId]: bought + 1 },
+        purchasedOnce: nextPurchasedOnce,
       };
       try {
         await AsyncStorage.multiSet([

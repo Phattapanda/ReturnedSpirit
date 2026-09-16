@@ -34,6 +34,7 @@ import CurrencyHud from "@/src/components/CurrencyHud";
 import CurrencyPrice from "@/src/components/currency-price";
 import ItemDurabilityBadge from "@/src/components/item-durability-badge";
 import SeasonedItemBadge from "@/src/components/seasoned-item-badge";
+import ScrollActivationOverlay from "@/src/components/scroll-activation-overlay";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { useHaptics } from "@/src/feedback/haptics-provider";
 import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
@@ -52,9 +53,11 @@ import {
 import { subscribeKitchenPlayerThought } from "@/src/game/kitchen-runtime-context";
 import {
   PLAYER_BAG_KEY, DEFAULT_BAG, KITCHEN_TABLE_KEY, ITEM_ATTRIBUTE, ITEM_CATALOG,
+  CONSUMABLE_CATEGORY,
   applyLifeRecovery, applyStaminaRecovery, canConsumeForStamina, canStack, getContainerStackLimit,
   getGrantedStatusEffectId, hasItemAttribute, isConsumable, isEdible,
-  getItemDurability,
+  getItemDurability, isItemDiscardable,
+  getConsumableCategory,
   normalizeBagItem, normalizeItemId, normalizePlayerBagData,
   type PlayerBagData, type BagItem,
 } from "@/src/game/item-system";
@@ -68,6 +71,7 @@ import {
   findCookingRecipe,
   getCraftableRecipeCount,
   loadDiscoveredRecipes,
+  RUPERT_MORTAR_RECIPE_DIALOG_SEEN_KEY,
 } from "@/src/game/cooking-system";
 import { planKitchenItemToBag } from "@/src/game/kitchen-bag-transfer";
 import {
@@ -75,15 +79,18 @@ import {
   DEFAULT_PLAYER_STATS,
   calcEffectiveStaminaCost,
   getActiveStaminaBuffReduction,
+  getEffectiveEndurance,
   getEffectiveLuck,
   normalizePlayerStats,
   type PlayerStats,
 } from "@/src/game/player-stats";
 import { applyTemporaryEffect } from "@/src/game/status-effect-system";
+import { potionBuffPotency } from "@/src/game/potion-effectiveness";
 import { loadLogbook, type LogEntry, LOGBOOK_KEY } from "@/src/game/logbook";
 import { COPPER_PER_SILVER, loadCurrencyCopper } from "@/src/game/currency-system";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
 import { completeRupertAlchemyIntro } from "@/src/game/rupert-alchemy-intro";
+import { unlockWorkshopOfferAfterRupertDialogue } from "@/src/game/workshop-system";
 import { setPlaytimePaused } from "@/src/game/playtime-tracker";
 import {
   guestTutorialHasReached,
@@ -239,6 +246,12 @@ type DLine = {
   highlightedPhrases?: readonly string[];
 };
 
+type PendingRecipePresentation = {
+  name: string;
+  outputId: string;
+  showMortarDiscoveryDialog?: boolean;
+};
+
 type LRect = { x: number; y: number; w: number; h: number; cx?: number; cy?: number };
 
 // Interaction policy for context bubbles
@@ -290,6 +303,7 @@ const CRAFT_TOOL_IDS = new Set([
   "oldpot",
   "cooking_pot",
   "fine_cooking_pot",
+  "mortar_and_pestle",
   "tool_kitchen_knife",
   "tool_rusty_butchering_knife",
   "tool_iron_butchering_knife",
@@ -342,9 +356,16 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   bag_carrot:  require("../assets/images/bag_carrot.png"),
   bag_onion:   require("../assets/images/bag_onion.png"),
   bag_potato:  require("../assets/images/bag_potato.png"),
+  bag_lettuce: require("../assets/images/bag_lettuce.png"),
+  bag_cucumber: require("../assets/images/bag_cucumber.png"),
+  bag_spinach: require("../assets/images/bag_spinach.png"),
+  bag_tomato: require("../assets/images/bag_tomato.png"),
+  bag_pumpkin: require("../assets/images/bag_pumpkin.png"),
   carrot:      require("../assets/images/carrot.png"),
   potato:      require("../assets/images/potato.png"),
   onion:       require("../assets/images/onion.png"),
+  spinach:     require("../assets/images/spinach.png"),
+  pumpkin:     require("../assets/images/pumpkin.png"),
   egg:         require("../assets/images/egg.png"),
   white_meat:  require("../assets/images/meat_white.png"),
   red_meat:    require("../assets/images/meat_red.png"),
@@ -382,6 +403,14 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   ingot_silver: require("../assets/images/ingot_silver.png"),
   ingot_gold: require("../assets/images/ingot_gold.png"),
   sap: require("../assets/images/sap.png"),
+  syrup: require("../assets/images/syrup.png"),
+  alchemy_powder_yellow: require("../assets/images/alchemy_powder_yellow.png"),
+  alchemy_powder_red: require("../assets/images/alchemy_powder_red.png"),
+  alchemy_powder_green: require("../assets/images/alchemy_powder_green.png"),
+  alchemy_powder_blue: require("../assets/images/alchemy_powder_blue.png"),
+  alchemy_powder_brown: require("../assets/images/alchemy_powder_brown.png"),
+  alchemy_powder_white: require("../assets/images/alchemy_powder_white.png"),
+  alchemy_powder_black: require("../assets/images/alchemy_powder_black.png"),
   malted_barley: require("../assets/images/quest_item.png"),
   brewers_yeast: require("../assets/images/quest_item.png"),
   dried_hop_cones: require("../assets/images/quest_item.png"),
@@ -408,6 +437,7 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   snowberrysherbet: require("../assets/images/snowberry_sherbet.png"),
   cooking_pot: require("../assets/images/cooking_pot.png"),
   frying_pan: require("../assets/images/frying_pan.png"),
+  mortar_and_pestle: require("../assets/images/mortar_and_pestle.png"),
   fine_cooking_pot: require("../assets/images/fine_cooking_pot.png"),
   snowberry: require("../assets/images/snowberry.png"),
   soup_herb: require("../assets/images/soup_herb.png"),
@@ -441,6 +471,9 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   questbook: require("../assets/images/questbook.png"),
   recipe_book: require("../assets/images/recipe_book.png"),
   potion_healing_low_grade: require("../assets/images/potion_healing_low_grade.png"),
+  potion_energy_low_grade: require("../assets/images/potion_energy_low_grade.png"),
+  potion_strength: require("../assets/images/potion_strength.png"),
+  potion_defense: require("../assets/images/potion_defense.png"),
   standard_fertilizer: require("../assets/images/fertilizer.png"),
   premium_fertilizer: require("../assets/premiumfertilizer.png"),
   seed_carrot: require("../assets/images/seed_carrot.png"),
@@ -461,25 +494,30 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   tool_kitchen_knife: require("../assets/images/cooking_knife.png"),
 };
 
-type RecipeCategoryId = "hand" | "pot" | "pan" | "knife";
+type RecipeCategoryId = "mortar" | "pot" | "pan" | "knife";
 
 const RECIPE_CATEGORIES: readonly {
   id: RecipeCategoryId;
   label: string;
   image: ImageSourcePropType;
 }[] = [
-  { id: "hand", label: "Hand Recipes", image: require("../assets/images/tool_hand.png") },
+  { id: "mortar", label: "Mortar and Pestle Recipes", image: require("../assets/images/mortar_and_pestle.png") },
   { id: "pot", label: "Pot Recipes", image: require("../assets/images/oldpot.png") },
   { id: "pan", label: "Pan Recipes", image: require("../assets/images/frying_pan.png") },
   { id: "knife", label: "Knife Recipes", image: require("../assets/images/cooking_knife.png") },
 ] as const;
 
-function recipeCategoryForTool(toolId: string | null): RecipeCategoryId {
-  if (!toolId) return "hand";
+function recipeCategoryForTool(toolId: string | null): RecipeCategoryId | null {
+  if (toolId === "mortar_and_pestle") return "mortar";
+  if (!toolId) return null;
   if (toolId === "oldpot" || toolId === "cooking_pot" || toolId === "fine_cooking_pot") return "pot";
   if (toolId === "frying_pan") return "pan";
   if (toolId.includes("knife")) return "knife";
-  return "hand";
+  return null;
+}
+
+function isRecipeVisibleInBook(recipeId: string, discoveredRecipeIds: readonly string[]): boolean {
+  return discoveredRecipeIds.includes(recipeId);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -562,7 +600,23 @@ const D_RUPERT_ALCHEMY_INTRO: DLine[] = [
   { id: "d_rupert_alchemy.0", speaker: "Rupert", portrait: "normal", text: '"I see that you were successful in the Forest Dungeon?"' },
   { id: "d_rupert_alchemy.1", speaker: "Rupert", portrait: "normal", text: '"Oh, this is part of a monster. This type of ingredient can be used for alchemy."' },
   { id: "d_rupert_alchemy.2", speaker: "Rupert", portrait: "sad", text: '"I\'m not very familiar with this, but you can buy recipes in the city."' },
-  { id: "d_rupert_alchemy.3", speaker: "Rupert", portrait: "normal", text: '"I once heard that you can make good spices using herbs and mana shards."' },
+];
+
+const D_RUPERT_MORTAR_RECIPE_DISCOVERY: DLine[] = [
+  {
+    id: "d_rupert_mortar_recipe.0",
+    speaker: "Rupert",
+    portrait: "laugh",
+    text: '"It seems you have a knack for alchemy. With others, it just turns into sludge."',
+    highlightedPhrases: ["alchemy"],
+  },
+  {
+    id: "d_rupert_mortar_recipe.1",
+    speaker: "Rupert",
+    portrait: "normal",
+    text: '"If you like, you can use the outbuilding if you need a workshop of your own. The local carpenter can help you with that."',
+    highlightedPhrases: ["workshop", "carpenter"],
+  },
 ];
 
 const HARVEST_BAG_CONTENTS = {
@@ -570,6 +624,11 @@ const HARVEST_BAG_CONTENTS = {
   bag_carrot: { itemId: "carrot", singular: "carrot", plural: "carrots" },
   bag_onion: { itemId: "onion", singular: "onion", plural: "onions" },
   bag_potato: { itemId: "potato", singular: "potato", plural: "potatoes" },
+  bag_lettuce: { itemId: "lettuce", singular: "lettuce", plural: "lettuce" },
+  bag_cucumber: { itemId: "cucumber", singular: "cucumber", plural: "cucumbers" },
+  bag_spinach: { itemId: "spinach", singular: "spinach", plural: "spinach" },
+  bag_tomato: { itemId: "tomato", singular: "tomato", plural: "tomatoes" },
+  bag_pumpkin: { itemId: "pumpkin", singular: "pumpkin", plural: "pumpkins" },
 } as const;
 
 type HarvestBagId = keyof typeof HARVEST_BAG_CONTENTS;
@@ -645,8 +704,9 @@ export default function KitchenScreen({
   const [recipeSlotSize, setRecipeSlotSize] = useState(44);
   const [discoveredRecipeIds, setDiscoveredRecipeIds] = useState<string[]>([]);
   const discoveredRecipeIdsRef = useRef<string[]>([]);
-  const [newRecipePresentation, setNewRecipePresentation] = useState<{ name: string; outputId: string } | null>(null);
-  const pendingNewRecipeRef = useRef<{ name: string; outputId: string } | null>(null);
+  const [newRecipePresentation, setNewRecipePresentation] = useState<PendingRecipePresentation | null>(null);
+  const pendingNewRecipeRef = useRef<PendingRecipePresentation | null>(null);
+  const mortarRecipeDialogSeenRef = useRef(false);
   const newRecipeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const newRecipeScale = useSharedValue(1.18);
   const newRecipeOpacity = useSharedValue(0);
@@ -791,6 +851,7 @@ export default function KitchenScreen({
   const [craftIngSlots, setCraftIngSlots] = useState<(BagItem | null)[]>([null, null, null]);
   const [craftTool, setCraftTool] = useState<BagItem | null>(null);
   const [craftResult, setCraftResult] = useState<BagItem | null>(null);
+  const [scrollActivationKey, setScrollActivationKey] = useState(0);
   const craftingLocked = useRef(false);
   const craftingInteractionLockedSV = useSharedValue(0);
   const cookingTutorialCompletedRef = useRef(false);
@@ -1027,10 +1088,10 @@ export default function KitchenScreen({
   // ─────────────────────────────────────────────────────────────────────────
   async function handleBagToTable(bagSlotIdx: number, item: BagItem) {
     setBagOpen(false);
-    const TABLE_STACK_LIMIT = 20;
     const currentBag = playerBagRef.current;
     const sourceItem = currentBag.slots[bagSlotIdx];
     if (!sourceItem || sourceItem.id !== item.id || sourceItem.quantity <= 0) return;
+    const TABLE_STACK_LIMIT = sourceItem.id === "scroll" || sourceItem.id.endsWith("_scroll") ? 1 : 20;
 
     const currentTable = tableItemsRef.current.slice();
     let transfer = sourceItem.quantity;
@@ -1040,9 +1101,7 @@ export default function KitchenScreen({
       if (soupSlotRef.current === i) continue;
       const t = currentTable[i];
       if (
-        t && t.id === sourceItem.id &&
-        t.containedItem === sourceItem.containedItem &&
-        t.containedQuantity === sourceItem.containedQuantity &&
+        t && canStack(t, sourceItem) &&
         t.quantity < TABLE_STACK_LIMIT
       ) {
         const add = Math.min(transfer, TABLE_STACK_LIMIT - t.quantity);
@@ -1059,7 +1118,7 @@ export default function KitchenScreen({
         if (soupSlotRef.current === i) continue;
         if (!currentTable[i]) {
           const add = Math.min(transfer, TABLE_STACK_LIMIT);
-          currentTable[i] = { ...sourceItem, quantity: add };
+          currentTable[i] = { ...sourceItem, quantity: add, equipped: false };
           if (firstNewSlot === null) firstNewSlot = i;
           transfer -= add;
           if (transfer <= 0) break;
@@ -3628,7 +3687,9 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
 
     inputLocked.current = true;
     const remainingQty = Math.max(0, item.quantity - 1);
-    const replacement: BagItem | null = remainingQty > 0 ? { ...item, quantity: remainingQty } : null;
+    const returnsBottle = getConsumableCategory(item) === CONSUMABLE_CATEGORY.POTION;
+    const emptyBottle: BagItem = { id: "empty_bottle", itemType: "empty_bottle", name: ITEM_CATALOG.empty_bottle.name, quantity: 1 };
+    const replacement: BagItem | null = remainingQty > 0 ? { ...item, quantity: remainingQty } : returnsBottle ? emptyBottle : null;
 
     const nextTable = tableItemsRef.current.slice();
     const nextIngredients = craftIngSlotsRef.current.slice() as (BagItem | null)[];
@@ -3640,6 +3701,30 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     else {
       inputLocked.current = false;
       return;
+    }
+
+    if (returnsBottle && remainingQty > 0) {
+      let bottlePlaced = false;
+      const tableLimit = getContainerStackLimit("kitchenTable");
+      const tableStack = nextTable.findIndex((slot) => !!slot && canStack(slot, emptyBottle) && slot.quantity < tableLimit);
+      if (tableStack >= 0) { nextTable[tableStack] = { ...nextTable[tableStack]!, quantity: nextTable[tableStack]!.quantity + 1 }; bottlePlaced = true; }
+      if (!bottlePlaced) {
+        const tableEmpty = nextTable.findIndex((slot) => !slot);
+        if (tableEmpty >= 0) { nextTable[tableEmpty] = emptyBottle; bottlePlaced = true; }
+      }
+      if (!bottlePlaced) {
+        const ingredientStack = nextIngredients.findIndex((slot) => !!slot && canStack(slot, emptyBottle) && slot.quantity < tableLimit);
+        if (ingredientStack >= 0) { nextIngredients[ingredientStack] = { ...nextIngredients[ingredientStack]!, quantity: nextIngredients[ingredientStack]!.quantity + 1 }; bottlePlaced = true; }
+      }
+      if (!bottlePlaced) {
+        const ingredientEmpty = nextIngredients.findIndex((slot) => !slot);
+        if (ingredientEmpty >= 0) { nextIngredients[ingredientEmpty] = emptyBottle; bottlePlaced = true; }
+      }
+      if (!bottlePlaced) {
+        inputLocked.current = false;
+        showPlayerBubble('"I need to make room for the Empty Bottle first."');
+        return;
+      }
     }
 
     tableItemsRef.current = nextTable;
@@ -3678,13 +3763,13 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     normalConsumeUnlockTimer.current = setTimeout(onNormalSoupConsumed, CONSUME_MS + 120);
 
     const oldSta = staminaCurrentRef.current;
-    const newSta = applyStaminaRecovery(item, oldSta, playerStats.maximumStamina);
+    const newSta = applyStaminaRecovery(item, oldSta, playerStats.maximumStamina, playerStats.effectiveness);
     setStaminaGainDisplay(Math.max(0, newSta - oldSta));
     updateStaminaCurrent(newSta);
     staminaSV.value = withTiming(newSta, { duration: STA_MS });
     AsyncStorage.setItem(SK.STAMINA, String(newSta)).catch(() => {});
 
-    const newLife = applyLifeRecovery(item, lifeCurrent, playerStats.maximumLife);
+    const newLife = applyLifeRecovery(item, lifeCurrent, playerStats.maximumLife, playerStats.effectiveness);
     if (newLife !== lifeCurrent) {
       setLifeCurrent(newLife);
       AsyncStorage.setItem(SK.LIFE, String(newLife)).catch(() => {});
@@ -3694,7 +3779,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     if (grantedEffectId) {
       const nextStats = {
         ...playerStats,
-        statusEffects: applyTemporaryEffect(playerStats.statusEffects, grantedEffectId),
+        statusEffects: applyTemporaryEffect(playerStats.statusEffects, grantedEffectId, undefined, potionBuffPotency(item.id, playerStats.effectiveness)),
       };
       setPlayerStats(nextStats);
       AsyncStorage.setItem(PLAYER_STATS_KEY, JSON.stringify(nextStats)).catch(() => {});
@@ -3747,13 +3832,14 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     if (!draggedItem || draggedItem.id !== expectedItemId) return;
     const garbageRect = layouts.current.garbage;
     if (garbageRect && inExpandedRect(absX, absY, garbageRect, 8)) {
-      if (hasItemAttribute(draggedItem, ITEM_ATTRIBUTE.QUEST_ITEM)) {
-        showPlayerBubble('"I should keep this Quest Item."');
+      if (!isItemDiscardable(draggedItem)) {
+        showPlayerBubble(hasItemAttribute(draggedItem, ITEM_ATTRIBUTE.QUEST_ITEM) ? '"I should keep this Quest Item."' : '"I should keep this tool."');
         return;
       }
       setDiscardKitchenTarget({ slot: srcSlot, item: { ...draggedItem } });
       return;
     }
+
     const cratePanelRect = layouts.current.cratePanel;
     if (draggedItem.id !== "crate1" && smallCrateOpen && cratePanelRect && inRect(absX, absY, cratePanelRect)) {
       void transferCookingItemToCrate(srcSlot);
@@ -4056,8 +4142,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     if (!target) return;
     const current = getCookingItemAtSlot(target.slot);
     if (!current || current.id !== target.item.id) return;
-    if (hasItemAttribute(current, ITEM_ATTRIBUTE.QUEST_ITEM)) {
-      showPlayerBubble('"I should keep this Quest Item."');
+    if (!isItemDiscardable(current)) {
+      showPlayerBubble(hasItemAttribute(current, ITEM_ATTRIBUTE.QUEST_ITEM) ? '"I should keep this Quest Item."' : '"I should keep this tool."');
       return;
     }
     if (current.id === "crate1" && smallCrateRef.current.count > 1 && smallCrateRef.current.slots.slice(-6).some(Boolean)) {
@@ -4113,6 +4199,13 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       tsRef.current = "IDLE";
       setCraftResult(createCraftResultPreview(craftIngSlotsRef.current, craftToolRef.current));
       setTimeout(() => { setCraftingInteractionLocked(false); }, 350);
+      if (newlyDiscoveredRecipe?.showMortarDiscoveryDialog) {
+        setTimeout(() => showDialog(D_RUPERT_MORTAR_RECIPE_DISCOVERY, () => {
+          void AsyncStorage.setItem(RUPERT_MORTAR_RECIPE_DIALOG_SEEN_KEY, "true")
+            .then(unlockWorkshopOfferAfterRupertDialogue)
+            .catch(() => {});
+        }), NEW_RECIPE_HOLD_MS + 450);
+      }
       return;
     }
 
@@ -4209,7 +4302,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     });
   }
 
-  function handleCraft() {
+  async function handleCraft() {
     if (craftingLocked.current) return;
     if (!craftResult) return;
     setCraftingInteractionLocked(true);
@@ -4235,7 +4328,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       return;
     }
 
-    const outputs = createRecipeOutputs(recipe, craftCount, getContainerStackLimit("kitchenTable"), getEffectiveLuck(playerStats), currentTool);
+    const outputs = createRecipeOutputs(recipe, craftCount, getContainerStackLimit("kitchenTable"), getEffectiveLuck(playerStats), currentTool, playerStats.effectiveness);
     const newTable = tableItemsRef.current.slice();
     const targetSlots: number[] = [];
     for (let i = 0; i < newTable.length && targetSlots.length < outputs.length; i++) {
@@ -4267,7 +4360,19 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     AsyncStorage.setItem(SK.CRAFT_INGREDIENTS, JSON.stringify(newIng)).catch(() => {});
     AsyncStorage.setItem(SK.CRAFT_TOOL_SLOT, JSON.stringify(newTool)).catch(() => {});
     if (!recipe.hiddenFromRecipeBook && !discoveredRecipeIdsRef.current.includes(recipe.id)) {
-      pendingNewRecipeRef.current = { name: recipe.name, outputId: recipe.outputId };
+      let showMortarDiscoveryDialog = false;
+      if (recipe.toolId === "mortar_and_pestle" && !mortarRecipeDialogSeenRef.current) {
+        const wasAlreadySeen = await AsyncStorage.getItem(RUPERT_MORTAR_RECIPE_DIALOG_SEEN_KEY)
+          .then((value) => value === "true")
+          .catch(() => false);
+        if (!wasAlreadySeen) {
+          showMortarDiscoveryDialog = true;
+          mortarRecipeDialogSeenRef.current = true;
+        } else {
+          mortarRecipeDialogSeenRef.current = true;
+        }
+      }
+      pendingNewRecipeRef.current = { name: recipe.name, outputId: recipe.outputId, showMortarDiscoveryDialog };
       const reservedIds = [...discoveredRecipeIdsRef.current, recipe.id];
       discoveredRecipeIdsRef.current = reservedIds;
       setDiscoveredRecipeIds(reservedIds);
@@ -4278,6 +4383,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         setDiscoveredRecipeIds(ids);
       }).catch(() => {});
     }
+    if (recipe.enhancementKind) setScrollActivationKey((current) => current + 1);
     startCraftOutputFlight(outputs, targetSlots, newTable, tutorialCraft);
   }
 
@@ -4577,7 +4683,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
             {!isBeingDragged && imgSrc && (
               <Image source={imgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
             )}
-            {!isBeingDragged && <SeasonedItemBadge visible={item.seasonedStage !== undefined} />}
+            {!isBeingDragged && <SeasonedItemBadge visible={item.seasonedStage !== undefined || !!item.weaponEnhanced || !!item.armorEnhanced} />}
             {!isBeingDragged && <ItemDurabilityBadge item={item} />}
             {!isBeingDragged && item.quantity > 1 && (
               <Text style={styles.tableItemQty}>{item.quantity}</Text>
@@ -4608,7 +4714,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
             {!isBeingDragged && imgSrc && (
               <Image source={imgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
             )}
-            {!isBeingDragged && <SeasonedItemBadge visible={item.seasonedStage !== undefined} />}
+            {!isBeingDragged && <SeasonedItemBadge visible={item.seasonedStage !== undefined || !!item.weaponEnhanced || !!item.armorEnhanced} />}
             {!isBeingDragged && <ItemDurabilityBadge item={item} />}
             {!isBeingDragged && item.quantity > 1 && (
               <Text style={styles.tableItemQty}>{item.quantity}</Text>
@@ -4647,7 +4753,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         {imgSrc && (
           <Image source={imgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
         )}
-        <SeasonedItemBadge visible={item.seasonedStage !== undefined} />
+        <SeasonedItemBadge visible={item.seasonedStage !== undefined || !!item.weaponEnhanced || !!item.armorEnhanced} />
         <ItemDurabilityBadge item={item} />
         {item.quantity > 1 && <Text style={styles.tableItemQty}>{item.quantity}</Text>}
       </Pressable>
@@ -4657,7 +4763,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   const aleServiceAvailable = isAleServiceAvailable(postGuestState, guestCalendarDaySerial);
   const guestAreaCleanCost = calcEffectiveStaminaCost(
     GUEST_AREA_CLEAN_STAMINA_COST,
-    playerStats.endurance,
+    getEffectiveEndurance(playerStats),
     getActiveStaminaBuffReduction(playerStats),
   );
   const canCleanGuestArea = !guestAreaComplete && staminaCurrent >= guestAreaCleanCost;
@@ -4860,7 +4966,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                               {!craftBeingDragged && craftImgSrc && (
                                 <Image source={craftImgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
                               )}
-                              {!craftBeingDragged && <SeasonedItemBadge visible={craftItem.seasonedStage !== undefined} />}
+                              {!craftBeingDragged && <SeasonedItemBadge visible={craftItem.seasonedStage !== undefined || !!craftItem.weaponEnhanced || !!craftItem.armorEnhanced} />}
                               {!craftBeingDragged && <ItemDurabilityBadge item={craftItem} />}
                               {!craftBeingDragged && craftItem.quantity > 1 && (
                                 <Text style={styles.tableItemQty}>{craftItem.quantity}</Text>
@@ -4871,7 +4977,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                           <Pressable style={styles.soupSlotTouch} onPress={() => returnCraftIngToTable(i)}>
                             <View style={{ width: "100%", height: "100%", alignItems: "center", justifyContent: "center" }}>
                               {craftImgSrc && <Image source={craftImgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />}
-                              <SeasonedItemBadge visible={craftItem.seasonedStage !== undefined} />
+                              <SeasonedItemBadge visible={craftItem.seasonedStage !== undefined || !!craftItem.weaponEnhanced || !!craftItem.armorEnhanced} />
                               <ItemDurabilityBadge item={craftItem} />
                               {craftItem.quantity > 1 && <Text style={styles.tableItemQty}>{craftItem.quantity}</Text>}
                             </View>
@@ -4941,7 +5047,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                         ) : ITEM_IMAGES[craftResult.id] ? (
                           <>
                             <Image source={ITEM_IMAGES[craftResult.id]} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
-                            <SeasonedItemBadge visible={craftResult.seasonedStage !== undefined} />
+                            <SeasonedItemBadge visible={craftResult.seasonedStage !== undefined || !!craftResult.weaponEnhanced || !!craftResult.armorEnhanced} />
                           </>
                         ) : null}
                         {previewDiscovered && craftResult.quantity > 1 && <Text style={styles.tableItemQty}>{craftResult.quantity}</Text>}
@@ -5020,7 +5126,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                 {item && ITEM_IMAGES[item.id] ? (
                   <>
                     <Image source={ITEM_IMAGES[item.id]} style={styles.smallCrateItemImage} resizeMode="contain" />
-                    <SeasonedItemBadge visible={item.seasonedStage !== undefined} />
+                    <SeasonedItemBadge visible={item.seasonedStage !== undefined || !!item.weaponEnhanced || !!item.armorEnhanced} />
                   </>
                 ) : null}
                 <ItemDurabilityBadge item={item} />
@@ -5688,7 +5794,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
                 <View style={styles.recipeCategoryGrid}>
                   {RECIPE_CATEGORIES.map((category) => {
                     const allRecipes = COOKING_RECIPES.filter((recipe) => recipeCategoryForTool(recipe.toolId) === category.id);
-                    const discoveredCount = allRecipes.filter((recipe) => discoveredRecipeIds.includes(recipe.id)).length;
+                    const discoveredCount = allRecipes.filter((recipe) => isRecipeVisibleInBook(recipe.id, discoveredRecipeIds)).length;
                     return (
                       <TouchableOpacity key={category.id} style={styles.recipeCategoryCard} onPress={() => setRecipeCategory(category.id)} activeOpacity={0.75}>
                         <Image source={category.image} style={styles.recipeCategoryImage} resizeMode="contain" resizeMethod="resize" />
@@ -5700,7 +5806,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
                 </View>
               ) : (() => {
                 const allRecipes = COOKING_RECIPES.filter((recipe) => recipeCategoryForTool(recipe.toolId) === recipeCategory);
-                const discoveredRecipes = allRecipes.filter((recipe) => discoveredRecipeIds.includes(recipe.id));
+                const discoveredRecipes = allRecipes.filter((recipe) => isRecipeVisibleInBook(recipe.id, discoveredRecipeIds));
                 if (discoveredRecipes.length === 0) {
                   return <Text style={styles.recipeEmpty}>{allRecipes.length === 0 ? "No recipes are currently available in this category." : "No recipes discovered in this category yet."}{"\n"}Try combining ingredients in the kitchen.</Text>;
                 }
@@ -5719,6 +5825,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
                         <Text style={styles.recipeIngredients}>
                           {recipe.ingredients.map((item) => `${item.quantity}× ${ITEM_CATALOG[item.id]?.name ?? item.id}`).join(" + ")}
                           {recipe.toolId ? ` · Tool: ${recipe.toolId === "oldpot" ? "Old Pot or better" : (ITEM_CATALOG[recipe.toolId]?.name ?? recipe.toolId)}` : ""}
+                          {` → ${recipe.outputQuantity}× ${ITEM_CATALOG[recipe.outputId]?.name ?? recipe.outputId}`}
                         </Text>
                         <View style={styles.recipeEffectsRow}>
                           <CurrencyPrice totalCopper={recipe.sellPriceCopper} textStyle={styles.recipeEffects} />
@@ -5804,9 +5911,9 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
               <View style={styles.detailPanel}>
                 <View style={styles.detailImageWrap}>
                   <Image source={ITEM_IMAGES[kitchenDetailItem.id] ?? ITEM_IMAGES.soup_herb} style={styles.detailImg} resizeMode="contain" resizeMethod="resize" />
-                  <SeasonedItemBadge visible={kitchenDetailItem.seasonedStage !== undefined} />
+                  <SeasonedItemBadge visible={kitchenDetailItem.seasonedStage !== undefined || !!kitchenDetailItem.weaponEnhanced || !!kitchenDetailItem.armorEnhanced} />
                 </View>
-                <Text style={styles.detailName}>{kitchenDetailItem.seasonedStage !== undefined || kitchenDetailItem.id === "monster_carcass" ? kitchenDetailItem.name : (ITEM_CATALOG[kitchenDetailItem.id]?.name ?? kitchenDetailItem.name)}</Text>
+                <Text style={styles.detailName}>{kitchenDetailItem.seasonedStage !== undefined || kitchenDetailItem.weaponEnhanced || kitchenDetailItem.armorEnhanced || kitchenDetailItem.id === "monster_carcass" ? kitchenDetailItem.name : (ITEM_CATALOG[kitchenDetailItem.id]?.name ?? kitchenDetailItem.name)}</Text>
                 {kitchenDetailItem.containedItem && kitchenDetailItem.containedQuantity != null && (
                   <Text style={styles.detailContents}>Contains: {kitchenDetailItem.containedQuantity}× {kitchenDetailItem.containedItem}</Text>
                 )}
@@ -5815,6 +5922,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
                   const durability = getItemDurability(kitchenDetailItem);
                   return durability ? <Text style={styles.detailContents}>Durability: {durability.current}/{durability.maximum}</Text> : null;
                 })()}
+                {kitchenDetailItem.maxUses !== undefined ? <Text style={styles.detailContents}>Uses: {kitchenDetailItem.usesRemaining ?? kitchenDetailItem.maxUses}/{kitchenDetailItem.maxUses}</Text> : null}
                 {(ITEM_CATALOG[kitchenDetailItem.id]?.attributes.includes("weapon") || ITEM_CATALOG[kitchenDetailItem.id]?.attributes.includes("armor")) && (
                   <Text style={styles.detailContents}>Carry it with you to equip.</Text>
                 )}
@@ -5897,6 +6005,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
           </View>
         );
       })()}
+      <ScrollActivationOverlay activationKey={scrollActivationKey} />
     </View>
   );
 }

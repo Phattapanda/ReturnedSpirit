@@ -106,13 +106,21 @@ export type GuestVisitView = {
   exchangeOffer: GuestExchangeOffer | null;
   transportDiscountPercent: number;
   selected: boolean;
-  favorRewardDialog: string | null;
+  favorRewardDialog: FavorRewardDialog | null;
   learnedPreferenceFacts: readonly GuestPreferenceFactKey[];
 };
 
-const FAVOR_GIFT_SUCCESS = "Thank you very much for your hospitality. I like coming here. Here, take this.";
-const FAVOR_GIFT_DEFERRED = "Thank you very much for your hospitality.  I’d like to give you something. I don’t have it with me right now, but I’ll bring it next time.";
-const favorRewardListeners = new Set<(guestId: GuestId, text: string) => void>();
+export type FavorRewardDialog = { text: string; itemName: string };
+
+function favorGiftSuccess(itemName: string): FavorRewardDialog {
+  return { text: `Thanks for your hard work. Take this ${itemName}.`, itemName };
+}
+
+function favorGiftDeferred(itemName: string): FavorRewardDialog {
+  return { text: `Thanks for your hard work. I’d like to give you a ${itemName}, but I don’t have it with me right now. I’ll bring it next time.`, itemName };
+}
+
+const favorRewardListeners = new Set<(guestId: GuestId, dialog: FavorRewardDialog) => void>();
 
 export type FavorChangeFeedbackKind = "increase" | "big_increase" | "stage_increase" | "decrease";
 
@@ -151,13 +159,13 @@ function emitFavorChangeFeedback(guestId: GuestId, previousFavor: number, nextFa
   for (const listener of favorChangeListeners) listener(feedback);
 }
 
-export function subscribeFavorRewardDialog(listener: (guestId: GuestId, text: string) => void): () => void {
+export function subscribeFavorRewardDialog(listener: (guestId: GuestId, dialog: FavorRewardDialog) => void): () => void {
   favorRewardListeners.add(listener);
   return () => { favorRewardListeners.delete(listener); };
 }
 
-function emitFavorRewardDialog(guestId: GuestId, text: string) {
-  for (const listener of favorRewardListeners) listener(guestId, text);
+function emitFavorRewardDialog(guestId: GuestId, dialog: FavorRewardDialog) {
+  for (const listener of favorRewardListeners) listener(guestId, dialog);
 }
 
 function exchangeOffer(itemId: string, name: string, quantity: number, weight: number): GuestExchangeOffer {
@@ -278,6 +286,14 @@ export const MERCHANT_PROFILE: GuestProfile = {
   name: "Merchant",
   portraitKey: "merchant",
   visitDays: EVERY_DAY,
+  favorTiers: [
+    { minFavor: 0, maxFavor: 24, visitDays: EVERY_DAY },
+    { minFavor: 25, maxFavor: 49, visitDays: EVERY_DAY },
+    { minFavor: 50, maxFavor: 74, visitDays: EVERY_DAY },
+    { minFavor: 75, maxFavor: 98, visitDays: EVERY_DAY },
+    { minFavor: 99, maxFavor: 99, visitDays: EVERY_DAY },
+    { minFavor: 100, maxFavor: 100, visitDays: EVERY_DAY },
+  ],
   initialFavor: 0,
   favoriteDishId: null,
   leastFavoriteDishId: null,
@@ -285,7 +301,7 @@ export const MERCHANT_PROFILE: GuestProfile = {
   dislikedMealTags: [],
   exchangePool: [],
   exchangeMode: "meal_value",
-  usesFavor: false,
+  usesFavor: true,
 };
 
 export const TRAVELER_PROFILE: GuestProfile = {
@@ -557,7 +573,7 @@ export function getMerchantExchangeOffer(mealValueCopper: number): GuestExchange
   if (value >= 9 && value <= 15) return exchangeOffer("nails", "Nails", 1, 100);
   if (value >= 16 && value <= 22) return exchangeOffer("cloth", "Cloth", 1, 100);
   if (value >= 23 && value <= 29) return exchangeOffer("paint", "Paint", 1, 100);
-  if (value >= 30 && value <= 36) return exchangeOffer("potion_healing_low_grade", "Low Quality Healing Potion", 1, 100);
+  if (value >= 30 && value <= 36) return exchangeOffer("potion_healing_low_grade", "Low Grade Healing Potion", 1, 100);
   if (value >= 37 && value <= 44) return exchangeOffer("potion_stamina_low_grade", "Low Grade Stamina Potion", 1, 100);
   if (value >= 45 && value <= 50) return exchangeOffer("ingot_iron", "Iron Ingot", 1, 100);
   if (value >= 51 && value <= 57) return exchangeOffer("ingot_copper", "Copper Ingot", 1, 100);
@@ -705,7 +721,7 @@ export async function prepareGuestsForDay(dayIndex: number): Promise<GuestVisitV
     Object.entries(state.pendingFavorGifts).map(([guestId, gifts]) => [guestId, [...gifts]]),
   );
   const nextGiftDialogDays = { ...state.giftDialogDaySerial };
-  const rewardDialogs: Record<string, string | null> = {};
+  const rewardDialogs: Record<string, FavorRewardDialog | null> = {};
   let playerBag = normalizePlayerBag(await AsyncStorage.getItem(PLAYER_BAG_KEY));
   let bagChanged = false;
 
@@ -745,9 +761,9 @@ export async function prepareGuestsForDay(dayIndex: number): Promise<GuestVisitV
         playerBag = { ...playerBag, slots: plan.updatedSlots };
         nextPendingGifts[profile.id] = pending.slice(1);
         bagChanged = true;
-        rewardDialogs[profile.id] = FAVOR_GIFT_SUCCESS;
+        rewardDialogs[profile.id] = favorGiftSuccess(gift.item.name);
       } else {
-        rewardDialogs[profile.id] = FAVOR_GIFT_DEFERRED;
+        rewardDialogs[profile.id] = favorGiftDeferred(gift.item.name);
       }
       nextGiftDialogDays[profile.id] = state.calendarDaySerial;
       changed = true;
@@ -909,7 +925,7 @@ export function setGuestFavor(guestId: GuestId, favor: number): Promise<GuestSta
           await AsyncStorage.setItem(GUEST_STATE_KEY, JSON.stringify(giftState));
         }
         nextState = giftState;
-        emitFavorRewardDialog(guestId, delivered ? FAVOR_GIFT_SUCCESS : FAVOR_GIFT_DEFERRED);
+        emitFavorRewardDialog(guestId, delivered ? favorGiftSuccess(gift.item.name) : favorGiftDeferred(gift.item.name));
       }
     }
     return nextState;

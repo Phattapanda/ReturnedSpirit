@@ -12,6 +12,11 @@ import { loadMailboxState } from "@/src/game/mailbox-system";
 import { loadCoachmanEscortState } from "@/src/game/coachman-escort-system";
 import { loadCityState } from "@/src/game/city-system";
 import { SLEEP_STAMINA_SPEND_REQUIRED } from "@/src/game/room-config";
+import {
+  guestTutorialHasReached,
+  loadGuestTutorialIntroStep,
+  subscribeGuestTutorialIntroStep,
+} from "@/src/game/guest-tutorial";
 
 const STAMINA_SPENT_TODAY_KEY = "@game:stamina_spent_today";
 
@@ -68,7 +73,7 @@ async function loadLocationStatus(): Promise<LocationStatus> {
   // player may be anywhere in the tavern. Process them before checking unread
   // mail so the badge does not wait until Courier's Chest is opened.
   await loadCityState();
-  const [primaryRaw, secondRaw, thirdRaw, fourthRaw, guestState, postGuestState, mailboxState, escortState, spentRaw, dayRaw] = await Promise.all([
+  const [primaryRaw, secondRaw, thirdRaw, fourthRaw, guestState, postGuestState, mailboxState, escortState, guestTutorialStep, spentRaw, dayRaw] = await Promise.all([
     AsyncStorage.getItem(PRIMARY_GARDEN_PLOT_KEY),
     AsyncStorage.getItem(SECOND_GARDEN_PLOT_KEY),
     AsyncStorage.getItem(THIRD_GARDEN_PLOT_KEY),
@@ -77,6 +82,7 @@ async function loadLocationStatus(): Promise<LocationStatus> {
     loadPostGuestTutorialState(),
     loadMailboxState(),
     loadCoachmanEscortState(),
+    loadGuestTutorialIntroStep(),
     AsyncStorage.getItem(STAMINA_SPENT_TODAY_KEY),
     AsyncStorage.getItem("@game:day_index"),
   ]);
@@ -84,9 +90,22 @@ async function loadLocationStatus(): Promise<LocationStatus> {
   // Match Outside the Tavern exactly. Serving the Merchant in Dining Hall must
   // not hide this badge because his shop remains available outside all day.
   const merchantDay = (guestState.calendarDaySerial + 1) % 4 === 0;
+  const dayIndex = Math.max(0, Number.parseInt(dayRaw ?? "0", 10) || 0);
+  const scheduledGuestCount = countPresentGuests(guestState, postGuestState, dayIndex);
+  const tutorialFarmerHasArrived = guestTutorialHasReached(guestTutorialStep, "dining_prompt");
+  const tutorialFarmerHasDeparted = guestTutorialHasReached(guestTutorialStep, "service_complete");
+  const staleDayTwoTutorialFarmer =
+    guestTutorialStep === "service_complete" &&
+    dayIndex === 1 &&
+    guestState.servedDaySerial.old_farmer !== guestState.calendarDaySerial;
+  const guestCount = !tutorialFarmerHasArrived
+    ? 0
+    : !tutorialFarmerHasDeparted
+      ? 1
+      : Math.max(0, scheduledGuestCount - (staleDayTwoTutorialFarmer ? 1 : 0));
 
   return {
-    guestCount: countPresentGuests(guestState, postGuestState, Math.max(0, Number.parseInt(dayRaw ?? "0", 10) || 0)),
+    guestCount,
     harvestReady: [primaryRaw, secondRaw, thirdRaw, fourthRaw].some((raw) => plotIsReady(parsePlot(raw))),
     merchantPresent:
       merchantDay &&
@@ -124,9 +143,11 @@ export function useLocationStatusBadges(): LocationStatus {
         .catch(() => { if (active) setStatus(DEFAULT_STATUS); });
     };
     listeners.add(listener);
+    const unsubscribeTutorial = subscribeGuestTutorialIntroStep(listener);
     return () => {
       active = false;
       listeners.delete(listener);
+      unsubscribeTutorial();
     };
   }, []);
 

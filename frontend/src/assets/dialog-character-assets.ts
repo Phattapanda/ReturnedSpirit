@@ -3,12 +3,12 @@ import type { PlayerAvatarId } from "@/src/game/player-avatar";
 
 export type DialogExpression = "normal" | "laugh" | "sad" | "sick" | "tired";
 export const PLAYER_DIALOG_SCALE = 0.8;
-export const AVATAR2_DIALOG_SCALE = 0.72;
+export const AVATAR2_DIALOG_SCALE = 0.6984;
 export const AVATAR3_DIALOG_SCALE = 0.8;
 export const INTRO_PLAYER_DIALOG_SCALE = 0.8;
 export const RUPERT_DIALOG_SCALE = 0.95;
 export const OLD_FARMER_DIALOG_SCALE = 0.72;
-export const COACHMAN_DIALOG_SCALE = 0.84;
+export const COACHMAN_DIALOG_SCALE = 0.8652;
 
 // Avatar 1's expression images use differently sized source canvases. Keep
 // every expression in the same frame as the Kitchen's sad portrait so wider

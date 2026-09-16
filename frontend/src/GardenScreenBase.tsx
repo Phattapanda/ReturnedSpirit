@@ -27,6 +27,8 @@ import Animated, {
 } from "react-native-reanimated";
 
 import GardenPlot, { GardenPlotData } from "@/src/components/GardenPlot";
+import ScrollActivationOverlay from "@/src/components/scroll-activation-overlay";
+import { expendScrollUse } from "@/src/game/scroll-system";
 import SeedSelectionModal from "@/src/components/seed-selection-modal";
 import SceneBackground from "@/src/components/SceneBackground";
 import CurrencyHud from "@/src/components/CurrencyHud";
@@ -60,6 +62,7 @@ import {
   PLAYER_STATS_KEY, DEFAULT_PLAYER_STATS,
   calcEffectiveStaminaCost,
   getActiveStaminaBuffReduction,
+  getEffectiveEndurance,
   normalizePlayerStats,
   type PlayerStats,
 } from "@/src/game/player-stats";
@@ -86,6 +89,7 @@ import {
   createGardenPlotFromSeed,
   createEmptyGardenPlot,
   createHarvestBagForCrop,
+  gardenPlotStorageKey,
   normalizeGardenSeedId,
   type GardenPlotNumber,
 } from "@/src/game/garden-crop-system";
@@ -199,6 +203,11 @@ const IMG = {
   bag_carrot:  require("../assets/images/bag_carrot.png"),
   bag_onion:   require("../assets/images/bag_onion.png"),
   bag_potato:  require("../assets/images/bag_potato.png"),
+  bag_lettuce: require("../assets/images/bag_lettuce.png"),
+  bag_cucumber: require("../assets/images/bag_cucumber.png"),
+  bag_spinach: require("../assets/images/bag_spinach.png"),
+  bag_tomato: require("../assets/images/bag_tomato.png"),
+  bag_pumpkin: require("../assets/images/bag_pumpkin.png"),
   bucket:      require("../assets/images/bucket.png"),
   bucketwater: require("../assets/images/bucketwater.png"),
   getwater:    require("../assets/images/getwater.png"),
@@ -371,6 +380,9 @@ setExploreUnlocked(exploreAvailable);
 
   // ── Plot
   const [plotData, setPlotData] = useState<GardenPlotData>(TUTORIAL_PLOT_INITIAL);
+  const [harvestScrollRevision, setHarvestScrollRevision] = useState(0);
+  const [scrollActivationKey, setScrollActivationKey] = useState(0);
+  const harvestScrollBusyRef = useRef(false);
 
   // ── Inventory + fertilizer
   const [inventory, setInventory] = useState<InventoryItem[]>(DEFAULT_INVENTORY);
@@ -875,6 +887,11 @@ setExploreUnlocked(exploreAvailable);
       bag_carrot: IMG.bag_carrot,
       bag_onion: IMG.bag_onion,
       bag_potato: IMG.bag_potato,
+      bag_lettuce: IMG.bag_lettuce,
+      bag_cucumber: IMG.bag_cucumber,
+      bag_spinach: IMG.bag_spinach,
+      bag_tomato: IMG.bag_tomato,
+      bag_pumpkin: IMG.bag_pumpkin,
     };
     const image = harvestImages[harvestBag.id] ?? IMG.bag_herb;
     const sourceView = source === "primary" ? cropAreaViewRef.current : auxiliaryCropAreaRefs.current[source];
@@ -1093,7 +1110,7 @@ setExploreUnlocked(exploreAvailable);
   }
 
   async function spendSecondPlotStamina(baseCost: number): Promise<boolean> {
-    const actualCost = calcEffectiveStaminaCost(baseCost, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
+    const actualCost = calcEffectiveStaminaCost(baseCost, getEffectiveEndurance(playerStats), getActiveStaminaBuffReduction(playerStats));
     if (staminaCurrentRef.current < actualCost) return false;
     deductStamina(actualCost, `-${actualCost}`);
     return true;
@@ -1109,7 +1126,7 @@ setExploreUnlocked(exploreAvailable);
       showPlayerBubble('"Already watered today."');
       return;
     }
-    const waterCost = calcEffectiveStaminaCost(2, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
+    const waterCost = calcEffectiveStaminaCost(2, getEffectiveEndurance(playerStats), getActiveStaminaBuffReduction(playerStats));
     if (staminaCurrent < waterCost) {
       showPlayerBubble('"Not enough stamina."');
       return;
@@ -1139,7 +1156,7 @@ setExploreUnlocked(exploreAvailable);
 
     if (plotData.withered) {
       // Special: remove withered crop
-      const clearCost = calcEffectiveStaminaCost(5, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
+      const clearCost = calcEffectiveStaminaCost(5, getEffectiveEndurance(playerStats), getActiveStaminaBuffReduction(playerStats));
       if (staminaCurrent < clearCost) { showPlayerBubble('"Not enough stamina."'); return; }
       actionLocked.current = true;
       const newPlot: GardenPlotData = {
@@ -1170,7 +1187,7 @@ setExploreUnlocked(exploreAvailable);
       showPlayerBubble('"I already did this today."');
       return;
     }
-    const pullCost = calcEffectiveStaminaCost(5, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
+    const pullCost = calcEffectiveStaminaCost(5, getEffectiveEndurance(playerStats), getActiveStaminaBuffReduction(playerStats));
     if (staminaCurrent < pullCost) { showPlayerBubble('"Not enough stamina."'); return; }
     actionLocked.current = true;
 
@@ -1206,7 +1223,7 @@ setExploreUnlocked(exploreAvailable);
     const fertConfig = getGardenFertilizerConfig(selectedFertilizer);
     if (!fertConfig) { showPlayerBubble('"No fertilizer available."'); return; }
 
-    const fertilizerCost = calcEffectiveStaminaCost(fertConfig.staminaCost, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
+    const fertilizerCost = calcEffectiveStaminaCost(fertConfig.staminaCost, getEffectiveEndurance(playerStats), getActiveStaminaBuffReduction(playerStats));
     if (staminaCurrentRef.current < fertilizerCost) {
       showPlayerBubble('"Not enough stamina."');
       return;
@@ -1544,6 +1561,35 @@ setExploreUnlocked(exploreAvailable);
   // ─────────────────────────────────────────────────────────────────────────
   // Tuesday: Bag open (inspect) handler
   // ─────────────────────────────────────────────────────────────────────────
+  async function applyBountifulHarvestScroll() {
+    if (harvestScrollBusyRef.current) return;
+    harvestScrollBusyRef.current = true;
+    try {
+    const slotIndex = playerBag.slots.findIndex((item) => item?.id === "bountiful_harvest_scroll" && item.equipped);
+    if (slotIndex < 0) return;
+    const changes: [string, string][] = [];
+    let affected = 0;
+    for (const number of [1, 2, 3, 4] as const) {
+      const key = gardenPlotStorageKey(number);
+      const raw = await AsyncStorage.getItem(key);
+      const plot = number === 1 ? plotData : raw ? JSON.parse(raw) as GardenPlotData : null;
+      if (!plot?.cropType || plot.status === "empty" || plot.status === "withered") continue;
+      const enhanced = { ...plot, accumulatedFertilizerYieldBonus: (plot.accumulatedFertilizerYieldBonus ?? 0) + 2 };
+      changes.push([key, JSON.stringify(enhanced)]);
+      if (number === 1) setPlotData(enhanced);
+      affected++;
+    }
+    if (affected === 0) { showPlayerBubble('"There are no planted Garden Plots to bless."'); return; }
+    setScrollActivationKey((current) => current + 1);
+    const nextBag = expendScrollUse(playerBag, slotIndex);
+    changes.push([PLAYER_BAG_KEY, JSON.stringify(nextBag)]);
+    await AsyncStorage.multiSet(changes);
+    setPlayerBag(nextBag); playerBagRef.current = nextBag;
+    setHarvestScrollRevision((current) => current + 1);
+    showPlayerBubble(`"Bountiful Harvest blesses ${affected} planted ${affected === 1 ? "plot" : "plots"}."`);
+    } finally { harvestScrollBusyRef.current = false; }
+  }
+
   async function handleOpenBag() {
     if (!playerBag.unlocked) return;
     setBagOpen(true);
@@ -1652,7 +1698,7 @@ setExploreUnlocked(exploreAvailable);
       return;
     }
 
-    const wellCost = calcEffectiveStaminaCost(3, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
+    const wellCost = calcEffectiveStaminaCost(3, getEffectiveEndurance(playerStats), getActiveStaminaBuffReduction(playerStats));
     if (staminaCurrent < wellCost) {
       showPlayerBubble('"Not enough stamina."');
       return;
@@ -1698,7 +1744,7 @@ setExploreUnlocked(exploreAvailable);
 
   async function handleCollectWood() {
     if (woodLocked.current || actionLocked.current) return;
-    const cost = calcEffectiveStaminaCost(5, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
+    const cost = calcEffectiveStaminaCost(5, getEffectiveEndurance(playerStats), getActiveStaminaBuffReduction(playerStats));
     if (staminaCurrent < cost) { showPlayerBubble('"Not enough stamina."'); return; }
     if (sharedResources.wood >= 999) { showPlayerBubble('"Storage is full."'); return; }
 
@@ -1715,7 +1761,7 @@ setExploreUnlocked(exploreAvailable);
 
   async function handleCollectStone() {
     if (stoneLocked.current || actionLocked.current) return;
-    const cost = calcEffectiveStaminaCost(5, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
+    const cost = calcEffectiveStaminaCost(5, getEffectiveEndurance(playerStats), getActiveStaminaBuffReduction(playerStats));
     if (staminaCurrent < cost) { showPlayerBubble('"Not enough stamina."'); return; }
     if (sharedResources.stone >= 999) { showPlayerBubble('"Storage is full."'); return; }
 
@@ -1732,7 +1778,7 @@ setExploreUnlocked(exploreAvailable);
 
   function handleWorkout() {
     if (workoutLocked.current || actionLocked.current) return;
-    const cost = calcEffectiveStaminaCost(15, playerStats.endurance, getActiveStaminaBuffReduction(playerStats));
+    const cost = calcEffectiveStaminaCost(15, getEffectiveEndurance(playerStats), getActiveStaminaBuffReduction(playerStats));
     if (staminaCurrent < cost) { showPlayerBubble('"Not enough stamina."'); return; }
 
     workoutLocked.current = true;
@@ -1961,15 +2007,15 @@ setExploreUnlocked(exploreAvailable);
   // Derived
   // ─────────────────────────────────────────────────────────────────────────
   const temporaryStaminaReduction = getActiveStaminaBuffReduction(playerStats);
-  const waterCost      = calcEffectiveStaminaCost(2, playerStats.endurance, temporaryStaminaReduction);
-  const pullWeedsCost  = calcEffectiveStaminaCost(5, playerStats.endurance, temporaryStaminaReduction);
+  const waterCost      = calcEffectiveStaminaCost(2, getEffectiveEndurance(playerStats), temporaryStaminaReduction);
+  const pullWeedsCost  = calcEffectiveStaminaCost(5, getEffectiveEndurance(playerStats), temporaryStaminaReduction);
   const selectedFertilizerConfig = getGardenFertilizerConfig(selectedFertilizer);
   const selectedFertilizerAvailable = inventory.some(
     (item) => item.itemType === "fertilizer" && item.id === selectedFertilizer && item.quantity > 0,
   );
   const fertilizeCost = calcEffectiveStaminaCost(
     selectedFertilizerConfig?.staminaCost ?? 3,
-    playerStats.endurance,
+    getEffectiveEndurance(playerStats),
     temporaryStaminaReduction,
   );
 
@@ -2077,6 +2123,11 @@ setExploreUnlocked(exploreAvailable);
         <Image source={IMG.bag_carrot}  style={{ width: 1, height: 1 }} />
         <Image source={IMG.bag_onion}   style={{ width: 1, height: 1 }} />
         <Image source={IMG.bag_potato}  style={{ width: 1, height: 1 }} />
+        <Image source={IMG.bag_lettuce} style={{ width: 1, height: 1 }} />
+        <Image source={IMG.bag_cucumber} style={{ width: 1, height: 1 }} />
+        <Image source={IMG.bag_spinach} style={{ width: 1, height: 1 }} />
+        <Image source={IMG.bag_tomato} style={{ width: 1, height: 1 }} />
+        <Image source={IMG.bag_pumpkin} style={{ width: 1, height: 1 }} />
         <Image source={IMG.bucket}      style={{ width: 1, height: 1 }} />
         <Image source={IMG.bucketwater} style={{ width: 1, height: 1 }} />
       </View>
@@ -2186,6 +2237,11 @@ setExploreUnlocked(exploreAvailable);
         </View>
 
         {/* Garden Plot */}
+        {playerBag.slots.some((item) => item?.id === "bountiful_harvest_scroll" && item.equipped) ? (
+          <TouchableOpacity onPress={() => { void applyBountifulHarvestScroll(); }} style={{ marginHorizontal: 16, padding: 12, borderRadius: 10, backgroundColor: "rgba(47,174,85,0.24)", borderColor: "#2FAE55", borderWidth: 1 }}>
+            <Text style={{ color: "#E7F8E9", fontFamily: "Oldenburg", textAlign: "center" }}>Use Bountiful Harvest Scroll · +2 yield to planted plots</Text>
+          </TouchableOpacity>
+        ) : null}
         <Animated.View ref={cropAreaViewRef} style={[{ marginHorizontal: 16, marginTop: 12 }, plotOpacityStyle]}>
           <GardenPlot
             data={plotData}
@@ -2219,6 +2275,7 @@ setExploreUnlocked(exploreAvailable);
             >
               <Text style={styles.secondPlotLabel}>{ordinal} Plot</Text>
               <GardenPlot
+                key={`${plotNumber}-${harvestScrollRevision}`}
                 data={data}
                 interactive={false}
                 selectedFertilizerId={selectedFertilizer}
@@ -2244,7 +2301,7 @@ setExploreUnlocked(exploreAvailable);
         <ActivityBar
           visible={showActivityBar}
           enabledActivities={["well", "collectWood", "collectStone", "workout"]}
-          endurance={playerStats.endurance}
+          endurance={getEffectiveEndurance(playerStats)}
           temporaryStaminaReduction={getActiveStaminaBuffReduction(playerStats)}
           onActivity={handleActivity}
           onLockedTap={handleLockedActivity}
@@ -2575,6 +2632,7 @@ return (
       )}
 
       {/* ── Flying item overlay — always rendered; opacity driven by animation */}
+      <ScrollActivationOverlay activationKey={scrollActivationKey} />
       <Animated.View style={flyAnimStyle} pointerEvents="none">
         {flyImg && <Image source={flyImg} style={{ width: 56, height: 56 }} resizeMode="contain" resizeMethod="resize" />}
       </Animated.View>

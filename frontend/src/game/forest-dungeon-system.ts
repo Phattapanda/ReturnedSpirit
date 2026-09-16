@@ -19,7 +19,8 @@ import {
   rollPlayerPhysicalDamage,
 } from "@/src/game/equipment-system";
 import { loadCurrencyCopper, saveCurrencyCopper } from "@/src/game/currency-system";
-import { ACCURACY_HIT_CHANCE_PER_POINT, DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, getEffectiveLuck, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
+import { expendScrollUse } from "@/src/game/scroll-system";
+import { ACCURACY_HIT_CHANCE_PER_POINT, DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, getEffectiveEndurance, getEffectiveLuck, getEffectiveStrength, normalizePlayerStats, type PlayerStats } from "@/src/game/player-stats";
 import {
   GARDEN_INVENTORY_KEY,
   normalizeGardenInventory,
@@ -78,7 +79,12 @@ export type ForestMonsterDefinition = {
   physicalDefense: number;
   magicalDefense: number;
   fireMagicalDefense?: number;
+  fireResistancePercent?: number;
   fireImmune?: boolean;
+  iceResistancePercent?: number;
+  iceImmune?: boolean;
+  lightningResistancePercent?: number;
+  lightningImmune?: boolean;
   boss?: boolean;
   maximumLife: number;
 };
@@ -186,10 +192,11 @@ export function getForestAttackPreview(
     - (monster.agility ?? 0)
     - (target === "head" ? 30 : 0),
   );
-  const strength = Math.max(0, Math.floor(stats.strength));
+  const strength = Math.max(0, Math.floor(getEffectiveStrength(stats)));
   const defense = Math.max(0, Math.floor(monster.physicalDefense));
-  const minimum = Math.max(0, (entry?.damageMin ?? 0) + strength - defense);
-  const maximum = Math.max(0, Math.max(entry?.damageMin ?? 0, entry?.damageMax ?? 0) + strength - defense);
+  const enhanced = (value: number) => weapon?.weaponEnhanced ? Math.ceil(value * 1.2) : value;
+  const minimum = Math.max(0, enhanced(entry?.damageMin ?? 0) + strength - defense);
+  const maximum = Math.max(0, enhanced(Math.max(entry?.damageMin ?? 0, entry?.damageMax ?? 0)) + strength - defense);
   return {
     hitChance,
     minimumDamage: target === "head" ? Math.ceil(minimum * 1.5) : minimum,
@@ -337,7 +344,8 @@ export type DungeonActionResult = {
   life: number;
   stamina: number;
   bag: PlayerBagData;
-  playerAttack?: { kind: "slash" | "critical" | "punch"; damage: number; defeated: boolean };
+  playerAttack?: { kind: "slash" | "critical" | "punch" | "fire_bolt_scroll" | "ice_field_scroll" | "lightning_bolt_scroll" | "gravitas_scroll"; damage: number; defeated: boolean };
+  scrollActivated?: boolean;
   lootFlights?: DungeonLootFlight[];
 };
 
@@ -575,7 +583,7 @@ async function monsterAttack(
   else {
     const armor = getEquippedItem(bag, "armor");
     const blessing = await activeTempleBlessing();
-    const rawDamage = incomingDamage(monster, runtime.stats.endurance, armor, defending);
+    const rawDamage = incomingDamage(monster, getEffectiveEndurance(runtime.stats), armor, defending);
     const damage = blessing === "protection" ? Math.ceil(rawDamage * 0.85) : rawDamage;
     life = Math.max(0, life - damage);
     if (damage > 0 && armor) bag = consumeArmorDurability(bag);
@@ -593,7 +601,7 @@ async function clericSupportTurn(
   const floor = currentFloorOf(state);
   if (hired?.definition.id !== "cleric" || !floor.monster || floor.monster.phase !== "combat") return { message: "", life: runtime.life, bag: runtime.bag, defeated: false };
   const monster = FOREST_MONSTERS[floor.monster.id];
-  const damage = Math.max(1, runtime.stats.strength + 5 - monster.physicalDefense);
+  const damage = Math.max(1, getEffectiveStrength(runtime.stats) + 5 - monster.physicalDefense);
   floor.monster.life = Math.max(0, floor.monster.life - damage);
   const roundKey = `@dungeon:cleric_round:${state.currentFloor}`;
   const round = Math.max(0, Number(await AsyncStorage.getItem(roundKey)) || 0) + 1;
@@ -650,7 +658,7 @@ export async function ambushHiddenForestMonster(): Promise<DungeonActionResult> 
   floor.monster.phase = "combat";
   await saveFightSnapshot(state, runtime.life, runtime.stamina, runtime.bag);
   const openingDamage = Math.ceil(
-    rollPlayerPhysicalDamage(runtime.stats.strength, monster.physicalDefense, weapon)
+    rollPlayerPhysicalDamage(getEffectiveStrength(runtime.stats), monster.physicalDefense, weapon)
     * FOREST_AMBUSH_DAMAGE_MULTIPLIER,
   );
   const criticalHit = Math.random() * 100 < getForestAmbushCriticalChance(runtime.stats);
@@ -712,7 +720,7 @@ export async function attackForestMonster(target: "head" | "body"): Promise<Dung
   let message: string;
   let playerAttack: DungeonActionResult["playerAttack"];
   if (Math.random() * 100 < hitChance) {
-    const baseDamage = rollPlayerPhysicalDamage(runtime.stats.strength, monster.physicalDefense, weapon);
+    const baseDamage = rollPlayerPhysicalDamage(getEffectiveStrength(runtime.stats), monster.physicalDefense, weapon);
     const damage = target === "head" ? Math.ceil(baseDamage * 1.5) : baseDamage;
     floor.monster.life = Math.max(0, floor.monster.life - damage);
     if (weapon) bag = consumeWeaponDurability(bag);
@@ -760,6 +768,52 @@ export async function defendAgainstForestMonster(): Promise<DungeonActionResult>
   };
   const result = await monsterAttack(state, { ...runtime, life: cleric.life, bag: cleric.bag }, true);
   return { ...result, message: cleric.message + " " + result.message };
+}
+
+export async function castEquippedForestScroll(): Promise<DungeonActionResult> {
+  const state = await loadForestDungeonState();
+  const runtime = await loadRuntime();
+  const floor = currentFloorOf(state);
+  if (!floor.monster || floor.monster.phase !== "combat") return { ok: false, state, message: "There is no monster to attack.", ...runtime };
+  const slot = runtime.bag.slots.findIndex((item) => item?.equipped && item.id.endsWith("_scroll"));
+  const scroll = runtime.bag.slots[slot];
+  const spell = scroll && ({
+    fire_bolt_scroll: { damage: 25, accuracy: 90, element: "fire" },
+    ice_field_scroll: { damage: 20, accuracy: 110, element: "ice" },
+    lightning_bolt_scroll: { damage: 45, accuracy: 85, element: "lightning" },
+    gravitas_scroll: { damage: 40, accuracy: 95, element: "physical" },
+  } as const)[scroll.id as "fire_bolt_scroll" | "ice_field_scroll" | "lightning_bolt_scroll" | "gravitas_scroll"];
+  if (!spell || slot < 0) return { ok: false, state, message: "Equip an attack Scroll in the Player Bag first.", ...runtime };
+  const monster = FOREST_MONSTERS[floor.monster.id];
+  const hitChance = clampPercent(spell.accuracy + runtime.stats.accuracy * ACCURACY_HIT_CHANCE_PER_POINT - (monster.agility ?? 0));
+  let bag = expendScrollUse(runtime.bag, slot);
+  let message = `${scroll!.name} misses the ${monster.name}.`;
+  let playerAttack: DungeonActionResult["playerAttack"];
+  if (Math.random() * 100 < hitChance) {
+    const resistance = spell.element === "fire" ? (monster.fireMagicalDefense ?? 0) + Math.ceil(spell.damage * (monster.fireResistancePercent ?? 0) / 100)
+      : spell.element === "ice" ? Math.ceil(spell.damage * (monster.iceResistancePercent ?? 0) / 100)
+      : spell.element === "lightning" ? Math.ceil(spell.damage * (monster.lightningResistancePercent ?? 0) / 100)
+      : monster.physicalDefense;
+    const immune = spell.element === "fire" ? monster.fireImmune
+      : spell.element === "ice" ? monster.iceImmune
+      : spell.element === "lightning" ? monster.lightningImmune : false;
+    const damage = immune ? 0 : Math.max(0, spell.damage - resistance);
+    floor.monster.life = Math.max(0, floor.monster.life - damage);
+    message = `${scroll!.name} hits the ${monster.name} for ${damage} ${spell.element} damage.`;
+    playerAttack = { kind: scroll!.id as "fire_bolt_scroll" | "ice_field_scroll" | "lightning_bolt_scroll" | "gravitas_scroll", damage, defeated: floor.monster.life <= 0 };
+    if (floor.monster.life <= 0) {
+      floor.monster.phase = "defeated";
+      const loot = await grantMonsterDefeatRewards(floor, bag, monster);
+      bag = loot.bag; message += loot.message;
+      await recordMonsterDefeat(monster.id);
+      await saveRuntime(state, runtime.life, runtime.stamina, bag);
+      return { ok: true, state, message, life: runtime.life, stamina: runtime.stamina, bag, playerAttack, scrollActivated: true, lootFlights: loot.lootFlights };
+    }
+  }
+  const cleric = await clericSupportTurn(state, { ...runtime, bag });
+  if (cleric.defeated) return { ok: true, state, message: message + cleric.message, life: cleric.life, stamina: runtime.stamina, bag: cleric.bag, playerAttack, scrollActivated: true, lootFlights: cleric.lootFlights };
+  const counter = await monsterAttack(state, { ...runtime, life: cleric.life, bag: cleric.bag }, false);
+  return { ...counter, message: `${message}${cleric.message} ${counter.message}`, playerAttack, scrollActivated: true };
 }
 
 export async function escapeForestCombat(): Promise<DungeonActionResult> {

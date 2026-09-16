@@ -11,11 +11,13 @@ type Props = {
 /** Compact durability readout placed directly over the bottom of an item image. */
 export default function ItemDurabilityBadge({ item, style }: Props) {
   const durability = item ? getItemDurability(item) : null;
-  if (!durability) return null;
+  const remaining = item?.maxUses !== undefined ? (item.usesRemaining ?? item.maxUses) : durability?.current;
+  const maximum = item?.maxUses ?? durability?.maximum;
+  if (remaining === undefined || maximum === undefined) return null;
 
   return (
     <View pointerEvents="none" style={[styles.badge, style]}>
-      <Text style={styles.text}>{durability.current}/{durability.maximum}</Text>
+      <Text style={styles.text}>{remaining}/{maximum}</Text>
     </View>
   );
 }

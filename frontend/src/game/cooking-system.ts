@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { ITEM_CATALOG, normalizeItemId, type BagItem, type MealTag } from "@/src/game/item-system";
+import { createCraftedScroll, SCROLL_BASE_USES } from "@/src/game/scroll-system";
 import {
   getButcheringDefinition,
   getButcheringKnifeTier,
@@ -8,6 +9,7 @@ import {
 } from "@/src/game/butchering-system";
 
 export const DISCOVERED_RECIPES_KEY = "@kitchen:discovered_recipes";
+export const RUPERT_MORTAR_RECIPE_DIALOG_SEEN_KEY = "@tutorial:rupert_mortar_recipe_dialog_seen";
 
 export type CookingRecipe = {
   id: string; name: string; stage: 1 | 2 | 3; rarity: "common" | "uncommon" | "rare"; unlock: string;
@@ -18,14 +20,145 @@ export type CookingRecipe = {
   /** Runtime recipes such as seasoning must work at the table without entering the recipe book. */
   hiddenFromRecipeBook?: boolean;
   seasonedStage?: 1 | 2 | 3;
+  enhancedOriginal?: BagItem;
+  enhancementKind?: "weapon" | "armor";
 };
 
 export const COOKING_RECIPES: readonly CookingRecipe[] = [
+  // Mortar and Pestle processing recipes are grouped by powder color and yield.
+  // Yellow
+  {
+    id: "powder_yellow_tusk", name: "Yellow Alchemy Powder from Tusk", stage: 1, rarity: "common", unlock: "Alchemy Processing",
+    ingredients: [{ id: "tusk", quantity: 1 }],
+    toolId: "mortar_and_pestle", outputId: "alchemy_powder_yellow", outputQuantity: 2,
+    sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 0, tags: [],
+  },
+  {
+    id: "powder_yellow_fang", name: "Yellow Alchemy Powder from Large Fang", stage: 1, rarity: "common", unlock: "Alchemy Processing",
+    ingredients: [{ id: "fang", quantity: 1 }],
+    toolId: "mortar_and_pestle", outputId: "alchemy_powder_yellow", outputQuantity: 2,
+    sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 0, tags: [],
+  },
+  // Red
+  {
+    id: "powder_red_feather", name: "Red Alchemy Powder from Ember Feather", stage: 1, rarity: "common", unlock: "Alchemy Processing",
+    ingredients: [{ id: "ember_feather", quantity: 1 }],
+    toolId: "mortar_and_pestle", outputId: "alchemy_powder_red", outputQuantity: 1,
+    sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 0, tags: [],
+  },
+  {
+    id: "powder_red_rooster_comb", name: "Red Alchemy Powder from Rooster Comb", stage: 1, rarity: "common", unlock: "Alchemy Processing",
+    ingredients: [{ id: "rooster_comb", quantity: 1 }],
+    toolId: "mortar_and_pestle", outputId: "alchemy_powder_red", outputQuantity: 2,
+    sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 0, tags: [],
+  },
+  {
+    id: "powder_red_elder_comb", name: "Red Alchemy Powder from Elder Ember Rooster Comb", stage: 1, rarity: "common", unlock: "Alchemy Processing",
+    ingredients: [{ id: "elder_ember_comb", quantity: 1 }],
+    toolId: "mortar_and_pestle", outputId: "alchemy_powder_red", outputQuantity: 5,
+    sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 0, tags: [],
+  },
+  // Green
+  {
+    id: "powder_green_spinach", name: "Green Alchemy Powder from Spinach", stage: 1, rarity: "common", unlock: "Alchemy Processing",
+    ingredients: [{ id: "spinach", quantity: 1 }],
+    toolId: "mortar_and_pestle", outputId: "alchemy_powder_green", outputQuantity: 2,
+    sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 0, tags: [],
+  },
+  // Blue
+  {
+    id: "powder_blue_slime_gel", name: "Blue Alchemy Powder from Slime Gel", stage: 1, rarity: "common", unlock: "Alchemy Processing",
+    ingredients: [{ id: "slime_gel", quantity: 1 }],
+    toolId: "mortar_and_pestle", outputId: "alchemy_powder_blue", outputQuantity: 1,
+    sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 0, tags: [],
+  },
+  {
+    id: "powder_blue_monster_core", name: "Blue Alchemy Powder from Weak Monster Core", stage: 1, rarity: "common", unlock: "Alchemy Processing",
+    ingredients: [{ id: "weak_monster_core", quantity: 1 }],
+    toolId: "mortar_and_pestle", outputId: "alchemy_powder_blue", outputQuantity: 1,
+    sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 0, tags: [],
+  },
+  // Brown
+  {
+    id: "powder_brown_nuts", name: "Brown Alchemy Powder from Nuts", stage: 1, rarity: "common", unlock: "Alchemy Processing",
+    ingredients: [{ id: "nuts", quantity: 1 }],
+    toolId: "mortar_and_pestle", outputId: "alchemy_powder_brown", outputQuantity: 1,
+    sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 0, tags: [],
+  },
+  {
+    id: "powder_brown_bark", name: "Brown Alchemy Powder from Bark", stage: 1, rarity: "common", unlock: "Alchemy Processing",
+    ingredients: [{ id: "bark", quantity: 1 }],
+    toolId: "mortar_and_pestle", outputId: "alchemy_powder_brown", outputQuantity: 2,
+    sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 0, tags: [],
+  },
+  // White
+  {
+    id: "powder_white_snowberry", name: "White Alchemy Powder from Snowberry", stage: 1, rarity: "common", unlock: "Alchemy Processing",
+    ingredients: [{ id: "snowberry", quantity: 1 }],
+    toolId: "mortar_and_pestle", outputId: "alchemy_powder_white", outputQuantity: 1,
+    sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 0, tags: [],
+  },
+  // Black
+  {
+    id: "powder_black_charred_wood", name: "Black Alchemy Powder from Charred Wood", stage: 1, rarity: "common", unlock: "Alchemy Processing",
+    ingredients: [{ id: "charred_wood", quantity: 1 }],
+    toolId: "mortar_and_pestle", outputId: "alchemy_powder_black", outputQuantity: 2,
+    sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 0, tags: [],
+  },
+  // Consumable-product recipes follow the powder processing recipes.
   {
     id: "spices", name: "Spices", stage: 1, rarity: "common", unlock: "Early",
-    ingredients: [{ id: "herbs", quantity: 2 }, { id: "shard_mana", quantity: 1 }],
-    toolId: null, outputId: "spices", outputQuantity: 2,
+    ingredients: [{ id: "herbs", quantity: 2 }, { id: "nuts", quantity: 1 }],
+    toolId: "mortar_and_pestle", outputId: "spices", outputQuantity: 2,
     sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 0, tags: [],
+  },
+  ...([
+    ["fire_bolt_scroll", "Fire Bolt Scroll", "red"],
+    ["ice_field_scroll", "Ice Field Scroll", "blue"],
+    ["lightning_bolt_scroll", "Lightning Bolt Scroll", "white"],
+    ["bountiful_harvest_scroll", "Bountiful Harvest Scroll", "green"],
+    ["gravitas_scroll", "Gravitas Scroll", "black"],
+    ["weapon_enhancement_scroll", "Weapon Enhancement Scroll", "brown"],
+    ["armor_enhancement_scroll", "Armor Enhancement Scroll", "yellow"],
+  ] as const).map(([id, name, color]): CookingRecipe => ({
+    id, name, stage: 1, rarity: "uncommon", unlock: "Scroll Crafting",
+    ingredients: [{ id: "scroll", quantity: 1 }, { id: "shard_mana", quantity: 1 }, { id: `alchemy_powder_${color}`, quantity: 2 }],
+    toolId: null, outputId: id, outputQuantity: 1,
+    sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 0, tags: [],
+  })),
+  // Distiller potions
+  {
+    id: "potion_healing_low_grade", name: "Low Grade Healing Potion", stage: 1, rarity: "common", unlock: "Distilling",
+    ingredients: [{ id: "alchemy_powder_red", quantity: 1 }, { id: "syrup", quantity: 1 }, { id: "empty_bottle", quantity: 1 }],
+    toolId: "distiller", outputId: "potion_healing_low_grade", outputQuantity: 1,
+    sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 30, tags: [],
+  },
+  {
+    id: "potion_stamina_low_grade", name: "Low Grade Stamina Potion", stage: 1, rarity: "common", unlock: "Distilling",
+    ingredients: [{ id: "alchemy_powder_yellow", quantity: 1 }, { id: "syrup", quantity: 1 }, { id: "empty_bottle", quantity: 1 }],
+    toolId: "distiller", outputId: "potion_stamina_low_grade", outputQuantity: 1,
+    sellPriceCopper: 0, staminaRecovery: 60, lifeRecovery: 0, tags: [],
+  },
+  {
+    id: "potion_energy_low_grade", name: "Low Grade Energy Potion", stage: 1, rarity: "common", unlock: "Distilling",
+    ingredients: [{ id: "alchemy_powder_blue", quantity: 1 }, { id: "syrup", quantity: 1 }, { id: "empty_bottle", quantity: 1 }],
+    toolId: "distiller", outputId: "potion_energy_low_grade", outputQuantity: 1,
+    sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 0, tags: [],
+    buff: { effectId: "low_grade_energy_potion", name: "Energy +1", intensity: 1, durationDays: 1 },
+  },
+  {
+    id: "potion_strength", name: "Strength Potion", stage: 1, rarity: "common", unlock: "Distilling",
+    ingredients: [{ id: "alchemy_powder_yellow", quantity: 1 }, { id: "alchemy_powder_red", quantity: 1 }, { id: "empty_bottle", quantity: 1 }],
+    toolId: "distiller", outputId: "potion_strength", outputQuantity: 1,
+    sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 0, tags: [],
+    buff: { effectId: "strength_potion", name: "Damage +5", intensity: 5, durationDays: 1 },
+  },
+  {
+    id: "potion_defense", name: "Defense Potion", stage: 1, rarity: "common", unlock: "Distilling",
+    ingredients: [{ id: "alchemy_powder_blue", quantity: 1 }, { id: "alchemy_powder_green", quantity: 1 }, { id: "empty_bottle", quantity: 1 }],
+    toolId: "distiller", outputId: "potion_defense", outputQuantity: 1,
+    sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 0, tags: [],
+    buff: { effectId: "defense_potion", name: "Endurance +5", intensity: 5, durationDays: 1 },
   },
   {
     id: "soup_herb", name: "Herb Soup", stage: 1, rarity: "common", unlock: "Start",
@@ -155,6 +288,12 @@ export const COOKING_RECIPES: readonly CookingRecipe[] = [
     toolId: "frying_pan", outputId: "pan_farmhouse", outputQuantity: 2,
     sellPriceCopper: 47, staminaRecovery: 50, lifeRecovery: 20,
     tags: ["warm", "vegetarian", "healthy", "hearty"],
+  },
+  {
+    id: "syrup", name: "Syrup", stage: 1, rarity: "common", unlock: "Early",
+    ingredients: [{ id: "sap", quantity: 2 }],
+    toolId: "oldpot", outputId: "syrup", outputQuantity: 1,
+    sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 0, tags: [],
   },
   {
     id: "pan_rare_mushroom_skillet", name: "Rare Mushroom Skillet", stage: 2, rarity: "rare", unlock: "Monster Cooking I",
@@ -314,6 +453,26 @@ export function findCookingRecipe(ingredientSlots: readonly (BagItem | null)[], 
   if (butchering) return butchering;
   const seasoning = findSeasoningRecipe(ingredientSlots, tool);
   if (seasoning) return seasoning;
+  if (!tool) {
+    const occupied = ingredientSlots.filter((item): item is BagItem => item !== null);
+    if (occupied.length === 2) {
+      const scroll = occupied.find((item) => item.id === "weapon_enhancement_scroll" || item.id === "armor_enhancement_scroll");
+      const equipment = occupied.find((item) => item !== scroll);
+      const kind = scroll?.id === "weapon_enhancement_scroll" ? "weapon" : "armor";
+      const attribute = kind === "weapon" ? "weapon" : "armor";
+      if (scroll && equipment && equipment.quantity === 1 && scroll.quantity === 1 &&
+          (scroll.usesRemaining ?? 1) > 0 &&
+          !equipment[kind === "weapon" ? "weaponEnhanced" : "armorEnhanced"] &&
+          ITEM_CATALOG[equipment.id]?.attributes.includes(attribute)) {
+        return { id: `enhance_${kind}_${equipment.id}`, name: `Enhanced ${equipment.name}`,
+          stage: 1, rarity: "uncommon", unlock: "Scroll Enhancement",
+          ingredients: [{ id: equipment.id, quantity: 1 }, { id: scroll.id, quantity: 1 }],
+          toolId: null, outputId: equipment.id, outputQuantity: 1,
+          sellPriceCopper: 0, staminaRecovery: 0, lifeRecovery: 0, tags: [],
+          hiddenFromRecipeBook: true, enhancedOriginal: equipment, enhancementKind: kind };
+      }
+    }
+  }
   const totals = ingredientTotals(ingredientSlots);
   return COOKING_RECIPES.find((recipe) => {
     if (!isCookingToolCompatible(tool?.id ?? null, recipe.toolId) || (tool && tool.quantity !== 1)) return false;
@@ -343,6 +502,10 @@ export function consumeRecipeIngredients(
     if (needed <= 0) return { ...slot };
     const used = Math.min(needed, slot.quantity);
     remaining.set(slot.id, needed - used);
+    if (recipe.enhancementKind && slot.id.endsWith("_enhancement_scroll")) {
+      const charges = (slot.usesRemaining ?? slot.maxUses ?? 1) - craftCount;
+      return charges > 0 ? { ...slot, usesRemaining: charges } : null;
+    }
     return slot.quantity > used ? { ...slot, quantity: slot.quantity - used } : null;
   });
   return [...remaining.values()].every((quantity) => quantity === 0) ? next : null;
@@ -354,7 +517,16 @@ export function createRecipeOutputs(
   maxStackQuantity = Number.POSITIVE_INFINITY,
   luck = 0,
   tool: BagItem | null = null,
+  effectiveness = 1,
 ): BagItem[] {
+  if (Object.hasOwn(SCROLL_BASE_USES, recipe.outputId)) {
+    return Array.from({ length: recipe.outputQuantity * craftCount }, () => createCraftedScroll(recipe.outputId, effectiveness));
+  }
+  if (recipe.enhancedOriginal && recipe.enhancementKind) {
+    return [{ ...recipe.enhancedOriginal, equipped: false, quantity: 1,
+      name: `Enhanced ${ITEM_CATALOG[recipe.outputId]?.name ?? recipe.enhancedOriginal.name}`,
+      [recipe.enhancementKind === "weapon" ? "weaponEnhanced" : "armorEnhanced"]: true }];
+  }
   const isButchering = recipe.id.startsWith("butcher_");
   if (isButchering && tool && getButcheringKnifeTier(tool.id)) {
     const monsterId = recipe.id.slice("butcher_".length);

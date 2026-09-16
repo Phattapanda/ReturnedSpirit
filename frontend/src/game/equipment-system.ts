@@ -10,9 +10,10 @@ import {
   type PlayerBagData,
 } from "@/src/game/item-system";
 
-export type EquipmentKind = "weapon" | "armor" | "tool";
+export type EquipmentKind = "weapon" | "armor" | "tool" | "scroll";
 
 export function getEquipmentKind(item: BagItem): EquipmentKind | null {
+  if (item.id.endsWith("_scroll")) return "scroll";
   const attributes = getItemAttributes(item);
   if (attributes.includes(ITEM_ATTRIBUTE.WEAPON)) return "weapon";
   if (attributes.includes(ITEM_ATTRIBUTE.ARMOR)) return "armor";
@@ -76,7 +77,8 @@ export function rollPlayerPhysicalDamage(
   const minimum = entry?.damageMin ?? 0;
   const maximum = Math.max(minimum, entry?.damageMax ?? 0);
   const weaponDamage = minimum + Math.floor(Math.max(0, Math.min(0.999999, randomValue)) * (maximum - minimum + 1));
-  return Math.max(0, weaponDamage + Math.max(0, Math.floor(strength)) - Math.max(0, Math.floor(monsterPhysicalDefense)));
+  const enhancedDamage = weapon?.weaponEnhanced ? Math.ceil(weaponDamage * 1.2) : weaponDamage;
+  return Math.max(0, enhancedDamage + Math.max(0, Math.floor(strength)) - Math.max(0, Math.floor(monsterPhysicalDefense)));
 }
 
 export function rollPlayerAttackHit(weapon: BagItem | null, randomValue = Math.random()): boolean {
@@ -89,7 +91,8 @@ export function calculateIncomingPhysicalDamage(
   endurance: number,
   armor: BagItem | null,
 ): number {
-  const armorDefense = armor ? ITEM_CATALOG[armor.id]?.physicalDefense ?? 0 : 0;
+  const baseArmorDefense = armor ? ITEM_CATALOG[armor.id]?.physicalDefense ?? 0 : 0;
+  const armorDefense = armor?.armorEnhanced ? Math.ceil(baseArmorDefense * 1.2) : baseArmorDefense;
   return Math.max(0, Math.floor(physicalAttack) - Math.max(0, Math.floor(endurance)) - armorDefense);
 }
 

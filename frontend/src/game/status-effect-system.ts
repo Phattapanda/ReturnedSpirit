@@ -16,6 +16,8 @@ export type StatusEffectDefinition = {
     staminaCostReduction?: number;
     fireResistance?: number;
     luck?: number;
+    physicalDamageBonus?: number;
+    endurance?: number;
   };
 };
 
@@ -39,6 +41,8 @@ export type ActiveStatusEffect = {
   kind: StatusEffectKind;
   remainingDays: number;
   stacks: number;
+  /** Absolute bonus captured when a Strength or Defense Potion is consumed. */
+  potency?: number;
 };
 
 export type ActiveTrait = {
@@ -110,6 +114,36 @@ export const STATUS_EFFECT_DEFINITIONS: Record<string, StatusEffectDefinition> =
     sourceItemId: "pan_rare_mushroom_skillet",
     modifiers: { luck: 3 },
   },
+  low_grade_energy_potion: {
+    id: "low_grade_energy_potion",
+    name: "Low Grade Energy Potion",
+    kind: "buff",
+    description: "Stamina-consuming actions cost 1 less Stamina.",
+    defaultDurationDays: 1,
+    stacking: "refresh",
+    sourceItemId: "potion_energy_low_grade",
+    modifiers: { staminaCostReduction: 1 },
+  },
+  strength_potion: {
+    id: "strength_potion",
+    name: "Strength Potion",
+    kind: "buff",
+    description: "Physical attacks deal 5 additional damage.",
+    defaultDurationDays: 1,
+    stacking: "refresh",
+    sourceItemId: "potion_strength",
+    modifiers: { physicalDamageBonus: 5 },
+  },
+  defense_potion: {
+    id: "defense_potion",
+    name: "Defense Potion",
+    kind: "buff",
+    description: "Increases Endurance by 5.",
+    defaultDurationDays: 1,
+    stacking: "refresh",
+    sourceItemId: "potion_defense",
+    modifiers: { endurance: 5 },
+  },
 };
 
 export const TRAIT_DEFINITIONS: Record<string, TraitDefinition> = {
@@ -159,6 +193,9 @@ export function normalizeStatusEffectState(
             definition.maxStacks ?? 1,
             positiveInteger(active.stacks, 1),
           ),
+          ...(typeof active.potency === "number" && Number.isFinite(active.potency)
+            ? { potency: Math.max(0, Math.floor(active.potency)) }
+            : {}),
         }];
       })
     : [];
@@ -207,14 +244,16 @@ export function applyTemporaryEffect(
   state: StatusEffectState,
   effectId: string,
   durationDays?: number,
+  potency?: number,
 ): StatusEffectState {
   const definition = STATUS_EFFECT_DEFINITIONS[effectId];
   if (!definition) return cloneState(state);
   const duration = positiveInteger(durationDays, definition.defaultDurationDays);
+  const resolvedPotency = potency === undefined ? undefined : Math.max(0, Math.floor(potency));
   const next = cloneState(state);
   const index = next.temporary.findIndex((effect) => effect.id === effectId);
   if (index < 0) {
-    next.temporary.push({ id: effectId, kind: definition.kind, remainingDays: duration, stacks: 1 });
+    next.temporary.push({ id: effectId, kind: definition.kind, remainingDays: duration, stacks: 1, ...(resolvedPotency === undefined ? {} : { potency: resolvedPotency }) });
     return next;
   }
 
@@ -228,9 +267,10 @@ export function applyTemporaryEffect(
     current.stacks = Math.min(definition.maxStacks ?? 1, current.stacks + 1);
     current.remainingDays = Math.max(current.remainingDays, duration);
   } else if (definition.stacking === "replace") {
-    next.temporary[index] = { id: effectId, kind: definition.kind, remainingDays: duration, stacks: 1 };
+    next.temporary[index] = { id: effectId, kind: definition.kind, remainingDays: duration, stacks: 1, ...(resolvedPotency === undefined ? {} : { potency: resolvedPotency }) };
   } else {
     current.remainingDays = Math.max(current.remainingDays, duration);
+    if (resolvedPotency !== undefined) current.potency = resolvedPotency;
   }
   return next;
 }
@@ -317,6 +357,8 @@ export function getStatusModifiers(state: StatusEffectState): {
   fireResistance: number;
   luck: number;
   fireDamageTakenMultiplier: number;
+  physicalDamageBonus: number;
+  endurance: number;
 } {
   const staminaCostReduction = state.temporary.reduce((total, active) => {
     const value = STATUS_EFFECT_DEFINITIONS[active.id]?.modifiers?.staminaCostReduction ?? 0;
@@ -330,8 +372,10 @@ export function getStatusModifiers(state: StatusEffectState): {
     const value = STATUS_EFFECT_DEFINITIONS[active.id]?.modifiers?.luck ?? 0;
     return total + value * active.stacks;
   }, 0);
+  const physicalDamageBonus = state.temporary.reduce((total, active) => total + (active.id === "strength_potion" ? active.potency ?? 5 : (STATUS_EFFECT_DEFINITIONS[active.id]?.modifiers?.physicalDamageBonus ?? 0) * active.stacks), 0);
+  const endurance = state.temporary.reduce((total, active) => total + (active.id === "defense_potion" ? active.potency ?? 5 : (STATUS_EFFECT_DEFINITIONS[active.id]?.modifiers?.endurance ?? 0) * active.stacks), 0);
   const fireDamageTakenMultiplier = state.traits.reduce((total, active) => {
     return total * (TRAIT_DEFINITIONS[active.id]?.modifiers?.fireDamageTakenMultiplier ?? 1);
   }, 1);
-  return { staminaCostReduction, fireResistance, luck, fireDamageTakenMultiplier };
+  return { staminaCostReduction, fireResistance, luck, fireDamageTakenMultiplier, physicalDamageBonus, endurance };
 }

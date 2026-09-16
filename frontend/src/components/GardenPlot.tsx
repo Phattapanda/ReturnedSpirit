@@ -117,6 +117,21 @@ const CROP_ASSETS: Record<string, ImageSourcePropType> = {
   seed_potato:      require("../../assets/images/seed_potato.png"),
   bed_potato_young: require("../../assets/images/bed_potato_young.png"),
   bed_potato:       require("../../assets/images/bed_potato.png"),
+  seed_lettuce: require("../../assets/images/seed_salad.png"),
+  bed_lettuce_young: require("../../assets/images/bed_lettuce_young.png"),
+  bed_lettuce: require("../../assets/images/bed_lettuce.png"),
+  seed_cucumber: require("../../assets/images/seed_cucumber.png"),
+  bed_cucumber_young: require("../../assets/images/bed_cucumber_young.png"),
+  bed_cucumber: require("../../assets/images/bed_cucumber.png"),
+  seed_spinach: require("../../assets/images/seed_spinach.png"),
+  bed_spinach_young: require("../../assets/images/bed_spinach_young.png"),
+  bed_spinach: require("../../assets/images/bed_spinach.png"),
+  seed_tomato: require("../../assets/images/seed_tomato.png"),
+  bed_tomato_young: require("../../assets/images/bed_tomato_young.png"),
+  bed_tomato: require("../../assets/images/bed_tomato.png"),
+  seed_pumpkin: require("../../assets/images/seed_pumpkin.png"),
+  bed_pumpkin_young: require("../../assets/images/bed_pumpkin_young.png"),
+  bed_pumpkin: require("../../assets/images/bed_pumpkin.png"),
 };
 
 const ACTION_IMG = {
@@ -156,6 +171,11 @@ const CROP_STAGE_CONFIGS: Record<string, CropStageConfig> = {
     growingStageAsset: "bed_onion_young",
     readyStageAsset: "bed_onion",
   },
+  lettuce: { seedStageAsset: "seed_lettuce", growingStageAsset: "bed_lettuce_young", readyStageAsset: "bed_lettuce" },
+  cucumber: { seedStageAsset: "seed_cucumber", growingStageAsset: "bed_cucumber_young", readyStageAsset: "bed_cucumber" },
+  spinach: { seedStageAsset: "seed_spinach", growingStageAsset: "bed_spinach_young", readyStageAsset: "bed_spinach" },
+  tomato: { seedStageAsset: "seed_tomato", growingStageAsset: "bed_tomato_young", readyStageAsset: "bed_tomato" },
+  pumpkin: { seedStageAsset: "seed_pumpkin", growingStageAsset: "bed_pumpkin_young", readyStageAsset: "bed_pumpkin" },
 };
 
 /**
@@ -304,7 +324,7 @@ export default function GardenPlot(props: GardenPlotProps) {
     if (secondData.withered) {
       setSecondBusy(true);
       try {
-        if (!(await onSpendStamina(5))) { showPlayerThought('"Not enough stamina."'); return; }
+        if (!(await onSpendStamina(actionCosts.pullWeeds))) { showPlayerThought('"Not enough stamina."'); return; }
         await persistSecond({ ...emptyAuxiliaryPlot, yieldUpgradeLevel: secondData.yieldUpgradeLevel ?? 0 });
         onActionSuccess?.();
         refreshGarden();
@@ -316,7 +336,7 @@ export default function GardenPlot(props: GardenPlotProps) {
     if (secondData.weedsPulledToday) { showPlayerThought('"I already did this today."'); return; }
     setSecondBusy(true);
     try {
-      if (!(await onSpendStamina(8))) { showPlayerThought('"Not enough stamina."'); return; }
+      if (!(await onSpendStamina(actionCosts.pullWeeds))) { showPlayerThought('"Not enough stamina."'); return; }
       await persistSecond({
         ...secondData,
         weedsPulledToday: true,
