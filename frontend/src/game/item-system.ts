@@ -702,12 +702,14 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
     description: "Reduces Stamina costs by 1 for 5 days.",
     attributes: [ITEM_ATTRIBUTE.CONSUMABLE],
     consumableCategory: CONSUMABLE_CATEGORY.DRINK,
+    grantedStatusEffectId: "energy_drink",
   },
   energypill: {
     name: "Energy Pill",
     description: "Reduces Stamina costs by 1 for 10 days.",
     attributes: [ITEM_ATTRIBUTE.CONSUMABLE],
     consumableCategory: CONSUMABLE_CATEGORY.PILL,
+    grantedStatusEffectId: "energy_pill",
   },
   potion_healing_low_grade: {
     name: "Low Grade Healing Potion",

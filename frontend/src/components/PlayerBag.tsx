@@ -21,6 +21,7 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withRepeat,
+  withDelay,
   withTiming,
 } from "react-native-reanimated";
 import {
@@ -255,12 +256,15 @@ export default function PlayerBag({
   const [buffResetTarget, setBuffResetTarget] = useState<{ slotIdx: number; item: BagItem } | null>(null);
   const [bottleDiscardTarget, setBottleDiscardTarget] = useState<{ slotIdx: number; item: BagItem } | null>(null);
   const [effectiveness, setEffectiveness] = useState(1);
+  const [recovery, setRecovery] = useState<{ id: number; stamina: number; life: number } | null>(null);
+  const recoverySequence = useRef(0);
   const carrotEditsPending = useRef(false);
   const longPressDidFire = useRef(false);
   const transferLocked = useRef(false);
 
   useEffect(() => {
     if (visible) {
+      setRecovery(null);
       void AsyncStorage.getItem(PLAYER_STATS_KEY).then((raw) => {
         setEffectiveness(normalizePlayerStats(raw ? JSON.parse(raw) : null).effectiveness);
       }).catch(() => setEffectiveness(1));
@@ -415,7 +419,14 @@ export default function PlayerBag({
     onStatsUpdated?.(nextStats);
     onStaminaUpdated?.(nextStamina);
     onLifeUpdated?.(nextLife);
-    audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
+    audioManager.playSoundEffect("eat", { maxDurationMs: 3000 });
+    const staminaGain = Math.max(0, nextStamina - currentStamina);
+    const lifeGain = Math.max(0, nextLife - currentLife);
+    if (staminaGain > 0 || lifeGain > 0) {
+      const id = ++recoverySequence.current;
+      setRecovery({ id, stamina: staminaGain, life: lifeGain });
+      setTimeout(() => setRecovery((current) => current?.id === id ? null : current), 1800);
+    }
   }
 
   function handleDiscardNo() {
@@ -463,6 +474,7 @@ export default function PlayerBag({
       <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={handleOverlayPress}>
         <TouchableOpacity activeOpacity={1} onPress={() => { if (infoItem) setInfoItem(null); }}>
           <View style={[styles.panel, { paddingBottom: insets.bottom + 8 }]}>
+            {recovery && <BagRecoveryNumbers key={recovery.id} stamina={recovery.stamina} life={recovery.life} />}
             <View style={styles.header}>
               <Text style={styles.title}>{bagTitle}</Text>
               <TouchableOpacity
@@ -768,6 +780,24 @@ export function BagIconButton({ unlocked, bagId = "bag1", onPress, style, pulsin
       </TouchableOpacity>
     </Animated.View>
   );
+}
+
+function BagRecoveryNumbers({ stamina, life }: { stamina: number; life: number }) {
+  const rise = useSharedValue(0);
+  const opacity = useSharedValue(1);
+  useEffect(() => {
+    rise.value = withTiming(-55, { duration: 1800 });
+    opacity.value = withDelay(1100, withTiming(0, { duration: 650 }));
+    return () => { cancelAnimation(rise); cancelAnimation(opacity); };
+  }, [rise, opacity]);
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ translateY: rise.value }],
+  }));
+  return <Animated.View pointerEvents="none" style={[{ position: "absolute", top: 65, left: 0, right: 0, alignItems: "center", zIndex: 10 }, animatedStyle]}>
+    {stamina > 0 && <Text style={{ color: "#7EC87E", fontSize: 22, fontWeight: "bold", textShadowColor: "#000", textShadowRadius: 3 }}>+{stamina} Stamina</Text>}
+    {life > 0 && <Text style={{ color: "#FF8585", fontSize: 22, fontWeight: "bold", textShadowColor: "#000", textShadowRadius: 3 }}>+{life} Life</Text>}
+  </Animated.View>;
 }
 
 const styles = StyleSheet.create({

@@ -444,6 +444,7 @@ export default function ForestEntranceScreen() {
       }
 
       setFloorTransitionActive(true);
+      playSoundEffect("footstep", { maxDurationMs: 3000 });
       floorBackgroundScale.value = 1;
       floorBlackOpacity.value = 0;
       await animateFloorTransitionValue(floorBackgroundScale, 1.14, 320);
@@ -652,11 +653,11 @@ export default function ForestEntranceScreen() {
       externalUseItemIds={["return_bell"]}
       onUseItem={() => leaveSafely(true)}
     />
-    <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: 128, paddingBottom: insets.bottom + 22 }]} contentInsetAdjustmentBehavior="automatic" showsVerticalScrollIndicator={false}>
+    <ScrollView ref={scrollRef} style={styles.scroll} contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 22 }]} contentInsetAdjustmentBehavior="automatic" showsVerticalScrollIndicator={false}>
       {!isRestArea ? <View style={styles.monsterStage}>
         {monster && ((monsterState?.phase !== "defeated" && monsterState?.phase !== "avoided") || defeatedMonsterVisible) ? <View style={styles.monsterCard}>
           {monster.boss ? <Text style={styles.bossLabel}>BOSS</Text> : null}
-          <View style={styles.monsterImageWrap}>
+          <View style={[styles.monsterImageWrap, monster.boss && { height: 266.5 }]}>
             <Reanimated.Image source={MONSTER_IMAGES[monster.id]} style={[styles.monsterImage, monster.id === "elder_ember_rooster" && styles.elderMonsterImage, monsterAttackStyle]} resizeMode="contain" />
             {attackEffect ? <Image source={ATTACK_IMAGES[attackEffect]} style={styles.attackEffect} resizeMode="contain" /> : null}
           </View>
@@ -804,8 +805,8 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#071006" }, backgroundShade: { backgroundColor: "rgba(3,10,2,0.22)" }, scroll: { flex: 1 },
   floorTransitionBlack: { zIndex: 1000, backgroundColor: "#000" },
   content: { flexGrow: 1, justifyContent: "flex-start", paddingHorizontal: 14, gap: 10 },
-  monsterStage: { width: "100%", height: 250, alignItems: "center", justifyContent: "flex-end" },
-  monsterCard: { width: "100%", height: 250, alignItems: "center", justifyContent: "flex-end", gap: 5 },
+  monsterStage: { width: "100%", minHeight: 250, alignItems: "center", justifyContent: "flex-start" },
+  monsterCard: { width: "100%", alignItems: "center", gap: 5 },
   monsterImageWrap: { width: "100%", height: 205, alignItems: "center", justifyContent: "center" },
   monsterImage: { width: "74%", height: 205 },
   elderMonsterImage: { width: "96.2%", height: 266.5 },

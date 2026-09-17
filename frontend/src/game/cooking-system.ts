@@ -482,6 +482,29 @@ export function findCookingRecipe(ingredientSlots: readonly (BagItem | null)[], 
   }) ?? null;
 }
 
+/**
+ * Recognize a pot recipe whose ingredients are valid but whose required pot tier
+ * is above the currently inserted pot. This deliberately excludes missing or
+ * unrelated tools so those combinations still behave like unknown recipes.
+ */
+export function findCookingRecipeBlockedByToolLevel(
+  ingredientSlots: readonly (BagItem | null)[],
+  tool: BagItem | null,
+): CookingRecipe | null {
+  if (!tool || tool.quantity !== 1) return null;
+  const actualLevel = COOKING_POT_LEVELS[tool.id];
+  if (actualLevel === undefined) return null;
+
+  const totals = ingredientTotals(ingredientSlots);
+  return COOKING_RECIPES.find((recipe) => {
+    if (!recipe.toolId) return false;
+    const requiredLevel = COOKING_POT_LEVELS[recipe.toolId];
+    if (requiredLevel === undefined || actualLevel >= requiredLevel) return false;
+    if (totals.size !== recipe.ingredients.length) return false;
+    return recipe.ingredients.every((ingredient) => (totals.get(ingredient.id) ?? 0) >= ingredient.quantity);
+  }) ?? null;
+}
+
 export function createCraftedItem(itemId: string, quantity: number): BagItem {
   const catalog = ITEM_CATALOG[itemId];
   return { id: itemId, itemType: itemId, name: catalog?.name ?? itemId, quantity,

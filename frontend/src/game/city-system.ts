@@ -639,13 +639,13 @@ export async function repairCityItem(slot: number): Promise<CityActionResult> {
   return { ok: true, message: `${item.name} repaired for ${formatCurrencyAmount(20)}.` };
 }
 
-export async function tanMaterial(source: "fur" | "wolf_pelt"): Promise<CityActionResult> {
+export async function tanMaterial(source: "fur" | "hide" | "wolf_pelt"): Promise<CityActionResult> {
   const bag = await loadBag(); const index = bag.slots.findIndex((item) => item?.id === source);
-  if (index < 0) return { ok: false, message: `I do not have any ${source === "fur" ? "Fur" : "Wolf Pelt"}.` };
+  if (index < 0) return { ok: false, message: `I do not have any ${ITEM_CATALOG[source].name}.` };
   const priceCopper = 25;
   const balance = await loadCurrencyCopper();
   if (balance < priceCopper) return { ok: false, message: `I need ${formatCurrencyAmount(priceCopper)} for tanning.` };
-  const removed = removeBagItem(bag, index, 1); const leather = createItem("leather"); leather.quantity = source === "fur" ? 1 : 2;
+  const removed = removeBagItem(bag, index, 1); const leather = createItem("leather"); leather.quantity = source === "wolf_pelt" ? 2 : 1;
   const plan = planAddToBag(leather, removed); if (!plan.canTransfer || plan.remainderQty) return { ok: false, message: "My bag needs room for the Leather." };
   const remainingCopper = balance - priceCopper;
   await AsyncStorage.multiSet([
@@ -654,7 +654,7 @@ export async function tanMaterial(source: "fur" | "wolf_pelt"): Promise<CityActi
   ]);
   notifyCurrencyChanged(remainingCopper);
   audioEngine.playSoundEffect("losecoin", { maxDurationMs: 2200 });
-  return { ok: true, message: `${source === "fur" ? "Fur" : "Wolf Pelt"} processed into ${leather.quantity}× Leather.` };
+  return { ok: true, message: `${ITEM_CATALOG[source].name} processed into ${leather.quantity}× Leather.` };
 }
 
 export async function hireSupporter(id: SupporterId, runs: number): Promise<CityActionResult> {

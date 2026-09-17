@@ -162,10 +162,17 @@ export async function payForCarriage(costCopper: number): Promise<boolean> {
 }
 
 export async function spendWalkingStamina(cost: number): Promise<{ ok: boolean; remaining: number }> {
-  const raw = await AsyncStorage.getItem("@game:stamina");
+  const [raw, rawSpent] = await AsyncStorage.multiGet([
+    "@game:stamina",
+    "@game:stamina_spent_today",
+  ]).then((entries) => entries.map(([, value]) => value));
   const current = Math.max(0, Number.parseInt(raw ?? "0", 10) || 0);
   if (current < cost) return { ok: false, remaining: current };
   const remaining = current - cost;
-  await AsyncStorage.setItem("@game:stamina", String(remaining));
+  const spentToday = Math.max(0, Number.parseInt(rawSpent ?? "0", 10) || 0);
+  await AsyncStorage.multiSet([
+    ["@game:stamina", String(remaining)],
+    ["@game:stamina_spent_today", String(spentToday + cost)],
+  ]);
   return { ok: true, remaining };
 }

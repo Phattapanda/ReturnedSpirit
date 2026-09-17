@@ -69,6 +69,7 @@ import {
   createRecipeOutputs,
   discoverRecipe,
   findCookingRecipe,
+  findCookingRecipeBlockedByToolLevel,
   getCraftableRecipeCount,
   loadDiscoveredRecipes,
   RUPERT_MORTAR_RECIPE_DIALOG_SEEN_KEY,
@@ -303,6 +304,7 @@ const CRAFT_TOOL_IDS = new Set([
   "oldpot",
   "cooking_pot",
   "fine_cooking_pot",
+  "frying_pan",
   "mortar_and_pestle",
   "tool_kitchen_knife",
   "tool_rusty_butchering_knife",
@@ -3416,7 +3418,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   }
 
   /** Update hovered slot during a generic kitchen item drag. */
-  function updateCookingHoveredSlot(itemX: number, itemY: number) {
+  function updateCookingHoveredSlot(itemX: number, itemY: number, pointerX: number, pointerY: number) {
     const srcSlot = cookingDraggedSlotRef.current;
     const cur = tsRef.current;
     const lts = layouts.current.tableSlots;
@@ -3435,7 +3437,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     }
     updateGarbageDropHover(false);
 
-    if (draggedItem?.id !== "crate1" && smallCrateOpen && cratePanel && inRect(itemX, itemY, cratePanel)) {
+    if (draggedItem?.id !== "crate1" && smallCrateOpen && cratePanel &&
+        (inRect(itemX, itemY, cratePanel) || inRect(pointerX, pointerY, cratePanel))) {
       updateCrateDropHover(true);
       updateBagDropHover(false);
       if (hoveredSlotRef.current !== null) { hoveredSlotRef.current = null; setHoveredSlot(null); }
@@ -3496,6 +3499,9 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     setTooltipVisible(false);
 
     cookingDraggedSlotRef.current = slotIdx;
+    // This gesture is a drag, even if it ends near its starting point. Do not
+    // let the root's outside-tap handler close the crate before the drop runs.
+    touchStartRef.current = null;
     cookingDragItemIdRef.current = itemId;
     setCookingDragActiveSlot(slotIdx);
     setFlyingItemId(itemId);
@@ -3598,7 +3604,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         const itemY = e.absoluteY + dragOffsetY.value;
         soupX.value = itemX;
         soupY.value = itemY;
-        runOnJS(updateCookingHoveredSlot)(itemX, itemY);
+        runOnJS(updateCookingHoveredSlot)(itemX, itemY, e.absoluteX, e.absoluteY);
       })
       .onEnd((e) => {
         if (craftingInteractionLockedSV.value !== 0) return;
@@ -3607,6 +3613,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
           itemId,
           e.absoluteX + dragOffsetX.value,
           e.absoluteY + dragOffsetY.value,
+          e.absoluteX,
+          e.absoluteY,
         );
       })
       .onFinalize((_, success) => {
@@ -3811,7 +3819,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   }
 
   /** Drop a generic Kitchen item. Source is supplied by the item's own GestureDetector. */
-  function handleCookingItemDrop(srcSlot: number, expectedItemId: string, absX: number, absY: number) {
+  function handleCookingItemDrop(srcSlot: number, expectedItemId: string, absX: number, absY: number, pointerX: number, pointerY: number) {
     cookingDraggedSlotRef.current = -1;
     cookingDragItemIdRef.current = "";
     setSoupDragging(false);
@@ -3841,7 +3849,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     }
 
     const cratePanelRect = layouts.current.cratePanel;
-    if (draggedItem.id !== "crate1" && smallCrateOpen && cratePanelRect && inRect(absX, absY, cratePanelRect)) {
+    if (draggedItem.id !== "crate1" && smallCrateOpen && cratePanelRect &&
+        (inRect(absX, absY, cratePanelRect) || inRect(pointerX, pointerY, cratePanelRect))) {
       void transferCookingItemToCrate(srcSlot);
       return;
     }
@@ -4073,7 +4082,13 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     tool: BagItem | null,
   ): BagItem | null {
     const recipe = findCookingRecipe(ingredients, tool);
-    if (!recipe) return null;
+    if (!recipe) {
+      const blockedRecipe = findCookingRecipeBlockedByToolLevel(ingredients, tool);
+      // An insufficient pot still reveals that the ingredients form a dish. The
+      // result renderer intentionally shows this preview as a question mark because
+      // findCookingRecipe continues to reject the currently inserted tool.
+      return blockedRecipe ? createCraftedItem(blockedRecipe.outputId, blockedRecipe.outputQuantity) : null;
+    }
     const craftCount = getCraftableRecipeCount(ingredients, recipe, tool);
     if (craftCount < 1) return null;
     const preview = createCraftedItem(recipe.outputId, recipe.outputQuantity * craftCount);
@@ -4242,7 +4257,6 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       craftFlightTable.current = landedTable;
       tableItemsRef.current = landedTable;
       setTableItems(landedTable);
-      AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(landedTable)).catch(() => {});
 
       // Keep the flying image above the newly-rendered slot for one frame, then
       // fade it out before dispatching the next crafted item.
@@ -4295,6 +4309,15 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     craftFlightOutputs.current = outputs;
     craftFlightTargetSlots.current = targetSlots;
     craftFlightTable.current = initialTable;
+    // Commit the complete craft transaction before starting its presentation.
+    // Room navigation can unmount the animation at any frame; persisting every
+    // output now prevents later byproducts (notably Empty Bucket) from vanishing.
+    const completedTable = initialTable.slice();
+    outputs.forEach((output, index) => {
+      const targetSlot = targetSlots[index];
+      if (targetSlot !== undefined) completedTable[targetSlot] = output;
+    });
+    AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(completedTable)).catch(() => {});
     // The result remains visible until the overlay has been positioned over it.
     requestAnimationFrame(() => {
       setCraftResult(null);
@@ -4314,8 +4337,12 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     const recipe = findCookingRecipe(currentIngredients, currentTool);
     if (!recipe) {
       setCraftingInteractionLocked(false);
-      setCraftResult(null);
-      showPlayerBubble('"There is no recipe for that."');
+      if (findCookingRecipeBlockedByToolLevel(currentIngredients, currentTool)) {
+        showPlayerBubble('"I need a better pot for that."');
+      } else {
+        setCraftResult(null);
+        showPlayerBubble('"There is no recipe for that."');
+      }
       return;
     }
 

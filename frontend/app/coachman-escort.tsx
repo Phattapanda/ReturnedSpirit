@@ -141,7 +141,6 @@ export default function CoachmanEscortScreen() {
   const preLines = useMemo(() => isWalking ? walkingPreBattleLines(playerName, playerPortrait, playerScale, playerAspectRatio) : preBattleLines(playerName, playerPortrait, playerScale, playerAspectRatio), [isWalking, playerAspectRatio, playerName, playerPortrait, playerScale]);
   const postLines = useMemo(() => postBattleLines(playerName, playerPortrait, playerScale, playerAspectRatio), [playerAspectRatio, playerName, playerPortrait, playerScale]);
   const activeLines = phase === "journey" ? preLines : postLines;
-  const wideBattleLayout = screenWidth >= 400;
   const attackPreview = useMemo(() => {
     return {
       body: getForestAttackPreview("wild_wolf", "body", stats, combatBag),
@@ -155,7 +154,7 @@ export default function CoachmanEscortScreen() {
 
   useEffect(() => {
     setActionPanelHeight(null);
-  }, [wideBattleLayout]);
+  }, [screenWidth]);
 
   useEffect(() => {
     void (async () => {
@@ -411,13 +410,11 @@ export default function CoachmanEscortScreen() {
   const dialogLine = phase === "journey" || phase === "post" ? activeLines[dialogIndex] ?? null : null;
   const battleTop = portraitBottom || headerHeight + 120;
   const availableBattleHeight = Math.max(300, screenHeight - battleTop);
-  const estimatedActionHeight = actionPanelHeight ?? (wideBattleLayout ? 82 : 146);
+  const estimatedActionHeight = actionPanelHeight ?? 146;
   const battleBottomPadding = insets.bottom + 18;
-  const preferredBattleContentHeight = 310 + combatMessageHeight + 24 + estimatedActionHeight + battleBottomPadding;
-  const battleTopSpacing = Math.max(0, Math.min(132, availableBattleHeight - preferredBattleContentHeight));
   const monsterAreaHeight = Math.max(
     180,
-    Math.min(310, availableBattleHeight - battleTopSpacing - combatMessageHeight - estimatedActionHeight - battleBottomPadding - 24),
+    Math.min(310, availableBattleHeight - combatMessageHeight - estimatedActionHeight - battleBottomPadding - 24),
   );
   const wolfHeight = Math.max(142, Math.min(224, monsterAreaHeight - 72));
 
@@ -428,11 +425,11 @@ export default function CoachmanEscortScreen() {
       <TravelHeader locationName="Road to the Next City" showPortraitRow onHeaderHeightChange={setHeaderHeight} onPortraitBottomChange={setPortraitBottom} refreshKey={headerRefreshKey} bagAttention={bagAttention} onBagUpdated={setCombatBag} onStatsUpdated={setStats} />
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={[styles.content, { paddingTop: battleTopSpacing, paddingBottom: battleBottomPadding }]}
+        contentContainerStyle={[styles.content, { paddingBottom: battleBottomPadding }]}
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
       >
-        <View style={[styles.monsterArea, { height: monsterAreaHeight }]}>
+        <View style={[styles.monsterArea, { height: monsterAreaHeight, justifyContent: "flex-start" }]}>
           <Reanimated.View style={[styles.wolfAttackWrapper, { height: wolfHeight }, wolfAttackStyle]}>
             <Animated.Image source={WOLF} style={[styles.wolf, { opacity: wolfOpacity }]} resizeMode="contain" />
           </Reanimated.View>
@@ -453,19 +450,10 @@ export default function CoachmanEscortScreen() {
             const measuredHeight = event.nativeEvent.layout.height;
             if (measuredHeight > 0 && measuredHeight !== actionPanelHeight) setActionPanelHeight(measuredHeight);
           }}>
-            {wideBattleLayout ? (
-              <View style={styles.actionRow}>
-                <Action label="Attack Head" subtitle={attackSubtitle("head")} onPress={() => { void playerAction("head"); }} disabled={busy} />
-                <Action label="Attack Body" subtitle={attackSubtitle("body")} onPress={() => { void playerAction("body"); }} disabled={busy} />
-                <Action label="Defend" subtitle="Prepare for the attack" onPress={() => { void defendAction(); }} disabled={busy} />
-                <Action label="Run" subtitle="Unavailable" onPress={runBlocked} disabled={busy} danger />
-              </View>
-            ) : (
               <>
                 <View style={styles.actionRow}><Action label="Attack Head" subtitle={attackSubtitle("head")} onPress={() => { void playerAction("head"); }} disabled={busy} /><Action label="Attack Body" subtitle={attackSubtitle("body")} onPress={() => { void playerAction("body"); }} disabled={busy} /></View>
                 <View style={styles.actionRow}><Action label="Defend" subtitle="Prepare for the attack" onPress={() => { void defendAction(); }} disabled={busy} /><Action label="Run" subtitle="Unavailable" onPress={runBlocked} disabled={busy} danger /></View>
               </>
-            )}
           </View> : carcassPending ? <TouchableOpacity style={styles.collectButton} onPress={() => { void collectPendingCarcass(); }}><Text style={styles.collectText}>Collect Monster Carcass</Text></TouchableOpacity> : null}
         </View>
       </ScrollView>
