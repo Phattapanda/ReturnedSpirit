@@ -79,6 +79,7 @@ const SFX_SOURCES: Record<string, number> = {
   victory:              require('../../assets/audio/victory.wav'),
   'victory-boss':       require('../../assets/audio/victory_boss.wav'),
   losecoin:             require('../../assets/audio/losecoin.wav'),
+  losemoney:            require('../../assets/audio/losecoin.wav'),
 };
 
 const MINSTREL_SOURCES: Record<MinstrelTrackKey, number> = {

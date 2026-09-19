@@ -18,7 +18,7 @@ import { useAudioManager } from "@/src/audio/AudioProvider";
 import { useHaptics } from "@/src/feedback/haptics-provider";
 import {
   FOREST_FLOOR_COUNT, FOREST_FORWARD_STAMINA_COST, FOREST_MONSTERS, FOREST_REST_FLOORS,
-  getForestAmbushCriticalChance, getForestAttackPreview, getForestHideChance, getForestSearchPreview,
+  getForestAmbushPreview, getForestAttackPreview, getForestHideChance, getForestSearchPreview,
   ambushHiddenForestMonster, attackForestMonster, castEquippedForestScroll, bandageAtForestRestArea, defendAgainstForestMonster, escapeForestCombat,
   collectPendingForestCarcass, dismissPendingForestLoot, enterForestDungeon, forestAreaForFloor, goForwardInForest, hideFromForestMonster, leaveForestDungeon, letHiddenForestMonsterPass, searchForestArea,
   type DungeonActionResult, type ForestDungeonState, type ForestMonsterId,
@@ -569,6 +569,7 @@ export default function ForestEntranceScreen() {
   const attackPreviews = useMemo(() => monsterState ? {
     head: getForestAttackPreview(monsterState.id, "head", combatStats, combatBag),
     body: getForestAttackPreview(monsterState.id, "body", combatStats, combatBag),
+    ambush: getForestAmbushPreview(monsterState.id, combatStats, combatBag),
   } : null, [combatBag, combatStats, monsterState]);
   const searchPreview = useMemo(() => floor ? getForestSearchPreview(
     floor.searchCost,
@@ -609,11 +610,11 @@ export default function ForestEntranceScreen() {
       <ActionButton label="Leave Dungeon" disabled={busy} onPress={() => { void leaveSafely(); }} />
     </>;
     if (monsterState?.phase === "noticed") return <View style={styles.combatGrid}>
-      <ActionButton label="Ambush" subtitle={`+50% damage · ${getForestAmbushCriticalChance(combatStats)}% critical chance`} disabled={busy} onPress={() => { void perform(ambushHiddenForestMonster); }} />
+      <ActionButton label="Ambush" subtitle={attackPreviews ? `${attackPreviews.ambush.minimumDamage}–${attackPreviews.ambush.maximumDamage} dmg · ${attackPreviews.ambush.criticalChance}% critical (×2)` : ""} disabled={busy} onPress={() => { void perform(ambushHiddenForestMonster); }} />
       <ActionButton label="Hide" subtitle={`${getForestHideChance(combatStats)}% chance · Let the monster pass`} disabled={busy} onPress={() => { void perform(hideFromForestMonster); }} />
     </View>;
     if (monsterState?.phase === "hidden") return <View style={styles.combatGrid}>
-      <ActionButton label="Ambush" subtitle="Critical damage · Keep the initiative" disabled={busy} onPress={() => { void perform(ambushHiddenForestMonster); }} />
+      <ActionButton label="Ambush" subtitle={attackPreviews ? `${attackPreviews.ambush.minimumDamage}–${attackPreviews.ambush.maximumDamage} dmg · ${attackPreviews.ambush.criticalChance}% critical (×2)` : ""} disabled={busy} onPress={() => { void perform(ambushHiddenForestMonster); }} />
       <ActionButton label="Hide" subtitle="Let the monster pass · Search the area" disabled={busy} onPress={() => { void perform(letHiddenForestMonsterPass); }} />
     </View>;
     if (monsterState?.phase === "combat") return <View style={styles.combatGrid}>

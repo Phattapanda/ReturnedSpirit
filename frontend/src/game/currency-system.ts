@@ -90,7 +90,7 @@ export async function saveCurrencyCopper(totalCopper: number): Promise<number> {
   const previous = previousRaw === null ? DEFAULT_CURRENCY_COPPER : normalizeCopper(Number(previousRaw));
   await AsyncStorage.setItem(CURRENCY_KEY, String(normalized));
   emitCurrency(normalized);
-  if (normalized < previous) audioEngine.playSoundEffect("losecoin", { maxDurationMs: 2200 });
+  if (normalized < previous) audioEngine.playSoundEffect("losemoney", { maxDurationMs: 2200 });
   return normalized;
 }
 

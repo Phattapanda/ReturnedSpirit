@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -54,6 +54,14 @@ export default function NewGame() {
   const [name, setName] = useState("");
   const [selectedAvatarId, setSelectedAvatarId] = useState<PlayerAvatarId>(DEFAULT_PLAYER_AVATAR_ID);
   const [showModal, setShowModal] = useState(false);
+  const nameSheetRef = useRef<ScrollView>(null);
+  useEffect(() => {
+    if (!showModal) return;
+    const subscription = Keyboard.addListener("keyboardDidShow", () => {
+      nameSheetRef.current?.scrollToEnd({ animated: true });
+    });
+    return () => subscription.remove();
+  }, [showModal]);
 
   const loadSlots = async () => {
     try {
@@ -225,9 +233,10 @@ export default function NewGame() {
       >
         <KeyboardAvoidingView
           style={styles.modalOverlay}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
         >
           <ScrollView
+            ref={nameSheetRef}
             style={styles.sheetScroll}
             contentContainerStyle={[styles.sheet, { paddingBottom: insets.bottom + 24 }]}
             keyboardShouldPersistTaps="handled"
@@ -263,6 +272,8 @@ export default function NewGame() {
               placeholder="Character name..."
               placeholderTextColor="#A89880"
               maxLength={24}
+              returnKeyType="done"
+              onSubmitEditing={() => Keyboard.dismiss()}
             />
             <TouchableOpacity
               testID="begin-adventure-button"

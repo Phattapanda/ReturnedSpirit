@@ -1,4 +1,6 @@
 import { prepareNextRun, type NextRunBonuses } from "@/src/game/next-run";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { PLAYER_STATS_KEY, normalizePlayerStats } from "@/src/game/player-stats";
 import { addKarmaPoints, spendKarmaPoints } from "@/src/game/progression";
 import { leaveForestDungeon, restoreForestFightSnapshot, type DungeonActionResult } from "@/src/game/forest-dungeon-system";
 
@@ -36,6 +38,10 @@ export async function returnToTavernAfterForestDeath(): Promise<Awaited<ReturnTy
 }
 
 export async function beginChosenNextRun(slotNumber: number, bonuses: NextRunBonuses): Promise<"ok" | "insufficient_kp"> {
+  const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
+  if (normalizePlayerStats(rawStats ? JSON.parse(rawStats) : null).runBaseUpgrades >= 10) {
+    bonuses = { ...bonuses, betterValues: false };
+  }
   const cost = nextRunBonusCost(bonuses);
   if (cost > 0 && !await spendKarmaPoints(cost)) return "insufficient_kp";
   await prepareNextRun(slotNumber, bonuses);

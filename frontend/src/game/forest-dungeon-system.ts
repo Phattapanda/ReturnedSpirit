@@ -203,6 +203,15 @@ export function getForestAttackPreview(
     maximumDamage: target === "head" ? Math.ceil(maximum * 1.5) : maximum,
   };
 }
+export function getForestAmbushPreview(monsterId: ForestMonsterId, stats: PlayerStats, bag: PlayerBagData) {
+  const base = getForestAttackPreview(monsterId, "body", stats, bag);
+  return {
+    minimumDamage: Math.ceil(base.minimumDamage * FOREST_AMBUSH_DAMAGE_MULTIPLIER),
+    maximumDamage: Math.ceil(base.maximumDamage * FOREST_AMBUSH_DAMAGE_MULTIPLIER),
+    criticalChance: getForestAmbushCriticalChance(stats),
+  };
+}
+
 function randomIndex(length: number, randomValue = Math.random): number {
   return Math.min(length - 1, Math.floor(Math.max(0, Math.min(0.999999, randomValue())) * length));
 }

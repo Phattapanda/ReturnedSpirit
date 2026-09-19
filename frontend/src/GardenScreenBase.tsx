@@ -41,7 +41,7 @@ import {
   type SharedResources,
 } from "@/src/game/shared-resources";
 import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
-import { loadLogbook, type LogEntry, LOGBOOK_KEY } from "@/src/game/logbook";
+import { loadLogbook, limitLogbook, type LogEntry, LOGBOOK_KEY } from "@/src/game/logbook";
 import ActivityBar from "@/src/components/ActivityBar";
 import StatusModal from "@/src/components/StatusModal";
 import QuestBookButton from "@/src/components/quest-book";
@@ -702,6 +702,10 @@ setExploreUnlocked(exploreAvailable);
         const rawInv = await AsyncStorage.getItem(GSK.INVENTORY);
         if (rawInv) {
           try { setInventory(normalizeGardenInventoryIds(JSON.parse(rawInv))); } catch { /* use default */ }
+        } else {
+          const initialInventory = DEFAULT_INVENTORY.map((item) => ({ ...item }));
+          await AsyncStorage.setItem(GSK.INVENTORY, JSON.stringify(initialInventory));
+          setInventory(initialInventory);
         }
 
         // Load selected fertilizer
@@ -964,8 +968,8 @@ setExploreUnlocked(exploreAvailable);
       const day = dayNames[dayIdx] ?? "MO";
       setLogbook(prev => {
         if (prev.some(e => e.id === logId)) return prev;
-        const entry: LogEntry = { id: logId, speaker, text, day, location: "garden", seq: prev.length };
-        const updated = [...prev, entry];
+        const entry: LogEntry = { id: logId, speaker, text, day, location: "garden", seq: (prev.at(-1)?.seq ?? -1) + 1 };
+        const updated = limitLogbook([...prev, entry]);
         AsyncStorage.setItem(LOGBOOK_KEY, JSON.stringify(updated)).catch(() => {});
         return updated;
       });
@@ -1808,7 +1812,7 @@ setExploreUnlocked(exploreAvailable);
     setPlantBusy(true);
     try {
       const rawInventory = await AsyncStorage.getItem(GSK.INVENTORY);
-      const latestInventory: InventoryItem[] = rawInventory ? JSON.parse(rawInventory) : [];
+      const latestInventory = normalizeGardenInventoryIds(rawInventory ? JSON.parse(rawInventory) : inventory);
       const seedIdx = latestInventory.findIndex(
         i => i.id === selectedSeedId && i.itemType === "seed" && i.quantity > 0,
       );
@@ -2520,32 +2524,6 @@ return (
         </View>
       </Modal>
 
-      {/* ── Menu Modal ── */}
-      <Modal visible={showMenu} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.menuPanel}>
-            <Text style={styles.panelTitle}>Menu</Text>
-            <View style={styles.divider} />
-            {[
-              { icon: "play" as const,         label: "Resume",    action: () => setShowMenu(false) },
-              { icon: "book-outline" as const,  label: "Logbook",   action: () => {
-                setShowMenu(false);
-                loadLogbook().then(setLogbook).catch(() => {});
-                setShowLogbook(true);
-              } },
-              { icon: "save-outline" as const,  label: "Save",      action: handleManualSave },
-              { icon: "home-outline" as const,   label: "Main Menu", action: handleMainMenu },
-              { icon: "settings-outline" as const, label: "Settings", action: () => { setShowMenu(false); router.push("/settings"); } },
-            ].map((item) => (
-              <TouchableOpacity key={item.label} style={styles.menuRow} onPress={item.action} activeOpacity={0.7}>
-                <Ionicons name={item.icon} size={20} color="#C4943A" />
-                <Text style={styles.menuRowText}>{item.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-      </Modal>
-
       {/* ── Player Bag Modal ── */}
       <PlayerBag
         bag={playerBag}
@@ -2701,15 +2679,37 @@ return (
 
       {/* ── Logbook Modal */}
       <Modal
-        visible={showLogbook}
+        visible={showMenu || showLogbook}
         transparent
         animationType="fade"
+        onRequestClose={() => { setShowMenu(false); setShowLogbook(false); }}
         onShow={() => {
           requestAnimationFrame(() => logbookScrollRef.current?.scrollToEnd({ animated: false }));
         }}
       >
+        {showMenu && <View style={styles.modalOverlay}>
+          <View style={styles.menuPanel}>
+            <Text style={styles.panelTitle}>Menu</Text>
+            <View style={styles.divider} />
+            {[
+              { icon: "play" as const, label: "Resume", action: () => setShowMenu(false) },
+              { icon: "book-outline" as const, label: "Logbook", action: () => {
+                setShowMenu(false);
+                setShowLogbook(true);
+              } },
+              { icon: "save-outline" as const, label: "Save", action: handleManualSave },
+              { icon: "home-outline" as const, label: "Main Menu", action: handleMainMenu },
+              { icon: "settings-outline" as const, label: "Settings", action: () => { setShowMenu(false); router.push("/settings"); } },
+            ].map((item) => (
+              <TouchableOpacity key={item.label} style={styles.menuRow} onPress={item.action} activeOpacity={0.7}>
+                <Ionicons name={item.icon} size={20} color="#C4943A" />
+                <Text style={styles.menuRowText}>{item.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>}
         {showLogbook && (<View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.72)", justifyContent: "center", alignItems: "center" }}>
-          <View style={{ backgroundColor: "#1A0F00", borderWidth: 1.5, borderColor: "#C4943A", borderRadius: 16, padding: 20, maxHeight: "80%", width: W * 0.88 }}>
+          <View style={{ backgroundColor: "#1A0F00", borderWidth: 1.5, borderColor: "#C4943A", borderRadius: 16, padding: 20, height: "80%", width: W * 0.88 }}>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
               <Text style={{ color: "#C4943A", fontFamily: "Oldenburg", fontSize: 17 }}>Logbook</Text>
               <TouchableOpacity onPress={() => setShowLogbook(false)}>

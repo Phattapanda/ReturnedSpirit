@@ -145,10 +145,12 @@ export async function prepareNextRun(slotNumber: number, bonuses: NextRunBonuses
   const nextGuestState = await loadGuestState();
   const rawAdvancedStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
   const advancedStats = normalizePlayerStats(rawAdvancedStats ? JSON.parse(rawAdvancedStats) : null);
+  const runBaseUpgrades = Math.min(10, advancedStats.runBaseUpgrades + (bonuses.betterValues ? 1 : 0));
   const cleanStats = {
     ...DEFAULT_PLAYER_STATS,
-    maximumStamina: DEFAULT_PLAYER_STATS.maximumStamina + (bonuses.betterValues ? 10 : 0),
-    maximumLife: DEFAULT_PLAYER_STATS.maximumLife + (bonuses.betterValues ? 5 : 0),
+    runBaseUpgrades,
+    maximumStamina: DEFAULT_PLAYER_STATS.maximumStamina + runBaseUpgrades * 10,
+    maximumLife: DEFAULT_PLAYER_STATS.maximumLife + runBaseUpgrades * 5,
     growthPoints: bonuses.growthPoints ? 30 : 0,
     statusEffects: advancedStats.statusEffects,
   };

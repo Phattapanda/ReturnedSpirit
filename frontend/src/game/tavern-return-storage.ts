@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getGardenFertilizerConfig } from "@/src/game/garden-fertilizer-system";
 
 import {
   DEFAULT_BAG,
@@ -115,10 +116,11 @@ export function planTavernReturnStorage(
 
   const slots = playerBag.slots.map((item) => {
     if (!item || item.id === "monster_carcass") return item;
-    if (!isCoreMaterialId(item.id) && !GARDEN_RETURN_SEED_IDS.has(item.id)) return item;
+    const fertilizer = getGardenFertilizerConfig(item.id);
+    if (!isCoreMaterialId(item.id) && !GARDEN_RETURN_SEED_IDS.has(item.id) && !fertilizer) return item;
 
     if (isCoreMaterialId(item.id)) sharedResources[item.id] += item.quantity;
-    else addGardenItem(gardenInventory, item);
+    else addGardenItem(gardenInventory, { ...item, id: fertilizer?.id ?? item.id, itemType: fertilizer ? "fertilizer" : "seed" });
     storedQuantity += item.quantity;
     return null;
   });

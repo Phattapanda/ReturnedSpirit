@@ -451,7 +451,8 @@ export async function buyCityItem(id: string, priceCopper: number, quantity = 1)
   const balance = await loadCurrencyCopper();
   if (balance < priceCopper) return { ok: false, message: "I do not have enough coins." };
   await AsyncStorage.multiSet([[PLAYER_BAG_KEY, JSON.stringify({ ...bag, slots: plan.updatedSlots })], ["@game:currency_copper", String(balance - priceCopper)]]);
-  await saveCurrencyCopper(balance - priceCopper);
+  notifyCurrencyChanged(balance - priceCopper);
+  if (priceCopper > 0) audioEngine.playSoundEffect("losemoney", { maxDurationMs: 2200 });
   return { ok: true, message: `${item.quantity > 1 ? `${item.quantity}× ` : ""}${item.name} added to my bag.` };
 }
 
@@ -485,6 +486,7 @@ export async function buyCityMarketItem(
       [CURRENCY_KEY, String(balance - priceCopper)],
     ]);
     notifyCurrencyChanged(balance - priceCopper);
+    if (priceCopper > 0) audioEngine.playSoundEffect("losemoney", { maxDurationMs: 2200 });
     return { ok: true, message: `${ITEM_CATALOG[id]?.name ?? id} sent to Garden Storage. ${weeklyLimit - bought - 1} remaining until the weekly reset.` };
   }
   const bag = await loadBag();
@@ -504,6 +506,7 @@ export async function buyCityMarketItem(
     [CURRENCY_KEY, String(balance - priceCopper)],
   ]);
   notifyCurrencyChanged(balance - priceCopper);
+  if (priceCopper > 0) audioEngine.playSoundEffect("losemoney", { maxDurationMs: 2200 });
   return { ok: true, message: `${item.name} added to my bag. ${weeklyLimit - bought - 1} remaining until the weekly reset.` };
 }
 

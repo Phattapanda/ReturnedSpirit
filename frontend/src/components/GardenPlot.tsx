@@ -27,6 +27,7 @@ import {
   createHarvestBagForCrop,
   gardenPlotStorageKey,
   getCropYieldLabel,
+  normalizeGardenSeedId,
   type GardenPlotNumber,
 } from "@/src/game/garden-crop-system";
 import {
@@ -267,7 +268,8 @@ export default function GardenPlot(props: GardenPlotProps) {
     setSecondBusy(true);
     try {
       const rawInventory = await AsyncStorage.getItem(GARDEN_INVENTORY_KEY);
-      const inventory: GardenInventoryItem[] = rawInventory ? JSON.parse(rawInventory) : [];
+      const inventory: GardenInventoryItem[] = (rawInventory ? JSON.parse(rawInventory) as GardenInventoryItem[] : [])
+        .map((item) => item.itemType === "seed" ? { ...item, id: normalizeGardenSeedId(item.id) ?? item.id } : item);
       const seedIndex = inventory.findIndex(
         (item) => item.id === selectedSeedId && item.itemType === "seed" && item.quantity > 0,
       );

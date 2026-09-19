@@ -475,6 +475,7 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
   alchemy_powder_white: { name: "White Alchemy Powder", description: "A processed alchemical ingredient ground with a Mortar and Pestle.", attributes: [ITEM_ATTRIBUTE.INGREDIENT, ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 22 },
   alchemy_powder_black: { name: "Black Alchemy Powder", description: "A processed alchemical ingredient ground with a Mortar and Pestle.", attributes: [ITEM_ATTRIBUTE.INGREDIENT, ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 22 },
   spices: { name: "Spices", description: "A fragrant blend crafted from Herbs and Nuts. Used to season cooked dishes.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
+  recipe: { name: "Recipe", description: "Try a new recipe.", attributes: [], baseSellPriceCopper: 50 },
   scroll: { name: "Scroll", description: "A blank, non-stackable scroll for crafting magic and enhancement scrolls.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   fire_bolt_scroll: { name: "Fire Bolt Scroll", description: "Fire magic: 25 damage, 90% accuracy. Ignores Defense; Fire Resistance and Immunity apply. 5 uses.", attributes: [ITEM_ATTRIBUTE.WEAPON], baseSellPriceCopper: 100 },
   ice_field_scroll: { name: "Ice Field Scroll", description: "Ice magic: 20 damage, 110% accuracy. Ignores Defense; Ice Resistance and Immunity apply. 7 uses.", attributes: [ITEM_ATTRIBUTE.WEAPON], baseSellPriceCopper: 100 },

@@ -1,4 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { GARDEN_INVENTORY_KEY, normalizeGardenInventory } from "@/src/game/tavern-return-storage";
+import { GARDEN_FERTILIZER_CONFIGS } from "@/src/game/garden-fertilizer-system";
 
 import {
   ITEM_CATALOG,
@@ -26,6 +28,7 @@ import {
 } from "@/src/game/player-stats";
 import {
   SHARED_RESOURCE_DEFAULTS,
+  CORE_MATERIAL_IDS,
   SHARED_RESOURCES_KEY,
   type ResourceId,
   type SharedResources,
@@ -45,6 +48,7 @@ const CURRENT_LIFE_KEY = "@game:life";
 export type MailSenderKind = "developer" | "npc" | "guild" | "adventurer" | "system";
 
 export type MailReward =
+  | { type: "garden_item"; itemId: string; quantity: number; itemType: "seed" | "fertilizer" }
   | { type: "item"; itemId: string; quantity: number; containedItem?: string; containedQuantity?: number; item?: BagItem }
   | { type: "copper"; amount: number }
   | { type: "silver"; amount: number }
@@ -100,6 +104,15 @@ export type BonusCodeDefinition = {
 
 /** Codes are normalized to uppercase before lookup, so entry is case-insensitive. */
 export const BONUS_CODE_CATALOG: Readonly<Record<string, BonusCodeDefinition>> = {
+  HARVESTSUN: {
+    sender: "The Developer",
+    subject: "Harvest Sun",
+    body: "Claim 3 seeds for every plant and 20 of each fertilizer. All supplies go directly to Garden Storage.",
+    rewards: [
+      ...["herb", "carrot", "potato", "onion", "spinach", "tomato", "lettuce", "cucumber", "pumpkin"].map((plant): MailReward => ({ type: "garden_item", itemId: `seed_${plant}`, quantity: 3, itemType: "seed" })),
+      ...GARDEN_FERTILIZER_CONFIGS.map((fertilizer): MailReward => ({ type: "garden_item", itemId: fertilizer.id, quantity: 20, itemType: "fertilizer" })),
+    ],
+  },
   WELCOMETRAVELLER: {
     sender: "The Developer",
     subject: "Welcome to A Returned Spirit!",
@@ -143,6 +156,11 @@ function positiveInteger(value: unknown): number {
 function normalizeReward(raw: unknown): MailReward | null {
   if (!raw || typeof raw !== "object") return null;
   const reward = raw as Partial<MailReward> & { type?: unknown };
+  if (reward.type === "garden_item" && typeof reward.itemId === "string" &&
+      (reward.itemType === "seed" || reward.itemType === "fertilizer")) {
+    const quantity = positiveInteger(reward.quantity);
+    return quantity > 0 ? { type: "garden_item", itemId: reward.itemId, itemType: reward.itemType, quantity } : null;
+  }
   if (reward.type === "item" && typeof reward.itemId === "string") {
     const quantity = positiveInteger(reward.quantity);
     const exactItem = reward.item && typeof reward.item === "object" &&
@@ -172,6 +190,22 @@ function normalizeReward(raw: unknown): MailReward | null {
     return quantity > 0 ? { type: "shared_resource", resourceId: reward.resourceId, quantity } : null;
   }
   return null;
+}
+
+/** Also routes already-delivered Porter letters when an older save is loaded. */
+function routePorterReward(reward: MailReward): MailReward {
+  if (reward.type !== "item") return reward;
+  const id = normalizeBagItem(reward.item ?? createRewardItem(reward.itemId, reward.quantity))!.id;
+  if (CORE_MATERIAL_IDS.includes(id as ResourceId)) {
+    return { type: "shared_resource", resourceId: id as ResourceId, quantity: reward.quantity };
+  }
+  if (id.startsWith("seed_") && ITEM_CATALOG[id]) {
+    return { type: "garden_item", itemId: id, quantity: reward.quantity, itemType: "seed" };
+  }
+  if (GARDEN_FERTILIZER_CONFIGS.some((entry) => entry.id === id)) {
+    return { type: "garden_item", itemId: id, quantity: reward.quantity, itemType: "fertilizer" };
+  }
+  return reward;
 }
 
 function normalizeDailySchedule(raw: unknown): DailyMailboxSchedule | null {
@@ -207,7 +241,8 @@ function normalizeMessage(raw: unknown): MailboxMessage | null {
     subject: canonicalSubject,
     body: canonicalBody,
     deliveredAt: Math.max(0, Number(message.deliveredAt) || 0),
-    rewards: Array.isArray(message.rewards) ? message.rewards.map(normalizeReward).filter((reward): reward is MailReward => reward !== null) : [],
+    rewards: Array.isArray(message.rewards) ? message.rewards.map(normalizeReward).filter((reward): reward is MailReward => reward !== null)
+      .map((reward) => typeof message.id === "string" && message.id.startsWith("supporter-return:") ? routePorterReward(reward) : reward) : [],
     read: message.read === true,
     claimed: message.claimed === true,
   };
@@ -366,6 +401,15 @@ export async function claimMailboxMessage(messageId: string): Promise<ClaimMailR
   const message = state.messages.find((entry) => entry.id === messageId);
   if (!message) return { ok: false, reason: "not_found", state };
   if (message.claimed) return { ok: false, reason: "already_claimed", state };
+  const gardenRewards = message.rewards.filter((reward) => reward.type === "garden_item");
+  const gardenInventory = gardenRewards.length
+    ? normalizeGardenInventory(await AsyncStorage.getItem(GARDEN_INVENTORY_KEY))
+    : null;
+  if (gardenInventory) for (const reward of gardenRewards) {
+    const existing = gardenInventory.find((item) => item.id === reward.itemId && item.itemType === reward.itemType);
+    if (existing) existing.quantity += reward.quantity;
+    else gardenInventory.push({ id: reward.itemId, itemType: reward.itemType, name: ITEM_CATALOG[reward.itemId]?.name ?? reward.itemId, quantity: reward.quantity });
+  }
 
   const [rawBag, currentCopper, rawStats, rawStamina, rawLife, rawResources, rawProgression] = await Promise.all([
     AsyncStorage.getItem(PLAYER_BAG_KEY),
@@ -415,7 +459,9 @@ export async function claimMailboxMessage(messageId: string): Promise<ClaimMailR
     if (reward.type === "shared_resource") {
       nextResources = {
         ...nextResources,
-        [reward.resourceId]: Math.min(999, nextResources[reward.resourceId] + reward.quantity),
+        [reward.resourceId]: message.id.startsWith("supporter-return:")
+          ? nextResources[reward.resourceId] + reward.quantity
+          : Math.min(999, nextResources[reward.resourceId] + reward.quantity),
       };
     }
   }
@@ -426,6 +472,7 @@ export async function claimMailboxMessage(messageId: string): Promise<ClaimMailR
   };
   await AsyncStorage.multiSet([
     [MAILBOX_STATE_KEY, JSON.stringify(nextState)],
+    ...(gardenInventory ? [[GARDEN_INVENTORY_KEY, JSON.stringify(gardenInventory)] as [string, string]] : []),
     [PLAYER_BAG_KEY, JSON.stringify(nextBag)],
     [CURRENCY_KEY, String(nextCopper)],
     [PLAYER_STATS_KEY, JSON.stringify(nextStats)],
@@ -487,6 +534,7 @@ export async function redeemBonusCode(rawCode: string): Promise<RedeemBonusCodeR
 }
 
 export function mailboxRewardLabel(reward: MailReward): string {
+  if (reward.type === "garden_item") return `${reward.quantity}× ${ITEM_CATALOG[reward.itemId]?.name ?? reward.itemId} → Garden Storage`;
   if (reward.type === "item") {
     const label = `${reward.quantity}× ${reward.item?.name ?? ITEM_CATALOG[reward.itemId]?.name ?? reward.itemId}`;
     return reward.containedItem && reward.containedQuantity

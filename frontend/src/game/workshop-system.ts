@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { audioEngine } from "@/src/audio/audioEngine";
 
 import { CURRENCY_KEY, COPPER_PER_SILVER, loadCurrencyCopper, notifyCurrencyChanged } from "@/src/game/currency-system";
 import { RUPERT_MORTAR_RECIPE_DIALOG_SEEN_KEY } from "@/src/game/cooking-system";
@@ -76,6 +77,7 @@ export async function placeWorkshopOrder(): Promise<{ ok: boolean; state: Worksh
   const currency = availability.currencyCopper - WORKSHOP_REQUIREMENTS.copper;
   await AsyncStorage.multiSet([[SHARED_RESOURCES_KEY, JSON.stringify(resources)], [CURRENCY_KEY, String(currency)], [WORKSHOP_STATE_KEY, JSON.stringify(next)]]);
   notifyCurrencyChanged(currency);
+  audioEngine.playSoundEffect("losemoney", { maxDurationMs: 2200 });
   return { ok: true, state: next, availability: { resources, currencyCopper: currency, canPlace: false } };
 }
 

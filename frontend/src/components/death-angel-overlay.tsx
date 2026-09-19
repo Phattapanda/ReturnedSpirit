@@ -8,14 +8,15 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KARMA_TAVERN_RETURN_COST, nextRunBonusCost, REPEAT_FIGHT_KP_COST } from "@/src/game/death-angel-system";
 import { PLAYER_AVATAR_KEY, normalizePlayerAvatarId, type PlayerAvatarId } from "@/src/game/player-avatar";
 import type { NextRunBonuses, NextRunFreeItem } from "@/src/game/next-run";
+import { PLAYER_STATS_KEY, normalizePlayerStats } from "@/src/game/player-stats";
 
 const MEETING_DEATH_VIDEO = require("../../assets/video/meeting_death.mp4");
 const REBIRTH_VIDEO = require("../../assets/video/rebirth.mp4");
 const MEETING_DEATH_BACKGROUND = require("../../assets/images/meeting_death.png");
 const DEATH_AVATARS = {
-  1: require("../../assets/images/avatar1_death.png"),
-  2: require("../../assets/images/avatar2_death.png"),
-  3: require("../../assets/images/avatar3_death.png"),
+  1: require("../../assets/images/avatar1_death.jpeg"),
+  2: require("../../assets/images/avatar2_death.jpeg"),
+  3: require("../../assets/images/avatar3_death.jpeg"),
 } as const;
 const AVATAR_CHOICES = {
   1: require("../../assets/images/avatar1_normal.png"),
@@ -51,6 +52,7 @@ export default function DeathAngelOverlay({ visible, karmaPoints, busy = false, 
   const [phase, setPhaseState] = useState<DeathPhase>("death");
   const [avatarId, setAvatarId] = useState<PlayerAvatarId>(1);
   const [avatarReady, setAvatarReady] = useState(false);
+  const [runBaseUpgrades, setRunBaseUpgrades] = useState(0);
   const [showNewRun, setShowNewRun] = useState(false);
   const [avatarCommitted, setAvatarCommitted] = useState(false);
   const [bonuses, setBonuses] = useState<NextRunBonuses>({ copper: 0, freeItem: null });
@@ -100,8 +102,9 @@ export default function DeathAngelOverlay({ visible, karmaPoints, busy = false, 
     }
 
     let mounted = true;
-    void AsyncStorage.getItem(PLAYER_AVATAR_KEY).then((rawAvatar) => {
+    void Promise.all([AsyncStorage.getItem(PLAYER_AVATAR_KEY), AsyncStorage.getItem(PLAYER_STATS_KEY)]).then(([rawAvatar, rawStats]) => {
       if (!mounted) return;
+      setRunBaseUpgrades(normalizePlayerStats(rawStats ? JSON.parse(rawStats) : null).runBaseUpgrades);
       setAvatarId(normalizePlayerAvatarId(rawAvatar));
       setAvatarReady(true);
       timerRef.current = setTimeout(() => {
@@ -143,12 +146,12 @@ export default function DeathAngelOverlay({ visible, karmaPoints, busy = false, 
 
   return <View style={styles.overlay}>
     {phase === "death" && avatarReady ? <Animated.View style={[styles.deathScene, { paddingTop: insets.top + 22, paddingBottom: insets.bottom + 22, opacity: deathOpacity }]}>
-      <Text style={styles.death}>YOU DIED.</Text>
-      <Image source={DEATH_AVATARS[avatarId]} style={styles.deathPortrait} resizeMode="contain" />
+      <Image source={DEATH_AVATARS[avatarId]} style={StyleSheet.absoluteFill} resizeMode="contain" />
+      <Text style={[styles.death, { position: "absolute", bottom: insets.bottom + 28, left: 14, right: 14, textShadowColor: "#000", textShadowRadius: 8 }]}>YOU DIED</Text>
     </Animated.View> : null}
 
     {phase === "meeting_video" || phase === "karma" ? <>
-      <Image source={MEETING_DEATH_BACKGROUND} style={StyleSheet.absoluteFill} resizeMode="cover" />
+      <Image source={MEETING_DEATH_BACKGROUND} style={StyleSheet.absoluteFill} resizeMode="contain" />
       {phase === "meeting_video" ? <VideoView player={meetingPlayer} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} /> : null}
       {phase === "karma" ? <View style={styles.karmaShade} /> : null}
     </> : null}
@@ -169,7 +172,7 @@ export default function DeathAngelOverlay({ visible, karmaPoints, busy = false, 
         </TouchableOpacity>
       </View> : <View style={styles.optionsPanel}>
         <Text style={styles.optionsTitle}>Blessings for the next run</Text>
-        <Option selected={!!bonuses.betterValues} label="Better starting values" cost="10 KP · +10 Maximum Stamina, +5 Maximum Life" onPress={() => toggle("betterValues")} />
+        {runBaseUpgrades >= 10 ? <Text style={styles.cost}>Better starting values: Maximum reached.</Text> : <Option selected={!!bonuses.betterValues} label="Better starting values" cost={`10 KP · ${100 + (runBaseUpgrades + 1) * 10} Maximum Stamina, ${30 + (runBaseUpgrades + 1) * 5} Maximum Life`} onPress={() => toggle("betterValues")} />}
         <Option selected={!!bonuses.growthPoints} label="30 Growth Points" cost="10 KP" onPress={() => toggle("growthPoints")} />
         <Option selected={!!bonuses.skipRupertTutorials} label="Skip Rupert’s Tutorials" cost="10 KP · Unlock basic tavern features from Day 1" onPress={() => toggle("skipRupertTutorials")} />
         <Option selected={bonuses.copper === 100} label="Start with 1 Silver Coin" cost="5 KP · 1 Silver Coin" onPress={() => setBonuses((current) => ({ ...current, copper: current.copper === 100 ? 0 : 100 }))} />

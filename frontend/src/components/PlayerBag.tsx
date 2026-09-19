@@ -58,8 +58,11 @@ import { potionBuffPotency, potionRecoveryBonus } from "@/src/game/potion-effect
 import { useKitchenRuntime } from "@/src/game/kitchen-runtime-context";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { getEquipmentKind, saveEquippedBag, toggleEquippedItem } from "@/src/game/equipment-system";
+import { readRecipeItem } from "@/src/game/recipe-item";
+import RecipeDiscoveryAnimation from "@/src/components/recipe-discovery-animation";
 
 const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
+  recipe: require("../../assets/images/recipe.png"),
   bag_herb:    require("../../assets/images/bag_herb.png"),
   bag_carrot:  require("../../assets/images/bag_carrot.png"),
   bag_onion:   require("../../assets/images/bag_onion.png"),
@@ -236,11 +239,12 @@ type Props = {
   onLifeUpdated?: (life: number) => void;
   externalUseItemIds?: readonly string[];
   onUseItem?: (slotIdx: number, item: BagItem) => void | Promise<void>;
+  onRecipeRead?: (ids: string[]) => void;
 };
 
 export default function PlayerBag({
   bag, visible, context, dayIdx, onClose, onTransferItem, onDiscardItem, onShowThoughtBubble,
-  onBagUpdated, onStatsUpdated, onStaminaUpdated, onLifeUpdated, externalUseItemIds, onUseItem,
+  onBagUpdated, onStatsUpdated, onStaminaUpdated, onLifeUpdated, externalUseItemIds, onUseItem, onRecipeRead,
 }: Props) {
   const { setManagedTimeout: setTimeout } = useManagedTimers();
   const { width: W } = useWindowDimensions();
@@ -248,6 +252,9 @@ export default function PlayerBag({
   const { refreshKitchen } = useKitchenRuntime();
   const audioManager = useAudioManager();
   const [infoItem, setInfoItem] = useState<BagItem | null>(null);
+  const [recipeNotice, setRecipeNotice] = useState<string | null>(null);
+  const [readDiscovery, setReadDiscovery] = useState<{ name: string; outputId: string } | null>(null);
+  const recipeReadBusy = useRef(false);
   const [infoSlotIndex, setInfoSlotIndex] = useState<number | null>(null);
   const [discardTarget, setDiscardTarget] = useState<{ slotIdx: number; item: BagItem } | null>(null);
   const [actionTarget, setActionTarget] = useState<{ slotIdx: number; item: BagItem } | null>(null);
@@ -296,6 +303,23 @@ export default function PlayerBag({
     longPressDidFire.current = true;
     setInfoItem(item);
     setInfoSlotIndex(slotIdx);
+    setRecipeNotice(null);
+  }
+
+  async function handleReadRecipe() {
+    if (infoSlotIndex === null || recipeReadBusy.current || readDiscovery) return;
+    recipeReadBusy.current = true;
+    try {
+      const result = await readRecipeItem(PLAYER_BAG_KEY, infoSlotIndex);
+      if (!result) return;
+      if (result.allKnown) { setRecipeNotice("You know all possible recipes"); return; }
+      if (result.bag) { setCarrotBagOverride(result.bag); onBagUpdated?.(result.bag); }
+      onRecipeRead?.(result.ids);
+      setInfoItem(null);
+      setReadDiscovery(result.recipe);
+      setTimeout(() => setReadDiscovery(null), 2000);
+    } catch { setRecipeNotice("I can't read this right now."); }
+    finally { recipeReadBusy.current = false; }
   }
 
   async function handleToggleEquipment() {
@@ -544,6 +568,12 @@ export default function PlayerBag({
                   </Text>
                 )}
                 <Text style={styles.infoDesc}>{ITEM_CATALOG[infoItem.id]?.description ?? ""}</Text>
+                {infoItem.id === "recipe" && <>
+                  {recipeNotice && <Text style={styles.infoDesc}>{recipeNotice}</Text>}
+                  <TouchableOpacity style={styles.equipButton} onPress={() => { void handleReadRecipe(); }}>
+                    <Text style={styles.equipButtonText}>Read recipe</Text>
+                  </TouchableOpacity>
+                </>}
                 {(() => {
                   const durability = getItemDurability(infoItem);
                   return durability ? <Text style={styles.infoContents}>Durability: {durability.current}/{durability.maximum}</Text> : null;
@@ -690,6 +720,7 @@ export default function PlayerBag({
           </TouchableOpacity>
         </Modal>
       )}
+      {readDiscovery && <RecipeDiscoveryAnimation name={readDiscovery.name} image={ITEM_IMAGES[readDiscovery.outputId]} />}
     </Modal>
   );
 }

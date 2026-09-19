@@ -75,6 +75,7 @@ import {
   RUPERT_MORTAR_RECIPE_DIALOG_SEEN_KEY,
 } from "@/src/game/cooking-system";
 import { planKitchenItemToBag } from "@/src/game/kitchen-bag-transfer";
+import { readRecipeItem, rollRecipeDrops } from "@/src/game/recipe-item";
 import {
   PLAYER_STATS_KEY,
   DEFAULT_PLAYER_STATS,
@@ -87,7 +88,7 @@ import {
 } from "@/src/game/player-stats";
 import { applyTemporaryEffect } from "@/src/game/status-effect-system";
 import { potionBuffPotency } from "@/src/game/potion-effectiveness";
-import { loadLogbook, type LogEntry, LOGBOOK_KEY } from "@/src/game/logbook";
+import { loadLogbook, limitLogbook, type LogEntry, LOGBOOK_KEY } from "@/src/game/logbook";
 import { COPPER_PER_SILVER, loadCurrencyCopper } from "@/src/game/currency-system";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
 import { completeRupertAlchemyIntro } from "@/src/game/rupert-alchemy-intro";
@@ -279,9 +280,8 @@ function mergeLogbookEntries(current: LogEntry[], stored: LogEntry[]): LogEntry[
   [...current, ...stored].forEach((entry) => {
     if (!merged.has(entry.id)) merged.set(entry.id, entry);
   });
-  return [...merged.values()]
-    .sort((left, right) => left.seq - right.seq)
-    .map((entry, seq) => ({ ...entry, seq }));
+  return limitLogbook([...merged.values()]
+    .sort((left, right) => left.seq - right.seq));
 }
 
 // ─── Location data ────────────────────────────────────────────────────────────
@@ -354,6 +354,7 @@ const IMG = {
 
 // Item image map for kitchen table items (non-soup items unpacked from bag)
 const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
+  recipe: require("../assets/images/recipe.png"),
   bag_herb:    require("../assets/images/bag_herb.png"),
   bag_carrot:  require("../assets/images/bag_carrot.png"),
   bag_onion:   require("../assets/images/bag_onion.png"),
@@ -2290,8 +2291,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     const day = dayNames[dayIdxRef.current] ?? "MO";
     setLogbook(prev => {
       if (prev.some(e => e.id === id)) return prev; // already logged
-      const entry: LogEntry = { id, speaker, text, day, location: "kitchen", seq: prev.length };
-      const updated = [...prev, entry];
+      const entry: LogEntry = { id, speaker, text, day, location: "kitchen", seq: (prev.at(-1)?.seq ?? -1) + 1 };
+      const updated = limitLogbook([...prev, entry]);
       logbookWriteQueueRef.current = logbookWriteQueueRef.current
         .catch(() => undefined)
         .then(() => AsyncStorage.setItem(LOGBOOK_KEY, JSON.stringify(updated)))
@@ -4325,6 +4326,25 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     });
   }
 
+  async function handleReadTableRecipe() {
+    if (craftingLocked.current) return;
+    setCraftingInteractionLocked(true);
+    try {
+      const slot = tableItemsRef.current.findIndex((item) => item?.id === "recipe");
+      if (slot < 0) return;
+      const result = await readRecipeItem(KITCHEN_TABLE_KEY, slot);
+      if (!result) return;
+      setKitchenDetailItem(null);
+      if (result.allKnown) { showPlayerBubble("You know all possible recipes"); return; }
+      tableItemsRef.current = result.slots;
+      setTableItems(result.slots);
+      discoveredRecipeIdsRef.current = result.ids;
+      setDiscoveredRecipeIds(result.ids);
+      showNewRecipePresentation(result.recipe);
+    } catch { setKitchenDetailItem(null); showPlayerBubble("I can't read this right now."); }
+    finally { setCraftingInteractionLocked(false); }
+  }
+
   async function handleCraft() {
     if (craftingLocked.current) return;
     if (!craftResult) return;
@@ -4356,6 +4376,12 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     }
 
     const outputs = createRecipeOutputs(recipe, craftCount, getContainerStackLimit("kitchenTable"), getEffectiveLuck(playerStats), currentTool, playerStats.effectiveness);
+    let recipeDrops = rollRecipeDrops(recipe, craftCount);
+    while (recipeDrops > 0) {
+      const quantity = Math.min(recipeDrops, getContainerStackLimit("kitchenTable"));
+      outputs.push(createCraftedItem("recipe", quantity));
+      recipeDrops -= quantity;
+    }
     const newTable = tableItemsRef.current.slice();
     const targetSlots: number[] = [];
     for (let i = 0; i < newTable.length && targetSlots.length < outputs.length; i++) {
@@ -5462,8 +5488,8 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
       />
 
       {/* ── Menu Modal */}
-      <Modal visible={showMenu} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
+      <Modal visible={showMenu || showLogbook} transparent animationType="fade" onRequestClose={() => { setShowMenu(false); setShowLogbook(false); }}>
+        {showMenu && <View style={styles.modalOverlay}>
           <View style={styles.menuPanel}>
             <Text style={styles.panelTitle}>Menu</Text>
             <View style={styles.divider} />
@@ -5488,20 +5514,10 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
               </TouchableOpacity>
             ))}
           </View>
-        </View>
-      </Modal>
+        </View>}
 
-      {/* ── Logbook Modal */}
-      <Modal
-        visible={showLogbook}
-        transparent
-        animationType="fade"
-        onShow={() => {
-          requestAnimationFrame(() => logbookScrollRef.current?.scrollToEnd({ animated: false }));
-        }}
-      >
         {showLogbook && (<View style={styles.modalOverlay}>
-          <View style={[styles.menuPanel, { maxHeight: "80%", minWidth: W * 0.88 }]}>
+          <View style={[styles.menuPanel, { height: "80%", width: W * 0.88 }]}>
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <Text style={styles.panelTitle}>Logbook</Text>
               <TouchableOpacity onPress={() => setShowLogbook(false)}>
@@ -5798,6 +5814,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
               <Text style={styles.closeBtnText}>Close</Text>
             </TouchableOpacity>
           </View>
+          {upgradeMessage && <View pointerEvents="none" style={styles.upgradeFloatingWrap}><Text style={styles.upgradeFloatingText}>{upgradeMessage}</Text></View>}
         </View>
       </Modal>
 
@@ -5880,6 +5897,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
         bag={playerBag}
         visible={bagOpen}
         context="kitchen"
+        onRecipeRead={(ids) => { discoveredRecipeIdsRef.current = ids; setDiscoveredRecipeIds(ids); }}
         dayIdx={dayIdx}
         onClose={() => setBagOpen(false)}
         onTransferItem={(bagSlotIdx, item) => handleBagToTable(bagSlotIdx, item)}
@@ -5945,6 +5963,9 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
                   <Text style={styles.detailContents}>Contains: {kitchenDetailItem.containedQuantity}× {kitchenDetailItem.containedItem}</Text>
                 )}
                 <Text style={styles.detailDesc}>{ITEM_CATALOG[kitchenDetailItem.id]?.description ?? ""}</Text>
+                {kitchenDetailItem.id === "recipe" && <TouchableOpacity style={styles.detailClose} onPress={() => { void handleReadTableRecipe(); }}>
+                  <Text style={styles.detailName}>Read recipe</Text>
+                </TouchableOpacity>}
                 {(() => {
                   const durability = getItemDurability(kitchenDetailItem);
                   return durability ? <Text style={styles.detailContents}>Durability: {durability.current}/{durability.maximum}</Text> : null;
@@ -6017,7 +6038,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
           </Animated.View>
         </View>
       )}
-      {upgradeMessage && <View pointerEvents="none" style={styles.upgradeFloatingWrap}><Text style={styles.upgradeFloatingText}>{upgradeMessage}</Text></View>}
+      {!showUpgrades && upgradeMessage && <View pointerEvents="none" style={styles.upgradeFloatingWrap}><Text style={styles.upgradeFloatingText}>{upgradeMessage}</Text></View>}
 
       {/* ── Player thought bubble */}
       {playerBubble && (() => {

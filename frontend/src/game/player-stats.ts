@@ -11,6 +11,7 @@ import {
 // ─── Player Stats & Growth Points ─────────────────────────────────────────────
 
 export type PlayerStats = {
+  runBaseUpgrades: number;
   level: number;
   maximumStamina: number;
   maximumLife: number;
@@ -27,6 +28,7 @@ export type PlayerStats = {
 export const PLAYER_STATS_KEY = "@game:player_stats";
 
 export const DEFAULT_PLAYER_STATS: PlayerStats = {
+  runBaseUpgrades: 0,
   level: 1,
   maximumStamina: 100,
   maximumLife: 30,
@@ -60,6 +62,10 @@ export function normalizePlayerStats(raw: unknown): PlayerStats {
     activeStaminaBuffs?: { energyDrinkDays?: unknown; energyPillDays?: unknown };
   };
   return {
+    // Older saves did not track purchases; Stamina preserves the existing
+    // starting bonus without mistaking Life bought with Growth Points for it.
+    runBaseUpgrades: Math.min(10, normalizedInteger(candidate.runBaseUpgrades,
+      Math.max(0, Math.floor((Number(candidate.maximumStamina) - 100) / 10)) || 0)),
     level: normalizedInteger(candidate.level, 1, 1),
     maximumStamina: normalizedInteger(candidate.maximumStamina, DEFAULT_PLAYER_STATS.maximumStamina, 1),
     maximumLife: normalizedInteger(candidate.maximumLife, DEFAULT_PLAYER_STATS.maximumLife, 1),

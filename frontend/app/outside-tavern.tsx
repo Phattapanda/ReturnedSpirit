@@ -1,7 +1,7 @@
 import React, { useCallback, useRef, useState } from "react";
 import { Animated, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -70,6 +70,8 @@ export default function OutsideTavernScreen() {
     clearManagedTimeout: clearTimeout,
   } = useManagedTimers();
   const router = useRouter();
+  const { storedQuantity } = useLocalSearchParams<{ storedQuantity?: string }>();
+  const storageNoticeShown = useRef(false);
   const insets = useSafeAreaInsets();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const audioManager = useAudioManager();
@@ -84,7 +86,19 @@ export default function OutsideTavernScreen() {
   const [merchantAvailable, setMerchantAvailable] = useState(false);
   const [merchantShop, setMerchantShop] = useState<MerchantShopState | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  React.useEffect(() => {
+    if (!message) return;
+    const timer = setTimeout(() => setMessage(null), 3000);
+    return () => clearTimeout(timer);
+  }, [message, setTimeout, clearTimeout]);
   const [floatingMessage, setFloatingMessage] = useState<string | null>(null);
+  React.useEffect(() => {
+    if (storageNoticeShown.current || !(Number(storedQuantity) > 0)) return;
+    storageNoticeShown.current = true;
+    setFloatingMessage(`${storedQuantity} materials and garden supplies stored in Garden Storage.`);
+    floatingMessageTimer.current = setTimeout(() => setFloatingMessage(null), 3500);
+    router.setParams({ storedQuantity: undefined });
+  }, [storedQuantity, router, setTimeout]);
   const [thought, setThought] = useState<string | null>(null);
   const [headerRefreshKey, setHeaderRefreshKey] = useState(0);
   const [crateDeliveryVisible, setCrateDeliveryVisible] = useState(false);
@@ -356,7 +370,6 @@ export default function OutsideTavernScreen() {
         })}
         <TouchableOpacity style={styles.backButton} onPress={() => chooseView("menu")}><Text style={styles.backText}>Go Back</Text></TouchableOpacity>
       </View>}
-      {message && <Text style={styles.message}>{message}</Text>}
     </ScrollView>
     <Modal visible={forestTravelConfirmationMode !== null} transparent animationType="fade" onRequestClose={() => { if (!forestTravelBusy) setForestTravelConfirmationMode(null); }}>
       <View style={styles.warningBackdrop}>
@@ -375,7 +388,7 @@ export default function OutsideTavernScreen() {
       </View>
     </Modal>
     {thought && <PortraitBubble anchorX={70} screenWidth={screenWidth} text={thought} top={portraitBubbleTop(portraitBottom || headerHeight + 108)} variant="thought" />}
-    {floatingMessage && <View pointerEvents="none" style={styles.floatingMessageWrap}><Text style={styles.floatingMessage}>{floatingMessage}</Text></View>}
+    {(floatingMessage || message) && <View pointerEvents="none" style={styles.floatingMessageWrap}><Text style={styles.floatingMessage}>{floatingMessage || message}</Text></View>}
     {crateDeliveryVisible && (
       <View pointerEvents="none" style={StyleSheet.absoluteFill}>
         <Animated.Image

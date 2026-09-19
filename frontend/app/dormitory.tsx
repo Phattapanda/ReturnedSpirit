@@ -1275,11 +1275,9 @@ export default function DormitoryScreen() {
                   />
                 ))
               )}
-              {upgradeMsg ? (
-                <Text style={styles.upgradeMsg}>{upgradeMsg}</Text>
-              ) : null}
             </ScrollView>
           </View>
+          {upgradeMsg && <View pointerEvents="none" style={styles.upgradeMessageOverlay}><Text style={styles.upgradeMsg}>{upgradeMsg}</Text></View>}
         </View>
       </Modal>
 
@@ -1641,7 +1639,8 @@ const styles = StyleSheet.create({
   },
   divider: { height: 1, backgroundColor: "rgba(196,148,58,0.22)", marginVertical: 10 },
   noUpgradesText: { color: "rgba(240,232,213,0.45)", fontStyle: "italic", fontSize: 14, textAlign: "center", marginVertical: 16 },
-  upgradeMsg:     { color: "#C4943A", fontSize: 13, fontStyle: "italic", textAlign: "center", marginTop: 10 },
+  upgradeMessageOverlay: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", paddingHorizontal: 28, zIndex: 1000 },
+  upgradeMsg: { color: "#FFF4DC", fontFamily: "Oldenburg", fontSize: 14, textAlign: "center", backgroundColor: "rgba(18,9,2,0.95)", borderWidth: 1, borderColor: "#C4943A", borderRadius: 12, paddingHorizontal: 18, paddingVertical: 12 },
 
   upgradeRow: {
     paddingVertical: 14, paddingHorizontal: 14,

@@ -48,6 +48,7 @@ const SUPPORTER_IMAGES: Record<SupporterId, ImageSourcePropType> = {
   cleric: require("../assets/images/porter_cleric.png"), botanist: require("../assets/images/porter_botanist.png"),
 };
 const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
+  recipe: require("../assets/images/recipe.png"),
   potato: require("../assets/images/potato.png"), carrot: require("../assets/images/carrot.png"), onion: require("../assets/images/onion.png"),
   tomato: require("../assets/images/tomato.png"), cucumber: require("../assets/images/cucumber.png"), lettuce: require("../assets/images/lettuce.png"),
   spinach: require("../assets/images/spinach.png"),
@@ -214,6 +215,11 @@ function merchantGuildIntroductionLines(
 export default function NextCityScreen() {
   const router = useRouter(); const insets = useSafeAreaInsets(); const audio = useAudioManager(); const params = useLocalSearchParams<{ returnTo?: string; arrival?: string }>();
   const [view, setView] = useState<ViewId>("city"); const [message, setMessage] = useState<string | null>(null); const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!message) return;
+    const timer = setTimeout(() => setMessage(null), 3000);
+    return () => clearTimeout(timer);
+  }, [message]);
   const [floatingMessage, setFloatingMessage] = useState<string | null>(null);
   const floatingMessageTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shopActionQueue = useRef<Promise<void>>(Promise.resolve());
@@ -330,9 +336,9 @@ export default function NextCityScreen() {
     if (busy) return;
     setBusy(true);
     try {
-      await storePlayerBagMaterialsForTavernReturn();
+      const stored = await storePlayerBagMaterialsForTavernReturn();
       audio.playSoundEffect("footstep", { maxDurationMs: 2000 });
-      router.replace({ pathname: "/outside-tavern", params: { returnTo: params.returnTo ?? "kitchen" } });
+      router.replace({ pathname: "/outside-tavern", params: { returnTo: params.returnTo ?? "kitchen", storedQuantity: String(stored.storedQuantity) } });
     } catch {
       setMessage("The materials could not be stored. Please try again.");
       setBusy(false);
@@ -742,7 +748,6 @@ export default function NextCityScreen() {
           </TouchableOpacity>
         )}
         {thought && <Text selectable style={styles.thought}>{thought}</Text>}
-        {message && <Text selectable style={styles.message}>{message}</Text>}
       </ScrollView>
       <Modal visible={workshopOrderOpen} transparent animationType="fade" onRequestClose={() => setWorkshopOrderOpen(false)}>
         <View style={styles.orderOverlay}><View style={styles.orderPanel}>
@@ -760,7 +765,7 @@ export default function NextCityScreen() {
         onContinue={() => { void advanceArrivalDialog(); }}
         onSkip={() => { if (arrivalDialogIndex === arrivalLines.length - 1) void advanceArrivalDialog(); else setArrivalDialogIndex(arrivalLines.length - 1); }}
       />
-      {floatingMessage && <View pointerEvents="none" style={styles.floatingMessageWrap}><Text selectable style={styles.floatingMessage}>{floatingMessage}</Text></View>}
+      {(floatingMessage || message) && <View pointerEvents="none" style={styles.floatingMessageWrap}><Text selectable style={styles.floatingMessage}>{floatingMessage || message}</Text></View>}
       <StoryDialogOverlay
         visible={guildDialogIndex !== null}
         line={guildDialogIndex === null ? null : guildLines[guildDialogIndex] ?? null}
