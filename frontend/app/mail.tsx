@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, PanResponder, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Alert, Animated, PanResponder, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -22,6 +22,7 @@ import {
   type MailboxState,
 } from "@/src/game/mailbox-system";
 import { loadCityState } from "@/src/game/city-system";
+import { UI_NOTIFICATION_DURATION_MS } from "@/src/ui/timings";
 
 type MailboxView = "inbox" | "send";
 
@@ -59,7 +60,13 @@ function senderIcon(kind: MailSenderKind): React.ComponentProps<typeof Ionicons>
   return "mail-outline";
 }
 
-function SwipeToDelete({ enabled, onDelete, children }: { enabled: boolean; onDelete: () => void; children: React.ReactNode }) {
+function SwipeToDelete({ enabled, protectedMessage = false, onProtectedDelete, onDelete, children }: {
+  enabled: boolean;
+  protectedMessage?: boolean;
+  onProtectedDelete?: () => void;
+  onDelete: () => void;
+  children: React.ReactNode;
+}) {
   const translateX = useRef(new Animated.Value(0)).current;
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pending = useRef(false);
@@ -73,13 +80,18 @@ function SwipeToDelete({ enabled, onDelete, children }: { enabled: boolean; onDe
 
   const beginDelete = useCallback(() => {
     if (!enabled || pending.current) return;
+    if (protectedMessage) {
+      onProtectedDelete?.();
+      restore();
+      return;
+    }
     pending.current = true;
     Animated.spring(translateX, { toValue: -112, useNativeDriver: true, speed: 25, bounciness: 2 }).start();
     timer.current = setTimeout(() => {
       timer.current = null;
       Animated.timing(translateX, { toValue: -520, duration: 230, useNativeDriver: true }).start(onDelete);
     }, 1400);
-  }, [enabled, onDelete, translateX]);
+  }, [enabled, onDelete, onProtectedDelete, protectedMessage, restore, translateX]);
 
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
   useEffect(() => { if (!enabled) restore(); }, [enabled, restore]);
@@ -116,6 +128,12 @@ export default function MailScreen() {
   const [busy, setBusy] = useState(false);
   const [headerRefreshKey, setHeaderRefreshKey] = useState(0);
   const claimLock = useRef(false);
+
+  useEffect(() => {
+    if (!feedback) return;
+    const timer = setTimeout(() => setFeedback(null), UI_NOTIFICATION_DURATION_MS);
+    return () => clearTimeout(timer);
+  }, [feedback]);
 
   useFocusEffect(useCallback(() => {
     let active = true;
@@ -285,26 +303,39 @@ export default function MailScreen() {
                 ) : <>
                   {messages.map((message) => {
                   const selected = selectedMessageId === message.id;
+                  const claimable = message.rewards.length > 0 && !message.claimed;
+                  const dimReadHeader = message.read && !claimable;
                   return (
-                    <SwipeToDelete key={message.id} enabled={message.read && (message.claimed || message.rewards.length === 0)} onDelete={() => { void deleteMessage(message.id); }}>
+                    <SwipeToDelete
+                      key={message.id}
+                      enabled={message.read || claimable}
+                      protectedMessage={claimable}
+                      onProtectedDelete={() => Alert.alert(
+                        "Unclaimed package",
+                        "This mail still contains unclaimed rewards. Claim the package before deleting the message.",
+                        [{ text: "OK" }],
+                      )}
+                      onDelete={() => { void deleteMessage(message.id); }}
+                    >
                     <View style={[
                       styles.messageCard,
                       !message.read && styles.messageCardUnread,
                       message.read && styles.messageCardRead,
                       message.claimed && styles.messageCardClaimed,
+                      claimable && styles.messageCardClaimable,
                     ]}>
                       <TouchableOpacity style={styles.messageHeader} onPress={() => openMessage(message.id)} activeOpacity={0.8}>
                         <View style={styles.senderIcon}>
-                          <Ionicons name={senderIcon(message.senderKind)} size={22} color={message.read ? "#8E877A" : "#E7C77A"} />
+                          <Ionicons name={senderIcon(message.senderKind)} size={22} color={dimReadHeader ? "#8E877A" : "#F2D78E"} />
                         </View>
                         <View style={styles.messageHeaderText}>
                           <View style={styles.senderRow}>
-                            <Text style={[styles.sender, message.read && styles.messageHeaderTextRead]}>{message.sender}</Text>
+                            <Text style={[styles.sender, dimReadHeader && styles.messageHeaderTextRead]}>{message.sender}</Text>
                             {!message.read && <View style={styles.unreadDot} />}
                           </View>
-                          <Text style={[styles.subject, message.read && styles.messageHeaderTextRead]}>{message.subject}</Text>
+                          <Text style={[styles.subject, dimReadHeader && styles.messageHeaderTextRead]}>{message.subject}</Text>
                         </View>
-                        <Ionicons name={selected ? "chevron-up" : "chevron-down"} size={20} color={message.read ? "#81796C" : "#C4943A"} />
+                        <Ionicons name={selected ? "chevron-up" : "chevron-down"} size={20} color={dimReadHeader ? "#81796C" : "#D6A33B"} />
                       </TouchableOpacity>
                       {selected && (
                         <View style={styles.messageBody}>
@@ -385,8 +416,13 @@ export default function MailScreen() {
           </>
         )}
 
-        {feedback && <Text selectable style={styles.feedback}>{feedback}</Text>}
       </ScrollView>
+
+      {feedback && (
+        <View pointerEvents="none" style={styles.feedbackOverlay}>
+          <Text selectable style={styles.feedbackPopup}>{feedback}</Text>
+        </View>
+      )}
 
       <View style={{ paddingBottom: insets.bottom, backgroundColor: "rgba(10,5,1,0.98)" }}>
         <TavernLocationBar current="mail" mailboxUnread={unreadCount > 0} />
@@ -442,6 +478,7 @@ const styles = StyleSheet.create({
   messageCardUnread: { borderColor: "rgba(231,199,122,0.72)", backgroundColor: "rgba(68,39,9,0.80)" },
   messageCardRead: { borderColor: "rgba(150,145,135,0.24)", backgroundColor: "rgba(36,32,27,0.72)" },
   messageCardClaimed: { borderColor: "rgba(128,124,117,0.18)", backgroundColor: "rgba(29,27,24,0.66)", opacity: 0.76 },
+  messageCardClaimable: { borderColor: "rgba(242,215,142,0.88)", backgroundColor: "rgba(79,48,13,0.92)" },
   swipeClip: { borderRadius: 13, overflow: "hidden" },
   swipeHint: { color: "rgba(240,232,213,0.48)", fontSize: 11, textAlign: "center", paddingTop: 4 },
   messageHeader: { minHeight: 68, flexDirection: "row", alignItems: "center", gap: 10, padding: 10 },
@@ -488,8 +525,24 @@ const styles = StyleSheet.create({
     borderWidth: 1.5, borderColor: "#D6A33B", backgroundColor: "rgba(112,73,18,0.92)",
   },
   sendButtonText: { color: "#FFF4D6", fontFamily: "Oldenburg", fontSize: 13 },
-  feedback: {
-    color: "#F5E6C8", backgroundColor: "rgba(54,28,6,0.96)", borderRadius: 11, padding: 11,
-    textAlign: "center", fontSize: 12, lineHeight: 17,
+  feedbackOverlay: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 5000,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 28,
+  },
+  feedbackPopup: {
+    color: "#FFF4DC",
+    fontFamily: "Oldenburg",
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
+    backgroundColor: "rgba(18,9,2,0.95)",
+    borderWidth: 1,
+    borderColor: "#C4943A",
+    borderRadius: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
   },
 });

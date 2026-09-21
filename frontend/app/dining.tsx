@@ -78,6 +78,7 @@ import {
   evaluateGuestMealFavor,
   getMerchantExchangeOffer,
   loadGuestState,
+  markMerchantDiningIntroductionSeen,
   markGuestServed as persistGuestServed,
   setActiveGuest,
   setCurrentGuestExchangeOffer,
@@ -268,6 +269,23 @@ function serviceReaction(): TutorialLine[] {
   ];
 }
 
+function merchantIntroduction(playerName: string): TutorialLine[] {
+  return [
+    { speaker: "Merchant", portrait: "merchant", text: '"Good morning."' },
+    { speaker: "Rupert", portrait: "rupert", text: '"Good morning, good to see you."' },
+    { speaker: "Merchant", portrait: "merchant", text: '"Things look a bit different here than usual."' },
+    { speaker: "Rupert", portrait: "rupert_laugh", text: `"I have a guest here, ${playerName}. I suppose things are about to pick up speed here."` },
+    { speaker: playerName, portrait: "player", text: '"Hello."' },
+    { speaker: "Merchant", portrait: "merchant", text: '"Nice to meet you."' },
+    {
+      speaker: "Merchant",
+      portrait: "merchant",
+      text: '"I am a merchant and come by here every fourth day. You are welcome to take a look at the goods in my wagon outside the tavern."',
+      highlightedPhrases: ["every fourth day", "take a look at the goods", "outside the tavern"],
+    },
+  ];
+}
+
 function rupertServingExplanation(playerName: string): TutorialLine[] {
   return [
     { speaker: "Rupert", portrait: "rupert", text: '"We already ate all of the soup."' },
@@ -344,6 +362,8 @@ export default function DiningScreen() {
   const serviceDialogDoneRef = useRef<(() => void) | null>(null);
   const [coachmanIntroLines, setCoachmanIntroLines] = useState<TutorialLine[]>([]);
   const [coachmanIntroIndex, setCoachmanIntroIndex] = useState(0);
+  const [merchantIntroLines, setMerchantIntroLines] = useState<TutorialLine[]>([]);
+  const [merchantIntroIndex, setMerchantIntroIndex] = useState(0);
   const [exploreUnlocked, setExploreUnlocked] = useState(false);
   const [serviceBusy, setServiceBusy] = useState(false);
   const [departingGuestId, setDepartingGuestId] = useState<GuestId | null>(null);
@@ -356,6 +376,7 @@ export default function DiningScreen() {
   const transferScale = useRef(new RNAnimated.Value(1)).current;
   const transferOpacity = useRef(new RNAnimated.Value(0)).current;
   const [transferAboveDialog, setTransferAboveDialog] = useState(false);
+  const rootRef = useRef<View>(null);
   const bagButtonRef = useRef<View>(null);
   const gardenNavButtonRef = useRef<View>(null);
   const currencyTargetRef = useRef<View>(null);
@@ -554,13 +575,22 @@ export default function DiningScreen() {
   ): Promise<GuestServiceSourcePoint> {
     return new Promise((resolve) => {
       const view = ref.current;
-      if (!view) {
+      const root = rootRef.current;
+      if (!view || !root) {
         resolve(fallback);
         return;
       }
-      view.measureInWindow((x, y, width, height) => {
-        resolve(width > 0 && height > 0 ? { x: x + width / 2, y: y + height / 2 } : fallback);
-      });
+      view.measureLayout(
+        root,
+        (x, y, width, height) => {
+          resolve(width > 0 && height > 0 ? { x: x + width / 2, y: y + height / 2 } : fallback);
+        },
+        () => view.measureInWindow((x, y, width, height) => {
+          root.measureInWindow((rootX, rootY) => {
+            resolve(width > 0 && height > 0 ? { x: x + width / 2 - rootX, y: y + height / 2 - rootY } : fallback);
+          });
+        }),
+      );
     });
   }
 
@@ -668,6 +698,11 @@ export default function DiningScreen() {
   function skipCurrentTutorialDialog() {
     if (favorDialogLine) { setFavorDialogLine(null); return; }
     if (serviceDialogLine) { void closeServiceDialog(); return; }
+    if (merchantIntroLine && merchantIntroIndex < merchantIntroLines.length - 1) {
+      setMerchantIntroIndex(merchantIntroLines.length - 1);
+      return;
+    }
+    if (merchantIntroLine) { void advanceMerchantIntroduction(); return; }
     if (coachmanIntroLine && coachmanIntroIndex < coachmanIntroLines.length - 1) {
       setCoachmanIntroIndex(coachmanIntroLines.length - 1);
       return;
@@ -694,8 +729,9 @@ export default function DiningScreen() {
     return IMG.rupert;
   }
 
+  const merchantIntroLine = merchantIntroLines[merchantIntroIndex] ?? null;
   const coachmanIntroLine = coachmanIntroLines[coachmanIntroIndex] ?? null;
-  const currentTutorialLine = favorDialogLine ?? serviceDialogLine ?? coachmanIntroLine ?? tutorialLines[tutorialLineIndex] ?? null;
+  const currentTutorialLine = favorDialogLine ?? serviceDialogLine ?? merchantIntroLine ?? coachmanIntroLine ?? tutorialLines[tutorialLineIndex] ?? null;
   const dialogLine: GuestTutorialDialogLine | null = currentTutorialLine ? {
     speaker: currentTutorialLine.speaker,
     text: currentTutorialLine.text,
@@ -707,7 +743,7 @@ export default function DiningScreen() {
       : currentTutorialLine.portrait === "coachman"
         ? COACHMAN_DIALOG_SCALE
       : currentTutorialLine.portrait === "player"
-        ? getPlayerDialogScale(playerAvatarId)
+        ? getPlayerDialogScale(playerAvatarId, getDialogExpressionForStamina(staminaCurrent))
         : currentTutorialLine.portrait === "rupert" || currentTutorialLine.portrait === "rupert_laugh" || currentTutorialLine.portrait === "rupert_sad"
           ? RUPERT_DIALOG_SCALE
         : 0.8,
@@ -795,6 +831,17 @@ export default function DiningScreen() {
       return () => { active = false; };
     }, [diningLoaded, playerName, tutorialStep]),
   );
+
+  useEffect(() => {
+    if (!diningLoaded || !merchantPresent || !guestTutorialHasReached(tutorialStep, "service_complete") || titheState?.phase !== "idle") return;
+    let active = true;
+    loadGuestState().then((guestState) => {
+      if (!active || guestState.merchantDiningIntroductionSeen) return;
+      setMerchantIntroLines((current) => current.length > 0 ? current : merchantIntroduction(playerName));
+      setMerchantIntroIndex(0);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [diningLoaded, merchantPresent, playerName, titheState?.phase, tutorialStep]);
 
   async function handleBagToMealSlot(bagSlotIndex: number) {
     const plan = planBagItemToMealSlot(playerBag, bagSlotIndex, mealState);
@@ -1376,6 +1423,16 @@ export default function DiningScreen() {
     setCoachmanIntroIndex(0);
   }
 
+  async function advanceMerchantIntroduction() {
+    if (merchantIntroIndex < merchantIntroLines.length - 1) {
+      setMerchantIntroIndex((current) => current + 1);
+      return;
+    }
+    await markMerchantDiningIntroductionSeen();
+    setMerchantIntroLines([]);
+    setMerchantIntroIndex(0);
+  }
+
   async function handleMealSlotTap(slotIndex: number) {
     if (!mealState.slots[slotIndex]) return;
     const next = selectActiveMealSlot(mealState, slotIndex);
@@ -1517,7 +1574,7 @@ export default function DiningScreen() {
 
   return (
     <TavernLocationTransition location="dining">
-    <View style={styles.root}>
+    <View ref={rootRef} collapsable={false} style={styles.root}>
       <SceneBackground source={useDawnBackground ? IMG.dining_dawn : IMG.dining} topOffset={headerH} />
       <View style={[StyleSheet.absoluteFill, { top: headerH }, styles.bgOverlay]} pointerEvents="none" />
 
@@ -1775,6 +1832,8 @@ const locationAction = guestDormitoryBlocked
           ? () => setFavorDialogLine(null)
           : serviceDialogLine
             ? closeServiceDialog
+            : merchantIntroLine
+              ? () => { void advanceMerchantIntroduction(); }
             : coachmanIntroLine
               ? () => { void advanceCoachmanIntroduction(); }
               : advanceTutorialDialog}

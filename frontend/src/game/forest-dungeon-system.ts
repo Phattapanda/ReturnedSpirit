@@ -7,6 +7,7 @@ import {
   normalizeBagItem,
   normalizePlayerBagData,
   planAddToBag,
+  planAddToNextFreeBagSlot,
   removeBagItem,
   type BagItem,
   type PlayerBagData,
@@ -32,8 +33,8 @@ import { FOREST_DIRECT_LOOT, getButcheringDefinition } from "@/src/game/butcheri
 import { queueRupertAlchemyIntroAfterDungeon } from "@/src/game/rupert-alchemy-intro";
 import {
   activeSupporter, activeTempleBlessing, addToSupporterFirst, beginSupporterDungeonRun,
-  beginTempleBlessingExpedition, completeTempleBlessingExpedition, deliverSupporterBagAfterDungeonRun, hasActiveCampQuest,
-  markCampDocumentsFound, recordMonsterDefeat,
+  activeLostItemSearchChance, beginTempleBlessingExpedition, completeTempleBlessingExpedition, deliverGuildProvisionsAtFloor, deliverSupporterBagAfterDungeonRun,
+  hasActiveCampQuest, markCampDocumentsFound, markLostAdventurerItemFound, recordMonsterDefeat,
 } from "@/src/game/city-system";
 
 export const FOREST_DUNGEON_KEY = "@dungeon:forest_entrance";
@@ -305,7 +306,7 @@ export async function loadForestDungeonState(): Promise<ForestDungeonState> {
   const state = normalizeForestDungeonState(raw ? JSON.parse(raw) : null);
   if (!state.floors[String(state.currentFloor)]) state.floors[String(state.currentFloor)] = createFloorState(state.currentFloor);
   const current = state.floors[String(state.currentFloor)];
-  if (current.searchAvailable && !current.searched && await hasActiveCampQuest()) {
+  if (current.searchAvailable && !current.searched && await hasActiveCampQuest(state.currentFloor)) {
     current.searchLocation = "Hunter's Camp";
     current.searchCost = 5;
   }
@@ -500,6 +501,27 @@ export async function searchForestArea(): Promise<DungeonActionResult> {
   runtime.bag = consumeTorchDurability(runtime.bag);
   const nextFloor = { ...floor, searched: true, searchAvailable: false };
   const nextState = { ...state, floors: { ...state.floors, [String(state.currentFloor)]: nextFloor } };
+  const lostItemChance = await activeLostItemSearchChance(state.currentFloor);
+  if (lostItemChance > 0 && Math.random() < lostItemChance) {
+    const item: BagItem = {
+      id: "quest_lost_adventurer_item",
+      itemType: "quest_lost_adventurer_item",
+      name: "Lost Adventurer Item",
+      quantity: 1,
+      attributes: [ITEM_ATTRIBUTE.QUEST_ITEM],
+    };
+    const plan = planAddToNextFreeBagSlot(item, runtime.bag);
+    if (!plan.ok) {
+      nextFloor.message = "I found the lost adventurer's item, but I need one free Player Bag slot to take it." + payment.message;
+      await saveRuntime(nextState, paidLife, stamina, runtime.bag);
+      return { ok: true, state: nextState, message: nextFloor.message, life: paidLife, stamina, bag: runtime.bag };
+    }
+    const bag = { ...runtime.bag, slots: plan.updatedSlots };
+    await markLostAdventurerItemFound();
+    nextFloor.message = "I found the item lost by an adventurer. It went into my Player Bag." + payment.message;
+    await saveRuntime(nextState, paidLife, stamina, bag);
+    return { ok: true, state: nextState, message: nextFloor.message, life: paidLife, stamina, bag };
+  }
   if (Math.random() * 100 >= searchPreview.successChance) {
     nextFloor.message = "I could not find anything useful.";
     nextFloor.message += payment.message;
@@ -507,7 +529,7 @@ export async function searchForestArea(): Promise<DungeonActionResult> {
     return { ok: true, state: nextState, message: nextFloor.message, life: paidLife, stamina, bag: runtime.bag };
   }
 
-  if (floor.searchLocation === "Hunter's Camp" && await hasActiveCampQuest()) {
+  if (floor.searchLocation === "Hunter's Camp" && await hasActiveCampQuest(state.currentFloor)) {
     const item: BagItem = { id: "quest_hunters_documents", itemType: "quest_hunters_documents", name: "Research Documents", quantity: 1, attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] };
     const support = await addToSupporterFirst(item);
     let bag = runtime.bag;
@@ -854,12 +876,15 @@ export async function goForwardInForest(): Promise<DungeonActionResult> {
   if (!state.floors[String(state.currentFloor)]) state.floors[String(state.currentFloor)] = createFloorState(state.currentFloor);
   const entered = currentFloorOf(state);
   runtime.bag = consumeTorchDurability(runtime.bag);
+  const provisionDelivery = await deliverGuildProvisionsAtFloor(runtime.bag, state.currentFloor);
+  runtime.bag = provisionDelivery.bag;
   const supporter = await activeSupporter();
   const life = supporter?.definition.id === "healer" ? Math.min(runtime.stats.maximumLife, payment.life + Math.ceil(runtime.stats.maximumLife * 0.1)) : payment.life;
   if (entered.monster?.phase === "combat") await saveFightSnapshot(state, life, payment.stamina, runtime.bag);
   await saveRuntime(state, life, payment.stamina, runtime.bag);
   const healerMessage = life > payment.life ? ` ${supporter!.definition.name} restores ${life - payment.life} Life.` : "";
-  return { ok: true, state, message: (entered.message ?? `I advance to floor ${state.currentFloor}.`) + payment.message + healerMessage, life, stamina: payment.stamina, bag: runtime.bag };
+  const provisionMessage = provisionDelivery.delivered ? " I leave the Guild provisions at the rest area. The quest is ready to turn in." : "";
+  return { ok: true, state, message: (entered.message ?? `I advance to floor ${state.currentFloor}.`) + payment.message + healerMessage + provisionMessage, life, stamina: payment.stamina, bag: runtime.bag };
 }
 
 export async function collectPendingForestCarcass(): Promise<DungeonActionResult> {

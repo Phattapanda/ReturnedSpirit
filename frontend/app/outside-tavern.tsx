@@ -22,8 +22,9 @@ import { areRegularGuestsUnlockedForDay, loadPostGuestTutorialState } from "@/sr
 import { MERCHANT_STOCK, prepareMerchantShop, purchaseMerchantItem, type MerchantShopState, type MerchantStockId } from "@/src/game/merchant-shop";
 import { finalizeCoachmanEscortDecline, hasCompletedCityRoadEncounter, loadCoachmanEscortState, prepareCoachmanEscortDeparture, reconsiderCoachmanEscort } from "@/src/game/coachman-escort-system";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
-import { QUESTS, isQuestReadyToTurnIn, loadCityState, turnInQuest, type CityState, type QuestId } from "@/src/game/city-system";
+import { QUESTS, getQuestDefinition, isQuestReadyToTurnIn, loadCityState, turnInQuest, type CityState, type QuestId } from "@/src/game/city-system";
 import { loadWorkshopState } from "@/src/game/workshop-system";
+import { UI_NOTIFICATION_DURATION_MS } from "@/src/ui/timings";
 
 const BACKGROUND = require("../assets/images/outsidetavern1.png");
 const COACHMAN = require("../assets/images/coachman.png");
@@ -88,7 +89,7 @@ export default function OutsideTavernScreen() {
   const [message, setMessage] = useState<string | null>(null);
   React.useEffect(() => {
     if (!message) return;
-    const timer = setTimeout(() => setMessage(null), 3000);
+    const timer = setTimeout(() => setMessage(null), UI_NOTIFICATION_DURATION_MS);
     return () => clearTimeout(timer);
   }, [message, setTimeout, clearTimeout]);
   const [floatingMessage, setFloatingMessage] = useState<string | null>(null);
@@ -96,7 +97,7 @@ export default function OutsideTavernScreen() {
     if (storageNoticeShown.current || !(Number(storedQuantity) > 0)) return;
     storageNoticeShown.current = true;
     setFloatingMessage(`${storedQuantity} materials and garden supplies stored in Garden Storage.`);
-    floatingMessageTimer.current = setTimeout(() => setFloatingMessage(null), 3500);
+    floatingMessageTimer.current = setTimeout(() => setFloatingMessage(null), UI_NOTIFICATION_DURATION_MS);
     router.setParams({ storedQuantity: undefined });
   }, [storedQuantity, router, setTimeout]);
   const [thought, setThought] = useState<string | null>(null);
@@ -164,7 +165,7 @@ export default function OutsideTavernScreen() {
   function showFloatingMessage(text: string) {
     setFloatingMessage(text);
     if (floatingMessageTimer.current) clearTimeout(floatingMessageTimer.current);
-    floatingMessageTimer.current = setTimeout(() => setFloatingMessage(null), 1000);
+    floatingMessageTimer.current = setTimeout(() => setFloatingMessage(null), UI_NOTIFICATION_DURATION_MS);
   }
 
   async function chooseCoachmanView() {
@@ -332,7 +333,7 @@ export default function OutsideTavernScreen() {
       {view === "receptionist" && <View style={styles.panel}>
         <View style={styles.personRow}><Image source={DIALOGUE_RECEPTIONIST} style={styles.receptionistPortrait} resizeMode="contain" /><View style={styles.personText}><Text style={styles.panelTitle}>Adventurers’ Guild Quests</Text><Text style={styles.panelSubtitle}>Guild Receptionist</Text></View></View>
         <Text style={styles.receptionistText}>I can review your accepted quests and receive completed work here on Sundays.</Text>
-        {(Object.keys(QUESTS) as QuestId[]).filter((id) => cityState?.quests[id].status === "accepted" || cityState?.quests[id].status === "ready").map((id) => { const readyToTurnIn = !!cityState && isQuestReadyToTurnIn(id, cityState, playerBag); return <View key={id} style={styles.receptionistQuest}><View style={styles.stockText}><Text style={styles.stockName}>{QUESTS[id].title}</Text><Text style={styles.stockDetails}>{QUESTS[id].detail}</Text></View><TouchableOpacity style={[styles.buyButton, readyToTurnIn && styles.turnInReady]} onPress={() => { void receptionistTurnIn(id); }}><Text style={styles.buyPrice}>Turn In</Text></TouchableOpacity></View>; })}
+        {(Object.keys(QUESTS) as QuestId[]).filter((id) => cityState?.quests[id].status === "accepted" || cityState?.quests[id].status === "ready").map((id) => { const readyToTurnIn = !!cityState && isQuestReadyToTurnIn(id, cityState, playerBag); const definition = cityState ? getQuestDefinition(id, cityState) : QUESTS[id]; return <View key={id} style={styles.receptionistQuest}><View style={styles.stockText}><Text style={styles.stockName}>{definition.title}</Text><Text style={styles.stockDetails}>{definition.detail}</Text></View><TouchableOpacity style={[styles.buyButton, readyToTurnIn && styles.turnInReady]} onPress={() => { void receptionistTurnIn(id); }}><Text style={styles.buyPrice}>Turn In</Text></TouchableOpacity></View>; })}
         {!cityState || !(Object.keys(QUESTS) as QuestId[]).some((id) => cityState.quests[id].status === "accepted" || cityState.quests[id].status === "ready") ? <Text style={styles.receptionistText}>You have no active Guild quests.</Text> : null}
         <TouchableOpacity style={styles.backButton} onPress={() => chooseView("menu")}><Text style={styles.backText}>Go Back</Text></TouchableOpacity>
       </View>}

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
+import { UI_NOTIFICATION_DURATION_MS } from "@/src/ui/timings";
 import {
   View,
   Text,
@@ -329,7 +330,7 @@ function UpgradeRequirement({ label, have, need }: { label: string; have: number
 }
 
 const IMG = {
-  kitchen:     require("../assets/images/kitchen1.jpg"),
+  kitchen:     require("../assets/images/kitchen1.png"),
   soup_herb:   require("../assets/images/soup_herb.png"),
   rupert:      require("../assets/images/rupert.png"),
   rupertsad:   require("../assets/images/rupertsad.png"),
@@ -415,6 +416,8 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   alchemy_powder_white: require("../assets/images/alchemy_powder_white.png"),
   alchemy_powder_black: require("../assets/images/alchemy_powder_black.png"),
   malted_barley: require("../assets/images/quest_item.png"),
+  quest_lost_adventurer_item: require("../assets/images/quest_item.png"),
+  quest_guild_provisions: require("../assets/images/quest_item.png"),
   brewers_yeast: require("../assets/images/quest_item.png"),
   dried_hop_cones: require("../assets/images/quest_item.png"),
   raw_wildflower_honey: require("../assets/images/quest_item.png"),
@@ -649,6 +652,7 @@ function isKitchenSplittableStack(item: BagItem): boolean {
   return item.id === "return_bell" ||
     item.id === "bucket" ||
     item.id === "monster_carcass" ||
+    getConsumableCategory(item) === CONSUMABLE_CATEGORY.POTION ||
     isEdible(item) ||
     hasItemAttribute(item, ITEM_ATTRIBUTE.INGREDIENT) ||
     COOKING_RECIPE_INGREDIENT_IDS.has(item.id);
@@ -760,7 +764,7 @@ export default function KitchenScreen({
   const [aleQuestUnlocked, setAleQuestUnlocked] = useState(false);
   useEffect(() => {
     if (!upgradeMessage) return;
-    const timer = setTimeout(() => setUpgradeMessage(null), 1000);
+    const timer = setTimeout(() => setUpgradeMessage(null), UI_NOTIFICATION_DURATION_MS);
     return () => clearTimeout(timer);
   }, [upgradeMessage, setTimeout, clearTimeout]);
   useEffect(() => {
@@ -1090,6 +1094,7 @@ export default function KitchenScreen({
   // Bag → Table unpack (tap on bag item in kitchen context)
   // ─────────────────────────────────────────────────────────────────────────
   async function handleBagToTable(bagSlotIdx: number, item: BagItem) {
+    if (craftingLocked.current) return;
     setBagOpen(false);
     const currentBag = playerBagRef.current;
     const sourceItem = currentBag.slots[bagSlotIdx];
@@ -2406,28 +2411,27 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       return;
     }
 
-    // Only set flag AFTER confirming layout is available (animation will actually play)
-    soupDemoSeenRef.current = true;
-    AsyncStorage.setItem(SK.SOUP_DEMO_SEEN, "true").catch(() => {});
-
-    const sx = slot0.cx ?? slot0.x + (slot0.w ?? 56) / 2;
-    const sy = slot0.cy ?? slot0.y + (slot0.h ?? 56) / 2;
-    const ex = player.x + player.w / 2;
-    const ey = player.y + player.h / 2;
-
-    setSoupDemoActive(true); // hide real soup in slot during demo
-    demoX.value = sx;
-    demoY.value = sy;
-    demoVis.value = 1;
-    demoScale.value = 1;
-    // Fly soup from slot 0 to player portrait
-    demoX.value = withTiming(ex, { duration: 700 });
-    demoY.value = withTiming(ey, { duration: 700 });
-    demoScale.value = withTiming(0.5, { duration: 700 });
-    demoVis.value = withTiming(0, { duration: 700 }, (done) => {
-      if (!done) return;
-      // Reset visible soup back to slot 0 (real soup reappears)
-      runOnJS(setSoupDemoActive)(false);
+    measureCenterInRoot(tableSlotRefs.current[0], slot0, (from) => {
+      measureCenterInRoot(playerPortraitRef.current, player, (to) => {
+        if (!from || !to || soupDemoSeenRef.current) return;
+        // Only set flag AFTER confirming layout is available (animation will actually play)
+        soupDemoSeenRef.current = true;
+        AsyncStorage.setItem(SK.SOUP_DEMO_SEEN, "true").catch(() => {});
+        setSoupDemoActive(true); // hide real soup in slot during demo
+        demoX.value = from.x;
+        demoY.value = from.y;
+        demoVis.value = 1;
+        demoScale.value = 1;
+        // Fly soup from slot 0 to the measured player portrait center.
+        demoX.value = withTiming(to.x, { duration: 700 });
+        demoY.value = withTiming(to.y, { duration: 700 });
+        demoScale.value = withTiming(0.5, { duration: 700 });
+        demoVis.value = withTiming(0, { duration: 700 }, (done) => {
+          if (!done) return;
+          // Reset visible soup back to slot 0 (real soup reappears)
+          runOnJS(setSoupDemoActive)(false);
+        });
+      });
     });
   }
 
@@ -2917,16 +2921,17 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     audioManager.playSoundEffect('eat', { maxDurationMs: 4000 });
 
     // Animate soup to player portrait center, shrinking
-    const lp = layouts.current.player;
-    const toX = lp ? lp.x + lp.w / 2 : absX;
-    const toY = lp ? lp.y + lp.h / 2 : absY;
-    // soupX/soupY are already at item visual center from pan gesture update — no override needed
-    soupVis.value = 1; soupScale.value = 1;
-    soupX.value = withTiming(toX, { duration: CONSUME_MS });
-    soupY.value = withTiming(toY, { duration: CONSUME_MS });
-    soupScale.value = withTiming(0.1, { duration: CONSUME_MS });
-    soupVis.value = withTiming(0, { duration: CONSUME_MS }, (done) => {
-      if (done) runOnJS(onConsumed)();
+    measureCenterInRoot(playerPortraitRef.current, layouts.current.player, (target) => {
+      const toX = target?.x ?? absX;
+      const toY = target?.y ?? absY;
+      // soupX/soupY are already at item visual center from pan gesture update.
+      soupVis.value = 1; soupScale.value = 1;
+      soupX.value = withTiming(toX, { duration: CONSUME_MS });
+      soupY.value = withTiming(toY, { duration: CONSUME_MS });
+      soupScale.value = withTiming(0.1, { duration: CONSUME_MS });
+      soupVis.value = withTiming(0, { duration: CONSUME_MS }, (done) => {
+        if (done) runOnJS(onConsumed)();
+      });
     });
   }
 
@@ -3753,18 +3758,17 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
 
     audioManager.playSoundEffect('eat', { maxDurationMs: 4000 });
     setFlyingItemId(item.id);
-    const player = layouts.current.player;
-    const toX = player ? player.x + player.w / 2 : absX;
-    const toY = player ? player.y + player.h / 2 : absY;
     soupX.value = absX;
     soupY.value = absY;
     soupScale.value = 1;
     soupVis.value = 1;
-    soupX.value = withTiming(toX, { duration: CONSUME_MS });
-    soupY.value = withTiming(toY, { duration: CONSUME_MS });
-    soupScale.value = withTiming(0.1, { duration: CONSUME_MS });
-    soupVis.value = withTiming(0, { duration: CONSUME_MS }, (done) => {
-      if (done) runOnJS(onNormalSoupConsumed)();
+    measureCenterInRoot(playerPortraitRef.current, layouts.current.player, (target) => {
+      soupX.value = withTiming(target?.x ?? absX, { duration: CONSUME_MS });
+      soupY.value = withTiming(target?.y ?? absY, { duration: CONSUME_MS });
+      soupScale.value = withTiming(0.1, { duration: CONSUME_MS });
+      soupVis.value = withTiming(0, { duration: CONSUME_MS }, (done) => {
+        if (done) runOnJS(onNormalSoupConsumed)();
+      });
     });
     // A new gesture can cancel the shared overlay animation. Never let that leave
     // Kitchen input locked until the player changes rooms.
@@ -4256,7 +4260,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       const landedTable = craftFlightTable.current.slice();
       landedTable[targetSlot] = output;
       craftFlightTable.current = landedTable;
-      tableItemsRef.current = landedTable;
+      // Animation progress is presentation only. The authoritative table already
+      // contains every output, including byproducts still flying to their slots.
       setTableItems(landedTable);
 
       // Keep the flying image above the newly-rendered slot for one frame, then
@@ -4318,6 +4323,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       const targetSlot = targetSlots[index];
       if (targetSlot !== undefined) completedTable[targetSlot] = output;
     });
+    tableItemsRef.current = completedTable;
     AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(completedTable)).catch(() => {});
     // The result remains visible until the overlay has been positioned over it.
     requestAnimationFrame(() => {
@@ -4450,6 +4456,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     setSoupSlot(null); soupSlotRef.current = null;
     setTableItems(newTable);
     AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(newTable)).catch(() => {});
+    audioManager.playSoundEffect('eat', { maxDurationMs: 4000 });
     showBubble(
       '"Thank you."',
       "Rupert", "ALLOW_ITEM", 3000,
@@ -4478,15 +4485,14 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     cookingPendingTable.current = newTable;
 
     audioManager.playSoundEffect('eat', { maxDurationMs: 4000 });
-    const lp = layouts.current.player;
-    const toX = lp ? lp.x + lp.w / 2 : absX;
-    const toY = lp ? lp.y + lp.h / 2 : absY;
-    soupVis.value = 1; soupScale.value = 1;
-    soupX.value = withTiming(toX, { duration: CONSUME_MS });
-    soupY.value = withTiming(toY, { duration: CONSUME_MS });
-    soupScale.value = withTiming(0.1, { duration: CONSUME_MS });
-    soupVis.value = withTiming(0, { duration: CONSUME_MS }, (done) => {
-      if (done) runOnJS(onCookingEatConsumed)();
+    measureCenterInRoot(playerPortraitRef.current, layouts.current.player, (target) => {
+      soupVis.value = 1; soupScale.value = 1;
+      soupX.value = withTiming(target?.x ?? absX, { duration: CONSUME_MS });
+      soupY.value = withTiming(target?.y ?? absY, { duration: CONSUME_MS });
+      soupScale.value = withTiming(0.1, { duration: CONSUME_MS });
+      soupVis.value = withTiming(0, { duration: CONSUME_MS }, (done) => {
+        if (done) runOnJS(onCookingEatConsumed)();
+      });
     });
 
     const newSta = applyStaminaRecovery("soup_herb", staminaCurrent, playerStats.maximumStamina);
@@ -4977,6 +4983,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
               unlocked={playerBag.unlocked}
               bagId={playerBag.bagId}
               onPress={() => {
+                if (craftingLocked.current) return;
                 setBagOpen(true);
                 if (ts === "COOKING_UNPACK_WAIT" && !bagOpenedOnceDuringCooking.current) {
                   bagOpenedOnceDuringCooking.current = true;
@@ -5406,7 +5413,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
           visible
           characterSource={kitchenDialogCharacter}
           playerCharacter={kitchenDialogPlayerSpeaking}
-          characterScale={kitchenDialogPlayerSpeaking ? getPlayerDialogScale(playerAvatarId) : RUPERT_DIALOG_SCALE}
+          characterScale={kitchenDialogPlayerSpeaking ? getPlayerDialogScale(playerAvatarId, getDialogExpressionForStamina(staminaCurrent)) : RUPERT_DIALOG_SCALE}
           characterAspectRatio={kitchenDialogPlayerSpeaking ? getPlayerDialogAspectRatio(playerAvatarId) : undefined}
           speakerName={kitchenDialogSpeaker}
           bottomOffset={ts === "NAME_INPUT" && keyboardTop !== null ? Math.max(0, H - keyboardTop) : 0}

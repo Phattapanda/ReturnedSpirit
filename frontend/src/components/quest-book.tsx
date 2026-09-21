@@ -3,19 +3,21 @@ import { Animated, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity,
 
 import { DIALOG_CHARACTER_ASSETS, RUPERT_DIALOG_SCALE } from "@/src/assets/dialog-character-assets";
 import StoryDialogOverlay, { type StoryDialogLine } from "@/src/components/story-dialog-overlay";
-import { MERCHANT_CONTRACTS, QUESTS, loadCityState, merchantContractDaysRemaining, type QuestId } from "@/src/game/city-system";
+import { MERCHANT_CONTRACTS, QUESTS, getQuestDefinition, loadCityState, merchantContractDaysRemaining, type QuestId } from "@/src/game/city-system";
 import { loadGuestState } from "@/src/game/guest-system";
 import { loadCoachmanEscortState, type CoachmanEscortPhase } from "@/src/game/coachman-escort-system";
 import { isGuestAreaComplete, loadPostGuestTutorialState } from "@/src/game/post-guest-tutorial";
 import { loadQuestBookUnlocked, subscribeQuestBookUnlocked } from "@/src/game/questbook-system";
 import { loadElapsedDays, loadTitheState } from "@/src/game/tithe-system";
-import { claimTavernQuest, loadTavernQuestState, repairLegacyCleanQuestReward, subscribeTavernQuests, type TavernQuestId } from "@/src/game/tavern-quest-system";
+import { claimTavernQuest, loadTavernQuestState, markAleIngredientsDialogueSeen, repairLegacyCleanQuestReward, subscribeTavernQuests, type TavernQuestId } from "@/src/game/tavern-quest-system";
 import type { PlayerBagData } from "@/src/game/item-system";
+import { UI_NOTIFICATION_DURATION_MS } from "@/src/ui/timings";
 
 type QuestTab = "open" | "complete";
-type QuestBookEntry = { id: string; source: string; title: string; detail: string; tab: QuestTab; ready?: boolean; progress?: string; reward?: "potion" | "carrot_seed" | "copper" | "ale_upgrade"; tavernQuestId?: TavernQuestId };
+type QuestBookEntry = { id: string; source: string; title: string; detail: string; tab: QuestTab; ready?: boolean; progress?: string; reward?: "potion" | "carrot_seed" | "copper" | "ale_upgrade" | "fertilizer"; tavernQuestId?: TavernQuestId };
 const NPC_ESCORT_PHASES = new Set<CoachmanEscortPhase>(["accepted", "journey", "combat", "post_combat", "city_arrival", "city_exploration"]);
 const REWARD_IMAGES: Record<NonNullable<QuestBookEntry["reward"]>, ImageSourcePropType> = {
+  fertilizer: require("../../assets/images/fertilizer.png"),
   potion: require("../../assets/images/potion_stamina_low_grade.png"), carrot_seed: require("../../assets/images/seed_carrot.png"), copper: require("../../assets/images/coin_copper.png"), ale_upgrade: require("../../assets/images/questbook.png"),
 };
 
@@ -31,20 +33,21 @@ async function loadQuestBookEntries(): Promise<QuestBookEntry[]> {
   (Object.keys(QUESTS) as QuestId[]).forEach((id) => {
     const state = city.quests[id];
     if (state.status === "offered") return;
-    const target = id === "wolves" || id === "feathers" ? 2 : 1;
-    entries.push({ id: `guild-${id}`, source: "Adventurers’ Guild", title: QUESTS[id].title, detail: QUESTS[id].detail, tab: state.status === "completed" ? "complete" : "open", ready: state.status === "ready", progress: id === "wolves" && state.status !== "completed" ? `${Math.min(target, state.progress)}/${target}` : undefined });
+    const definition = getQuestDefinition(id, city);
+    const target = definition.targetQuantity ?? 1;
+    entries.push({ id: `guild-${id}`, source: "Adventurers’ Guild", title: definition.title, detail: definition.detail, tab: state.status === "completed" ? "complete" : "open", ready: state.status === "ready", progress: id === "wolves" && state.status !== "completed" ? `${Math.min(target, state.progress)}/${target}` : undefined });
   });
   if (city.adventurerPromotionActive || city.adventurerPromotionCompleted) {
     const complete = city.adventurerPromotionCompleted;
-    const ready = !complete && city.adventurerPromotionProgress >= 5;
+    const ready = !complete && city.adventurerPromotionProgress >= 3;
     entries.push({
       id: "adventurer-promotion-rank-g",
       source: "Adventurers’ Guild",
-      title: "Promotion Examination · Rank G",
-      detail: ready ? "Return to the Receptionist to complete the promotion." : "Defeat 5 Ember Roosters.",
+      title: "Rank-Up Aptitude Test · Rank G",
+      detail: ready ? "Return to the Receptionist to complete the promotion. Reward: 3 Silver Coins." : "Defeat 3 Ember Roosters. Reward: 3 Silver Coins.",
       tab: complete ? "complete" : "open",
       ready,
-      progress: complete ? undefined : `${city.adventurerPromotionProgress}/5`,
+      progress: complete ? undefined : `${city.adventurerPromotionProgress}/3`,
     });
   }
   city.activeMerchantContracts.forEach((contract) => {
@@ -68,10 +71,15 @@ async function loadQuestBookEntries(): Promise<QuestBookEntry[]> {
   addTavern("build_second_plot", "Build the second Plot", "Get the materials in the Garden and talk to Rupert.", post.secondPlotUnlocked, post.secondPlotUnlocked ? "Built" : undefined, "carrot_seed");
   if (tavern.claimed.clean_guest_area) addTavern("serve_food", "Serve food to 5 guests", "Serve meals to five guests. Water does not count.", tavern.foodServed >= 5, `${tavern.foodServed}/5`, "copper");
   if (tavern.claimed.serve_food) addTavern("serve_water", "Serve water to 5 guests", "Serve water to five guests.", tavern.waterServed >= 5, `${tavern.waterServed}/5`, "ale_upgrade");
+  if (tavern.claimed.serve_water && tavern.aleIngredientsDialogueSeen) addTavern("standard_ale_ingredients", "Get the ingredients for Standard Ale.", "Bring Malted Barley, Dried Hop Cones and Brewer's Yeast to Rupert and complete the Standard Ale upgrade.", post.aleServiceUnlocked, post.aleServiceUnlocked ? "Upgrade completed" : undefined, "fertilizer");
   return entries;
 }
 
 function rewardDialog(id: TavernQuestId): StoryDialogLine[] {
+  if (id === "standard_ale_ingredients") return [
+    { speaker: "Rupert", portrait: DIALOG_CHARACTER_ASSETS.rupert.laugh, characterScale: RUPERT_DIALOG_SCALE, text: "I never thought I would start brewing beer again." },
+    { speaker: "Rupert", portrait: DIALOG_CHARACTER_ASSETS.rupert.laugh, characterScale: RUPERT_DIALOG_SCALE, text: "I'll start right away; it takes a day. Starting tomorrow, you can serve it to the guests instead of water. Here, take this." },
+  ];
   if (id === "clean_guest_area") return [
     { speaker: "Rupert", portrait: DIALOG_CHARACTER_ASSETS.rupert.laugh, characterScale: RUPERT_DIALOG_SCALE, text: '“Wow, it looks neat and tidy again!”' },
     { speaker: "Rupert", portrait: DIALOG_CHARACTER_ASSETS.rupert.laugh, characterScale: RUPERT_DIALOG_SCALE, text: '“Maybe more guests will stop by again now that it doesn\'t look like a haunted house anymore.”' },
@@ -95,40 +103,67 @@ export default function QuestBookButton({ size = 38, disabled = false, onBagUpda
   const [tab, setTab] = useState<QuestTab>("open"), [entries, setEntries] = useState<QuestBookEntry[]>([]), [floatingMessage, setFloatingMessage] = useState<string | null>(null);
   const [dialog, setDialog] = useState<{ lines: StoryDialogLine[]; index: number; reward: NonNullable<QuestBookEntry["reward"]> } | null>(null);
   const [flightVisible, setFlightVisible] = useState(false);
+  const claimBusy = useRef(false);
+  const gardenStorageTargetRef = useRef<View>(null);
   const [flightReward, setFlightReward] = useState<NonNullable<QuestBookEntry["reward"]>>("potion");
   const rewardX = useRef(new Animated.Value(0)).current, rewardY = useRef(new Animated.Value(0)).current, rewardScale = useRef(new Animated.Value(1)).current, rewardOpacity = useRef(new Animated.Value(0)).current;
   async function refresh() { setEntries(await loadQuestBookEntries()); }
   useEffect(() => { let active = true; void Promise.all([loadQuestBookUnlocked(), loadQuestBookEntries(), repairLegacyCleanQuestReward()]).then(([value, initialEntries, repairedBag]) => { if (active) { setUnlocked(value); setEntries(initialEntries); if (repairedBag) onBagUpdated?.(repairedBag); } }); const a = subscribeQuestBookUnlocked((value) => { if (active) setUnlocked(value); }); const b = subscribeTavernQuests(() => { if (active) void refresh(); }); return () => { active = false; a(); b(); }; }, [onBagUpdated]);
   const hasReadyQuest = entries.some((entry) => entry.tab === "open" && entry.ready);
   const visibleEntries = useMemo(() => entries.filter((entry) => entry.tab === tab), [entries, tab]);
-  async function openQuestBook() { if (disabled) return; setVisible(true); setLoading(true); setTab("open"); try { await refresh(); } finally { setLoading(false); } }
-  function showFloating(text: string) { setFloatingMessage(text); setTimeout(() => setFloatingMessage(null), 1000); }
+  async function openQuestBook() {
+    if (disabled) return;
+    const tavern = await loadTavernQuestState();
+    if (tavern.claimed.serve_water && !tavern.aleIngredientsDialogueSeen) {
+      setDialog({ lines: rewardDialog("serve_water"), index: 0, reward: "ale_upgrade" });
+      return;
+    }
+    setVisible(true); setLoading(true); setTab("open");
+    try { await refresh(); } finally { setLoading(false); }
+  }
+  function showFloating(text: string) { setFloatingMessage(text); setTimeout(() => setFloatingMessage(null), UI_NOTIFICATION_DURATION_MS); }
   async function claim(entry: QuestBookEntry) {
-    if (!entry.tavernQuestId || !entry.ready || !entry.reward) return;
+    if (!entry.tavernQuestId || !entry.ready || !entry.reward || claimBusy.current) return;
+    claimBusy.current = true;
+    try {
     const result = await claimTavernQuest(entry.tavernQuestId);
     if (!result.ok) { showFloating(result.reason === "bag_full" ? "Make some some free space in your bag." : "This quest is not ready yet."); return; }
     if (result.playerBag) onBagUpdated?.(result.playerBag);
     setVisible(false); setFlightReward(entry.reward); setDialog({ lines: rewardDialog(entry.tavernQuestId), index: 0, reward: entry.reward }); await refresh();
+    } catch { showFloating("Could not claim this reward. Please try again."); }
+    finally { claimBusy.current = false; }
   }
   function flyReward(reward: NonNullable<QuestBookEntry["reward"]>) {
     setFlightVisible(true);
-    rewardX.setValue(width * .72); rewardY.setValue(height * .48); rewardScale.setValue(1); rewardOpacity.setValue(1);
-    const target = reward === "copper" ? { x: width - 62, y: 62 } : reward === "carrot_seed" ? { x: width * .26, y: height - 74 } : { x: width - 58, y: 145 };
-    Animated.parallel([Animated.timing(rewardX, { toValue: target.x, duration: 720, useNativeDriver: true }), Animated.timing(rewardY, { toValue: target.y, duration: 720, useNativeDriver: true }), Animated.timing(rewardScale, { toValue: .42, duration: 720, useNativeDriver: true })]).start(() => Animated.timing(rewardOpacity, { toValue: 0, duration: 120, useNativeDriver: true }).start(() => setFlightVisible(false)));
+    requestAnimationFrame(() => {
+      const begin = (target: { x: number; y: number }) => {
+        rewardX.setValue(width * .72); rewardY.setValue(height * .48); rewardScale.setValue(1); rewardOpacity.setValue(1);
+        Animated.parallel([Animated.timing(rewardX, { toValue: target.x, duration: 720, useNativeDriver: true }), Animated.timing(rewardY, { toValue: target.y, duration: 720, useNativeDriver: true }), Animated.timing(rewardScale, { toValue: .42, duration: 720, useNativeDriver: true })]).start(() => Animated.timing(rewardOpacity, { toValue: 0, duration: 120, useNativeDriver: true }).start(() => setFlightVisible(false)));
+      };
+      const fallback = reward === "copper" ? { x: width - 62, y: 62 } : reward === "carrot_seed" || reward === "fertilizer" ? { x: width * .26, y: height - 74 } : { x: width - 58, y: 145 };
+      if (reward !== "fertilizer" || !gardenStorageTargetRef.current) {
+        begin(fallback);
+        return;
+      }
+      gardenStorageTargetRef.current.measureInWindow((x, y, w, h) => {
+        begin(w > 0 && h > 0 ? { x: x + w / 2, y: y + h / 2 } : fallback);
+      });
+    });
   }
-  function advanceDialog(skip = false) { if (!dialog) return; if (!skip && dialog.index < dialog.lines.length - 1) { setDialog({ ...dialog, index: dialog.index + 1 }); return; } if (dialog.reward !== "ale_upgrade") flyReward(dialog.reward); setDialog(null); }
+  function advanceDialog(skip = false) { if (!dialog) return; if (!skip && dialog.index < dialog.lines.length - 1) { setDialog({ ...dialog, index: dialog.index + 1 }); return; } if (dialog.reward !== "ale_upgrade") flyReward(dialog.reward); else void markAleIngredientsDialogueSeen().catch(() => {}); setDialog(null); }
   return <>
     <View style={{ width: Math.round(size * 1.33), height: size }}>{unlocked ? <TouchableOpacity style={[styles.button, disabled && styles.disabled]} onPress={() => void openQuestBook()} disabled={disabled} accessibilityLabel="Open questbook"><Image source={require("../../assets/images/questbook.png")} style={styles.icon} resizeMode="contain" />{hasReadyQuest ? <View style={styles.readyBadge}><Text style={styles.readyBadgeText}>✓</Text></View> : null}</TouchableOpacity> : null}</View>
     <Modal visible={visible} transparent animationType="fade" onRequestClose={() => setVisible(false)}><View style={styles.overlay}><View style={styles.panel}>
       <View style={styles.titleRow}><Image source={require("../../assets/images/questbook.png")} style={styles.titleIcon} resizeMode="contain" /><View pointerEvents="none" style={styles.titleCenter}><Text style={styles.title}>Questbook</Text></View><TouchableOpacity style={styles.closeButton} onPress={() => setVisible(false)}><Text style={styles.closeText}>×</Text></TouchableOpacity></View>
       <View style={styles.tabs}>{(["open", "complete"] as QuestTab[]).map((value) => <TouchableOpacity key={value} style={[styles.tab, tab === value && styles.tabActive]} onPress={() => setTab(value)}><Text style={[styles.tabText, tab === value && styles.tabTextActive]}>{value === "open" ? "Open" : "Complete"}</Text></TouchableOpacity>)}</View>
       <ScrollView contentContainerStyle={styles.list}>{loading ? <Text style={styles.empty}>Loading quests…</Text> : null}{!loading && visibleEntries.length === 0 ? <Text style={styles.empty}>{tab === "open" ? "You have no open quests." : "No quests completed yet."}</Text> : null}
-        {!loading && visibleEntries.map((entry) => <View key={entry.id} style={[styles.questCard, entry.ready && entry.tab === "open" && styles.questReady]}><View style={styles.questHeader}><Text style={styles.source}>{entry.source}</Text><Text style={[styles.status, entry.ready && styles.ready]}>{entry.tab === "complete" ? "Complete" : entry.ready ? "Ready" : "Open"}</Text></View><Text style={styles.questTitle}>{entry.title}</Text><Text style={styles.detail}>{entry.detail}</Text>{entry.progress ? <Text style={styles.progress}>Progress: {entry.progress}</Text> : null}{entry.reward === "copper" ? <View style={styles.rewardRow}><Text style={styles.rewardText}>Reward: 25</Text><Image source={REWARD_IMAGES.copper} style={styles.coinIcon} /></View> : entry.reward === "ale_upgrade" ? <Text style={styles.rewardText}>Reward: New Upgrade</Text> : null}{entry.tab === "open" && entry.tavernQuestId ? <TouchableOpacity style={[styles.doneButton, !entry.ready && styles.doneDisabled]} disabled={!entry.ready} onPress={() => void claim(entry)}><Text style={styles.doneText}>Done</Text></TouchableOpacity> : null}</View>)}
+        {!loading && visibleEntries.map((entry) => <View key={entry.id} style={[styles.questCard, entry.ready && entry.tab === "open" && styles.questReady]}><View style={styles.questHeader}><Text style={styles.source}>{entry.source}</Text><Text style={[styles.status, entry.ready && styles.ready]}>{entry.tab === "complete" ? "Complete" : entry.ready ? "Ready" : "Open"}</Text></View><Text style={styles.questTitle}>{entry.title}</Text><Text style={styles.detail}>{entry.detail}</Text>{entry.progress ? <Text style={styles.progress}>Progress: {entry.progress}</Text> : null}{entry.reward === "fertilizer" ? <Text style={styles.rewardText}>Reward: 5 Standard Fertilizer</Text> : entry.reward === "copper" ? <View style={styles.rewardRow}><Text style={styles.rewardText}>Reward: 25</Text><Image source={REWARD_IMAGES.copper} style={styles.coinIcon} /></View> : entry.reward === "ale_upgrade" ? <Text style={styles.rewardText}>Reward: New Upgrade</Text> : null}{entry.tab === "open" && entry.tavernQuestId ? <TouchableOpacity style={[styles.doneButton, !entry.ready && styles.doneDisabled]} disabled={!entry.ready} onPress={() => void claim(entry)}><Text style={styles.doneText}>Done</Text></TouchableOpacity> : null}</View>)}
       </ScrollView></View></View>{floatingMessage ? <View pointerEvents="none" style={styles.floating}><Text style={styles.floatingText}>{floatingMessage}</Text></View> : null}</Modal>
     <Modal visible={!!dialog || flightVisible} transparent animationType="none" statusBarTranslucent onRequestClose={() => {}}>
       <View style={styles.dialogLayer} pointerEvents="box-none">
         <StoryDialogOverlay visible={!!dialog} line={dialog?.lines[dialog.index] ?? null} onContinue={() => advanceDialog(false)} onSkip={() => advanceDialog(true)} />
-        <Animated.View pointerEvents="none" style={[styles.flyingReward, { opacity: rewardOpacity, transform: [{ translateX: rewardX }, { translateY: rewardY }, { scale: rewardScale }] }]}><Image source={REWARD_IMAGES[flightReward]} style={styles.flyingRewardImage} resizeMode="contain" /></Animated.View>
+        {flightVisible && flightReward === "fertilizer" && <View pointerEvents="none" style={{ position: "absolute", bottom: 45, left: width * .26 - 55, alignItems: "center" }}><View ref={gardenStorageTargetRef} collapsable={false}><Image source={REWARD_IMAGES.fertilizer} style={{ width: 44, height: 44 }} /></View><Text style={styles.rewardText}>Garden Storage</Text></View>}
+        <Animated.View pointerEvents="none" style={[styles.flyingReward, { opacity: rewardOpacity, transform: [{ translateX: rewardX }, { translateY: rewardY }, { scale: rewardScale }] }]}><Image source={REWARD_IMAGES[flightReward]} style={styles.flyingRewardImage} resizeMode="contain" />{flightReward === "fertilizer" && <Text style={{ color: "white", fontWeight: "700", position: "absolute", right: 0, bottom: 0 }}>×5</Text>}</Animated.View>
       </View>
     </Modal>
   </>;

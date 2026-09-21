@@ -17,7 +17,7 @@ export const WORKSHOP_CRAFT_RESULT_KEY = "@workshop:craft_result";
 export type WorkshopPhase = "locked" | "available" | "quoted" | "building" | "complete";
 export type WorkshopState = { version: 1; phase: WorkshopPhase; orderPlacedDaySerial: number | null; completionDaySerial: number | null };
 export const DEFAULT_WORKSHOP_STATE: WorkshopState = { version: 1, phase: "locked", orderPlacedDaySerial: null, completionDaySerial: null };
-export const WORKSHOP_REQUIREMENTS = { wood: 50, stone: 20, nails: 25, copper: 20 * COPPER_PER_SILVER } as const;
+export const WORKSHOP_REQUIREMENTS = { wood: 50, stone: 20, nails: 25, copper: 5 * COPPER_PER_SILVER } as const;
 
 function normalizeState(raw: unknown): WorkshopState {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_WORKSHOP_STATE };

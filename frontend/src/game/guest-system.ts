@@ -98,6 +98,8 @@ export type GuestState = {
   servedDaySerial: Record<string, number>;
   /** Preference facts discovered by talking to each guest. */
   learnedPreferenceFacts: Record<string, GuestPreferenceFactKey[]>;
+  /** The Merchant's first Dining Hall introduction only plays once per save. */
+  merchantDiningIntroductionSeen: boolean;
 };
 
 export type GuestVisitView = {
@@ -376,6 +378,7 @@ export const DEFAULT_GUEST_STATE: GuestState = {
   giftDialogDaySerial: {},
   servedDaySerial: {},
   learnedPreferenceFacts: {},
+  merchantDiningIntroductionSeen: false,
 };
 
 function normalizeWeekday(value: number): number {
@@ -490,6 +493,7 @@ function normalizeGuestState(raw: unknown): GuestState {
     giftDialogDaySerial,
     servedDaySerial,
     learnedPreferenceFacts,
+    merchantDiningIntroductionSeen: candidate.merchantDiningIntroductionSeen === true,
   };
 }
 
@@ -527,6 +531,12 @@ export function getGuestTransportDiscountPercent(profile: GuestProfile, favor: n
 
 export function getGuestExchangePool(profile: GuestProfile, favor: number): readonly GuestExchangeOffer[] {
   return getGuestFavorTier(profile, favor)?.exchangePool ?? profile.exchangePool;
+}
+
+export async function markMerchantDiningIntroductionSeen(): Promise<GuestState> {
+  const state = await loadGuestState();
+  if (state.merchantDiningIntroductionSeen) return state;
+  return saveGuestState({ ...state, merchantDiningIntroductionSeen: true });
 }
 
 export function getGuestPreferenceFactKeys(profile: GuestProfile): GuestPreferenceFactKey[] {

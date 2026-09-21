@@ -486,7 +486,7 @@ export default function IntroScreen() {
           visible
           characterSource={introCharacterSource}
           playerCharacter={introPlayerSpeaking}
-          characterScale={introPlayerSpeaking ? getPlayerDialogScale(playerAvatarId) : RUPERT_DIALOG_SCALE}
+          characterScale={introPlayerSpeaking ? getPlayerDialogScale(playerAvatarId, "tired") : RUPERT_DIALOG_SCALE}
           characterAspectRatio={introPlayerSpeaking ? getPlayerDialogAspectRatio(playerAvatarId) : undefined}
           speakerName={currentDialogEntry.speakerName}
           onSkip={currentDialogEntry.choices ? undefined : skipDialogDestination ? skipDialog : advanceDialog}

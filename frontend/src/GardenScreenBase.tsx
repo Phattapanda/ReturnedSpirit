@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
+import { UI_NOTIFICATION_DURATION_MS } from "@/src/ui/timings";
 import {
   View,
   Text,
@@ -97,6 +98,7 @@ import {
   getGardenFertilizerConfig,
   normalizeGardenFertilizerId,
 } from "@/src/game/garden-fertilizer-system";
+import { normalizeGardenInventory } from "@/src/game/tavern-return-storage";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
   PLAYER_AVATAR_KEY,
@@ -190,7 +192,7 @@ const DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
 // ─── Assets ───────────────────────────────────────────────────────────────────
 
 const IMG = {
-  garden:      require("../assets/images/garden1.jpg"),
+  garden:      require("../assets/images/garden1.png"),
   rupert:      require("../assets/images/rupert.png"),
   rupertsad:   require("../assets/images/rupertsad.png"),
   rupertlaugh: require("../assets/images/rupertlaugh.png"),
@@ -244,16 +246,34 @@ const DEFAULT_INVENTORY: InventoryItem[] = [
   { id: "standard_fertilizer", itemType: "fertilizer",  name: "Standard Fertilizer",  quantity: 5 },
 ];
 
-function normalizeGardenInventoryIds(items: InventoryItem[]): InventoryItem[] {
-  return items.map((item) => {
+function normalizeGardenInventoryIds(value: unknown): InventoryItem[] {
+  const compacted = normalizeGardenInventory(value) as InventoryItem[];
+  const normalized: InventoryItem[] = [];
+  const stackIndexes = new Map<string, number>();
+
+  for (const item of compacted) {
+    let nextItem = item;
     if (item.itemType === "seed") {
-      return { ...item, id: normalizeGardenSeedId(item.id) ?? item.id };
+      nextItem = { ...item, id: normalizeGardenSeedId(item.id) ?? item.id };
+    } else if (item.itemType === "fertilizer") {
+      nextItem = { ...item, id: normalizeGardenFertilizerId(item.id) ?? item.id };
     }
-    if (item.itemType === "fertilizer") {
-      return { ...item, id: normalizeGardenFertilizerId(item.id) ?? item.id };
+
+    if (nextItem.itemType === "seed" || nextItem.itemType === "fertilizer") {
+      const stackKey = `${nextItem.itemType}:${nextItem.id}`;
+      const existingIndex = stackIndexes.get(stackKey);
+      if (existingIndex !== undefined) {
+        normalized[existingIndex].quantity = Math.min(
+          Number.MAX_SAFE_INTEGER,
+          normalized[existingIndex].quantity + nextItem.quantity,
+        );
+        continue;
+      }
+      stackIndexes.set(stackKey, normalized.length);
     }
-    return item;
-  });
+    normalized.push(nextItem);
+  }
+  return normalized;
 }
 
 const TUTORIAL_PLOT_INITIAL: GardenPlotData = {
@@ -411,11 +431,10 @@ setExploreUnlocked(exploreAvailable);
   const bucketGiftLocked = useRef(false);
 
   // ── Flying item overlay (harvest, bucket, well animations)
+  const rootRef         = useRef<View>(null);
   const bagIconViewRef  = useRef<View>(null);
   const cropAreaViewRef = useRef<View>(null);
   const auxiliaryCropAreaRefs = useRef<Record<number, View | null>>({ 2: null, 3: null, 4: null });
-  const bagIconLayout   = useRef<{ cx: number; cy: number } | null>(null);
-  const cropLayout      = useRef<{ cx: number; cy: number } | null>(null);
   const [activityBarH, setActivityBarH] = useState(70);
 
   // Single flying item overlay — always rendered (opacity driven by animation)
@@ -560,7 +579,13 @@ setExploreUnlocked(exploreAvailable);
         }
 
         if (rawInv) {
-          try { setInventory(normalizeGardenInventoryIds(JSON.parse(rawInv))); } catch { /* keep current */ }
+          try {
+            const repairedInventory = normalizeGardenInventoryIds(rawInv);
+            setInventory(repairedInventory);
+            if (JSON.stringify(repairedInventory) !== rawInv) {
+              await AsyncStorage.setItem(GSK.INVENTORY, JSON.stringify(repairedInventory));
+            }
+          } catch { /* keep current */ }
         }
 
         if (rawBag) {
@@ -701,7 +726,13 @@ setExploreUnlocked(exploreAvailable);
         // Load inventory
         const rawInv = await AsyncStorage.getItem(GSK.INVENTORY);
         if (rawInv) {
-          try { setInventory(normalizeGardenInventoryIds(JSON.parse(rawInv))); } catch { /* use default */ }
+          try {
+            const repairedInventory = normalizeGardenInventoryIds(rawInv);
+            setInventory(repairedInventory);
+            if (JSON.stringify(repairedInventory) !== rawInv) {
+              await AsyncStorage.setItem(GSK.INVENTORY, JSON.stringify(repairedInventory));
+            }
+          } catch { /* use default */ }
         } else {
           const initialInventory = DEFAULT_INVENTORY.map((item) => ({ ...item }));
           await AsyncStorage.setItem(GSK.INVENTORY, JSON.stringify(initialInventory));
@@ -837,11 +868,29 @@ setExploreUnlocked(exploreAvailable);
     rupertPortraitRef.current?.measureInWindow((x, y, w, h) => {
       portraitLayouts.current.rupert = { x, y, w, h };
     });
-    bagIconViewRef.current?.measureInWindow((x, y, w, h) => {
-      bagIconLayout.current = { cx: x + w / 2, cy: y + h / 2 };
-    });
-    cropAreaViewRef.current?.measureInWindow((x, y, w, h) => {
-      cropLayout.current = { cx: x + w / 2, cy: y + h / 2 };
+  }
+
+  type RootCenter = { cx: number; cy: number };
+
+  // The flying overlay is positioned relative to this screen's root. Pointer
+  // hit-testing still uses window coordinates, while flights use root-local
+  // centers so safe-area and host-view offsets cannot shift their endpoints.
+  function measureCenterInRoot(view: View | null, fallback: RootCenter): Promise<RootCenter> {
+    return new Promise((resolve) => {
+      const root = rootRef.current;
+      if (!view || !root) {
+        resolve(fallback);
+        return;
+      }
+      view.measureLayout(
+        root,
+        (x, y, w, h) => resolve({ cx: x + w / 2, cy: y + h / 2 }),
+        () => view.measureInWindow((x, y, w, h) => {
+          root.measureInWindow((rootX, rootY) => {
+            resolve({ cx: x + w / 2 - rootX, cy: y + h / 2 - rootY });
+          });
+        }),
+      );
     });
   }
 
@@ -901,28 +950,8 @@ setExploreUnlocked(exploreAvailable);
     const sourceView = source === "primary" ? cropAreaViewRef.current : auxiliaryCropAreaRefs.current[source];
 
     const [startPos, endPos] = await Promise.all([
-      new Promise<{ cx: number; cy: number }>((resolve) => {
-        const view = sourceView;
-        if (!view) {
-          resolve({ cx: W / 2, cy: H * (source === "primary" ? 0.45 : 0.66) });
-          return;
-        }
-        view.measureInWindow((x, y, w, h) => {
-          resolve({ cx: x + w / 2, cy: y + h / 2 });
-        });
-      }),
-      new Promise<{ cx: number; cy: number }>((resolve) => {
-        const view = bagIconViewRef.current;
-        if (!view) {
-          resolve(bagIconLayout.current ?? { cx: W * 0.75, cy: H * 0.2 });
-          return;
-        }
-        view.measureInWindow((x, y, w, h) => {
-          const center = { cx: x + w / 2, cy: y + h / 2 };
-          bagIconLayout.current = center;
-          resolve(center);
-        });
-      }),
+      measureCenterInRoot(sourceView, { cx: W / 2, cy: H * (source === "primary" ? 0.45 : 0.66) }),
+      measureCenterInRoot(bagIconViewRef.current, { cx: W * 0.75, cy: H * 0.2 }),
     ]);
 
     audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
@@ -1317,22 +1346,10 @@ setExploreUnlocked(exploreAvailable);
         containedQuantity: finalYield,
       };
 
-      // Measure positions for fly animation
-      await new Promise<void>(res => {
-        bagIconViewRef.current?.measureInWindow((x, y, w, h) => {
-          bagIconLayout.current = { cx: x + w / 2, cy: y + h / 2 };
-          res();
-        }) ?? res();
-      });
-      await new Promise<void>(res => {
-        cropAreaViewRef.current?.measureInWindow((x, y, w, h) => {
-          cropLayout.current = { cx: x + w / 2, cy: y + h / 2 };
-          res();
-        }) ?? res();
-      });
-
-      const startPos = cropLayout.current ?? { cx: W / 2, cy: H * 0.45 };
-      const endPos   = bagIconLayout.current ?? { cx: W * 0.75, cy: H * 0.2 };
+      const [startPos, endPos] = await Promise.all([
+        measureCenterInRoot(cropAreaViewRef.current, { cx: W / 2, cy: H * 0.45 }),
+        measureCenterInRoot(bagIconViewRef.current, { cx: W * 0.75, cy: H * 0.2 }),
+      ]);
 
       // Defensive: ensure bag_herb asset is decoded before flying animation.
       await ensureAssetReady('bag_herb');
@@ -1640,20 +1657,16 @@ setExploreUnlocked(exploreAvailable);
             await AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(newBag));
 
             // Fly animation: bucket from Rupert to bag icon
-            const rupertL = portraitLayouts.current.rupert;
-            bagIconViewRef.current?.measureInWindow((x, y, w, h) => {
-              bagIconLayout.current = { cx: x + w / 2, cy: y + h / 2 };
-            });
             // Defensive: ensure bucket asset is decoded before fly; then animate
             setTimeout(async () => {
               await ensureAssetReady('bucket');
-              const startX = rupertL ? rupertL.x + rupertL.w / 2 : W / 2;
-              const startY = rupertL ? rupertL.y + rupertL.h / 2 : H * 0.2;
-              const endX   = bagIconLayout.current?.cx ?? W * 0.75;
-              const endY   = bagIconLayout.current?.cy ?? H * 0.18;
+              const [start, end] = await Promise.all([
+                measureCenterInRoot(rupertPortraitRef.current, { cx: W / 2, cy: H * 0.2 }),
+                measureCenterInRoot(bagIconViewRef.current, { cx: W * 0.75, cy: H * 0.18 }),
+              ]);
               startFlyAnim(
                 IMG.bucket,
-                startX, startY, endX, endY,
+                start.cx, start.cy, end.cx, end.cy,
               );
             }, 200);
           }
@@ -1886,10 +1899,10 @@ setExploreUnlocked(exploreAvailable);
       await AsyncStorage.setItem(GSK.SAVE_LOCATION, "garden");
       await createSnapshot(slotNum, "manual");
       setFloatMsg("Game saved.");
-      setTimeout(() => setFloatMsg(null), 1800);
+      setTimeout(() => setFloatMsg(null), UI_NOTIFICATION_DURATION_MS);
     } catch {
       setFloatMsg("Save failed.");
-      setTimeout(() => setFloatMsg(null), 1800);
+      setTimeout(() => setFloatMsg(null), UI_NOTIFICATION_DURATION_MS);
     }
   }
 
@@ -2112,7 +2125,7 @@ setExploreUnlocked(exploreAvailable);
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
-    <View style={styles.root}>
+    <View ref={rootRef} collapsable={false} style={styles.root}>
       {/* ── Hidden portrait preload (belt-and-suspenders on top of AssetManager) ── */}
       <View style={{ position: "absolute", width: 0, height: 0, overflow: "hidden" }}>
         <Image source={IMG.rupert}      style={{ width: 1, height: 1 }} />
@@ -2250,6 +2263,7 @@ setExploreUnlocked(exploreAvailable);
           <GardenPlot
             data={plotData}
             interactive={plotInteractive}
+            attentionPulse={gts === "GARDEN_PLOT_INTERACTIVE" && !plotData.wateredToday}
             selectedFertilizerId={selectedFertilizer}
             fertilizerAvailable={selectedFertilizerAvailable}
             actionCosts={{ water: waterCost, pullWeeds: pullWeedsCost, fertilize: fertilizeCost }}
@@ -2266,7 +2280,6 @@ setExploreUnlocked(exploreAvailable);
         {([2, 3, 4] as const).map((plotNumber) => {
           const unlocked = plotNumber === 2 ? secondPlotUnlocked : plotNumber === 3 ? thirdPlotUnlocked : fourthPlotUnlocked;
           if (!unlocked) return null;
-          const ordinal = plotNumber === 2 ? "2nd" : plotNumber === 3 ? "3rd" : "4th";
           const data = {
             ...createEmptyGardenPlot(plotNumber),
             yieldUpgradeLevel: plotYieldUpgradeLevels[`garden_plot_0${plotNumber}`] ?? 0,
@@ -2277,7 +2290,6 @@ setExploreUnlocked(exploreAvailable);
               ref={(view: View | null) => { auxiliaryCropAreaRefs.current[plotNumber] = view; }}
               style={[styles.secondPlotWrap, plotOpacityStyle]}
             >
-              <Text style={styles.secondPlotLabel}>{ordinal} Plot</Text>
               <GardenPlot
                 key={`${plotNumber}-${harvestScrollRevision}`}
                 data={data}
@@ -2447,75 +2459,82 @@ return (
             </View>
             <View style={styles.divider} />
 
-            {/* Seeds */}
-            {seeds.length > 0 && (
-              <>
-                <Text style={styles.storeCatLabel}>Seeds</Text>
-                {seeds.map(item => (
-                  <View key={item.id} style={styles.storeRow}>
-                    <Text style={styles.storeItemName}>{item.name}</Text>
-                    <Text style={styles.storeItemQty}>×{item.quantity}</Text>
-                  </View>
-                ))}
-              </>
-            )}
-
-            {/* Fertilizers */}
-            {fertilizers.length > 0 && (
-              <>
-                <Text style={styles.storeCatLabel}>Fertilizers</Text>
-                {fertilizers.map(item => (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={[styles.storeRow, selectedFertilizer === item.id && styles.storeRowSelected]}
-                    onPress={() => selectFertilizer(item.id)}
-                    activeOpacity={0.8}
-                  >
-                    <View style={styles.storeRowLeft}>
-                      <Image
-                        source={item.id === "premium_fertilizer" ? IMG.premium_fertilizer : IMG.standard_fertilizer}
-                        style={styles.storeItemImage}
-                        resizeMode="contain"
-                        resizeMethod="resize"
-                      />
-                      {selectedFertilizer === item.id && (
-                        <Ionicons name="checkmark-circle" size={16} color="#C4943A" style={{ marginRight: 6 }} />
-                      )}
+            <ScrollView
+              style={styles.storageScroll}
+              contentContainerStyle={styles.storageScrollContent}
+              showsVerticalScrollIndicator
+              nestedScrollEnabled
+            >
+              {/* Seeds */}
+              {seeds.length > 0 && (
+                <>
+                  <Text style={styles.storeCatLabel}>Seeds</Text>
+                  {seeds.map(item => (
+                    <View key={item.id} style={styles.storeRow}>
                       <Text style={styles.storeItemName}>{item.name}</Text>
+                      <Text style={styles.storeItemQty}>×{item.quantity}</Text>
                     </View>
-                    <Text style={styles.storeItemQty}>×{item.quantity}</Text>
-                  </TouchableOpacity>
-                ))}
-              </>
-            )}
+                  ))}
+                </>
+              )}
 
-            {/* Herb bags */}
-            {harvestBags.length > 0 && (
-              <>
-                <Text style={styles.storeCatLabel}>Harvest</Text>
-                {harvestBags.map((item, idx) => (
-                  <View key={`${item.id}_${idx}`} style={styles.storeRow}>
-                    <Text style={styles.storeItemName}>{item.name}</Text>
-                    <Text style={styles.storeItemQty}>×{item.quantity}</Text>
-                  </View>
-                ))}
-              </>
-            )}
+              {/* Fertilizers */}
+              {fertilizers.length > 0 && (
+                <>
+                  <Text style={styles.storeCatLabel}>Fertilizers</Text>
+                  {fertilizers.map(item => (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={[styles.storeRow, selectedFertilizer === item.id && styles.storeRowSelected]}
+                      onPress={() => selectFertilizer(item.id)}
+                      activeOpacity={0.8}
+                    >
+                      <View style={styles.storeRowLeft}>
+                        <Image
+                          source={item.id === "premium_fertilizer" ? IMG.premium_fertilizer : IMG.standard_fertilizer}
+                          style={styles.storeItemImage}
+                          resizeMode="contain"
+                          resizeMethod="resize"
+                        />
+                        {selectedFertilizer === item.id && (
+                          <Ionicons name="checkmark-circle" size={16} color="#C4943A" style={{ marginRight: 6 }} />
+                        )}
+                        <Text style={styles.storeItemName}>{item.name}</Text>
+                      </View>
+                      <Text style={styles.storeItemQty}>×{item.quantity}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </>
+              )}
 
-            {seeds.length === 0 && fertilizers.length === 0 && harvestBags.length === 0 && (
-              <Text style={styles.storeEmpty}>Storage is empty.</Text>
-            )}
+              {/* Herb bags */}
+              {harvestBags.length > 0 && (
+                <>
+                  <Text style={styles.storeCatLabel}>Harvest</Text>
+                  {harvestBags.map((item, idx) => (
+                    <View key={`${item.id}_${idx}`} style={styles.storeRow}>
+                      <Text style={styles.storeItemName}>{item.name}</Text>
+                      <Text style={styles.storeItemQty}>×{item.quantity}</Text>
+                    </View>
+                  ))}
+                </>
+              )}
 
-            {/* Materials (shared resources – informational, always visible) */}
-            <Text style={styles.storeCatLabel}>Materials</Text>
-            {CORE_MATERIAL_IDS.map(resId => (
-              <View key={resId} style={styles.storeRow}>
-                <Text style={styles.storeItemName}>{RESOURCE_NAMES[resId]}</Text>
-                <Text style={[styles.storeItemQty, sharedResources[resId] === 0 && styles.storeItemQtyZero]}>
-                  ×{sharedResources[resId]}
-                </Text>
-              </View>
-            ))}
+              {seeds.length === 0 && fertilizers.length === 0 && harvestBags.length === 0 && (
+                <Text style={styles.storeEmpty}>Storage is empty.</Text>
+              )}
+
+              {/* Materials (shared resources – informational, always visible) */}
+              <Text style={styles.storeCatLabel}>Materials</Text>
+              {CORE_MATERIAL_IDS.map(resId => (
+                <View key={resId} style={styles.storeRow}>
+                  <Text style={styles.storeItemName}>{RESOURCE_NAMES[resId]}</Text>
+                  <Text style={[styles.storeItemQty, sharedResources[resId] === 0 && styles.storeItemQtyZero]}>
+                    ×{sharedResources[resId]}
+                  </Text>
+                </View>
+              ))}
+            </ScrollView>
 
             <TouchableOpacity style={styles.closeBtn} onPress={() => setShowStorage(false)} activeOpacity={0.8}>
               <Text style={styles.closeBtnText}>Close</Text>
@@ -2847,14 +2866,7 @@ const styles = StyleSheet.create({
 
   secondPlotWrap: {
     marginHorizontal: 16,
-    marginTop: 12,
-  },
-  secondPlotLabel: {
-    color: "#C4943A",
-    fontSize: 13,
-    fontFamily: "Oldenburg",
-    letterSpacing: 0.8,
-    marginBottom: 6,
+    marginTop: 6,
   },
 
   // Tear-out modal
@@ -2884,6 +2896,8 @@ const styles = StyleSheet.create({
     shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.6, shadowRadius: 16, elevation: 24,
   },
   storageTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "center" },
+  storageScroll: { flexShrink: 1 },
+  storageScrollContent: { paddingBottom: 4 },
   panelTitle: { color: "#F5E6C8", fontSize: 18, fontFamily: "Oldenburg", letterSpacing: 1, textAlign: "center" },
   divider: { height: 1, backgroundColor: "rgba(196,148,58,0.22)", marginVertical: 10 },
   storeCatLabel: {

@@ -101,6 +101,8 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   leather: require("../../assets/images/leather.png"),
   sap: require("../../assets/images/sap.png"),
   quest_hunters_documents: require("../../assets/images/quest_bag.png"),
+  quest_lost_adventurer_item: require("../../assets/images/quest_item.png"),
+  quest_guild_provisions: require("../../assets/images/quest_item.png"),
   malted_barley: require("../../assets/images/quest_item.png"),
   brewers_yeast: require("../../assets/images/quest_item.png"),
   dried_hop_cones: require("../../assets/images/quest_item.png"),

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from typing import List
 import uuid
 from datetime import datetime
+from support_mail import router as support_router
 
 
 ROOT_DIR = Path(__file__).parent
@@ -54,6 +55,7 @@ async def get_status_checks():
 
 # Include the router in the main app
 app.include_router(api_router)
+app.include_router(support_router)
 
 app.add_middleware(
     CORSMiddleware,

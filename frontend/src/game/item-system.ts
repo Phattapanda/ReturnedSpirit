@@ -228,14 +228,18 @@ function sameOptionalTagSet<T extends string>(a?: readonly T[], b?: readonly T[]
 /** Returns true only when all stack-relevant properties are identical. */
 export function canStack(a: BagItem, b: BagItem): boolean {
   if (a.id === "scroll" || b.id === "scroll" || a.id.endsWith("_scroll") || b.id.endsWith("_scroll")) return false;
+  // Reward potions may use the legacy generic "consumable" itemType,
+  // whereas crafted potions use their item ID. Their identity is the same.
+  const bothPotions = getConsumableCategory(a) === CONSUMABLE_CATEGORY.POTION &&
+    getConsumableCategory(b) === CONSUMABLE_CATEGORY.POTION;
   return (
-    normalizeItemId(a.itemType) === normalizeItemId(b.itemType) &&
+    (bothPotions || normalizeItemId(a.itemType) === normalizeItemId(b.itemType)) &&
     normalizeItemId(a.id)       === normalizeItemId(b.id) &&
     (a.quality          ?? null) === (b.quality          ?? null) &&
     (a.containedItem    ?? null) === (b.containedItem    ?? null) &&
     (a.containedQuantity ?? null) === (b.containedQuantity ?? null) &&
     sameOptionalTagSet(a.mealTags, b.mealTags) &&
-    (a.consumableCategory ?? null) === (b.consumableCategory ?? null) &&
+    getConsumableCategory(a) === getConsumableCategory(b) &&
     (a.monsterId ?? null) === (b.monsterId ?? null) &&
     (a.seasonedStage ?? null) === (b.seasonedStage ?? null) &&
     ((a.durability === undefined && b.durability === undefined) ||
@@ -810,6 +814,16 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
   quest_hunters_documents: {
     name: "Research Documents",
     description: "A field bag containing the researchers' abandoned documents. Quest item.",
+    attributes: [ITEM_ATTRIBUTE.QUEST_ITEM],
+  },
+  quest_lost_adventurer_item: {
+    name: "Lost Adventurer Item",
+    description: "Wanted by the Adventurers' Guild.",
+    attributes: [ITEM_ATTRIBUTE.QUEST_ITEM],
+  },
+  quest_guild_provisions: {
+    name: "Provisions",
+    description: "Resources provided by the guild for adventurers.",
     attributes: [ITEM_ATTRIBUTE.QUEST_ITEM],
   },
   armor_leather_bracers: {

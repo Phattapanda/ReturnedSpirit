@@ -33,7 +33,18 @@ function load(file) {
 (async () => {
   const { rollRecipeDrops, readRecipeItem } = load(path.join(root, "src/game/recipe-item.ts"));
   const { COOKING_RECIPES, DISCOVERED_RECIPES_KEY } = load(path.join(root, "src/game/cooking-system.ts"));
-  const { ITEM_CATALOG, PLAYER_BAG_KEY, KITCHEN_TABLE_KEY, isItemDiscardable } = load(path.join(root, "src/game/item-system.ts"));
+  const { ITEM_CATALOG, PLAYER_BAG_KEY, KITCHEN_TABLE_KEY, isItemDiscardable, canStack, getContainerStackLimit } = load(path.join(root, "src/game/item-system.ts"));
+  for (const [id, catalog] of Object.entries(ITEM_CATALOG)) {
+    if (catalog.consumableCategory !== "potion") continue;
+    const crafted = { id, itemType: id, name: catalog.name, quantity: 2 };
+    const reward = { ...crafted, itemType: "consumable", consumableCategory: "potion", quantity: 1 };
+    assert.equal(canStack(crafted, reward), true, `${id}: crafted and reward stack`);
+    assert.equal(canStack(reward, crafted), true, `${id}: symmetric stacking`);
+    assert.equal(canStack(crafted, { ...reward, quality: "different" }), false);
+    assert.equal(canStack(crafted, { ...reward, id: "another_potion" }), false);
+    assert.equal(canStack(crafted, { ...crafted, quantity: 1 }), true);
+  }
+  assert.equal(getContainerStackLimit("kitchenTable"), 20);
   const meal = COOKING_RECIPES.find((recipe) => recipe.toolId === "oldpot");
   assert.equal(rollRecipeDrops(meal, 3, () => 0.049), 3);
   assert.equal(rollRecipeDrops(meal, 3, () => 0.05), 0);

@@ -4,6 +4,8 @@ import {
   Text,
   TouchableOpacity,
   Image,
+  Modal,
+  Pressable,
   StyleSheet,
   type ImageSourcePropType,
 } from "react-native";
@@ -12,6 +14,7 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
+  withRepeat,
   interpolateColor,
 } from "react-native-reanimated";
 
@@ -85,6 +88,7 @@ export type GardenPlotProps = {
   onHarvestStored?: (item: BagItem) => void;
   onActionSuccess?: () => void;
   onLockedAction?: () => void;
+  attentionPulse?: boolean;
   actionCosts?: { water: number; pullWeeds: number; fertilize: number };
   selectedFertilizerId?: string;
   fertilizerAvailable?: boolean;
@@ -212,6 +216,7 @@ export default function GardenPlot(props: GardenPlotProps) {
     onHarvestStored,
     onActionSuccess,
     onLockedAction,
+    attentionPulse = false,
     actionCosts = { water: 2, pullWeeds: 5, fertilize: 3 },
     selectedFertilizerId = "standard_fertilizer",
     fertilizerAvailable = true,
@@ -231,6 +236,8 @@ export default function GardenPlot(props: GardenPlotProps) {
   const [availableSeeds, setAvailableSeeds] = useState<SeedSelectionOption[]>([]);
   const [selectedSeedId, setSelectedSeedId] = useState<string | null>(null);
   const [secondBusy, setSecondBusy] = useState(false);
+  const [actionMenuVisible, setActionMenuVisible] = useState(false);
+  const [tearOutConfirmVisible, setTearOutConfirmVisible] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -256,6 +263,18 @@ export default function GardenPlot(props: GardenPlotProps) {
 
   const progBarStyle = useAnimatedStyle(() => ({
     backgroundColor: interpolateColor(progColor.value, [0, 1], ["#CC2200", "#4E9E2A"]),
+  }));
+
+  const attentionScale = useSharedValue(1);
+  useEffect(() => {
+    if (attentionPulse && !actionMenuVisible) {
+      attentionScale.value = withRepeat(withTiming(1.07, { duration: 650 }), -1, true);
+    } else {
+      attentionScale.value = withTiming(1, { duration: 180 });
+    }
+  }, [actionMenuVisible, attentionPulse, attentionScale]);
+  const attentionStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: attentionScale.value }],
   }));
 
   async function persistSecond(next: GardenPlotData) {
@@ -310,7 +329,7 @@ export default function GardenPlot(props: GardenPlotProps) {
     if (secondData.wateredToday) { showPlayerThought('"Already watered today."'); return; }
     setSecondBusy(true);
     try {
-      if (!(await onSpendStamina(2))) { showPlayerThought('"Not enough stamina."'); return; }
+      if (!(await onSpendStamina(actionCosts.water))) { showPlayerThought('"Not enough stamina."'); return; }
       await persistSecond({ ...secondData, wateredToday: true });
       onActionSuccess?.();
       refreshGarden();
@@ -368,7 +387,7 @@ export default function GardenPlot(props: GardenPlotProps) {
       const inventory: GardenInventoryItem[] = rawInventory ? JSON.parse(rawInventory) : [];
       const fertIndex = inventory.findIndex((item) => item.id === selected && item.itemType === "fertilizer" && item.quantity > 0);
       if (fertIndex < 0) { showPlayerThought('"No fertilizer available."'); return; }
-      if (!(await onSpendStamina(fertilizerConfig.staminaCost))) { showPlayerThought('"Not enough stamina."'); return; }
+      if (!(await onSpendStamina(actionCosts.fertilize))) { showPlayerThought('"Not enough stamina."'); return; }
 
       const nextInventory = inventory.map((item) => ({ ...item }));
       nextInventory[fertIndex] = {
@@ -427,12 +446,28 @@ export default function GardenPlot(props: GardenPlotProps) {
     }
   }
 
-  async function handleCropPress() {
-    const isEmpty = effectiveData.status === "empty";
-    if (!isEmpty && protectSeeds) {
+  async function handleSecondTearOut() {
+    if (secondBusy || secondData.status === "empty") return;
+    if (protectSeeds) {
       showPlayerThought('"I shouldn\'t waste any seeds."');
       return;
     }
+    setSecondBusy(true);
+    try {
+      await persistSecond({
+        ...emptyAuxiliaryPlot,
+        yieldUpgradeLevel: secondData.yieldUpgradeLevel ?? 0,
+      });
+      onActionSuccess?.();
+      refreshGarden();
+    } finally {
+      setSecondBusy(false);
+      setTearOutConfirmVisible(false);
+    }
+  }
+
+  async function handleCropPress() {
+    const isEmpty = effectiveData.status === "empty";
     if (isAuxiliaryPlot) {
       if (isEmpty) {
         const rawInventory = await AsyncStorage.getItem(GARDEN_INVENTORY_KEY);
@@ -447,10 +482,13 @@ export default function GardenPlot(props: GardenPlotProps) {
         setAvailableSeeds(seeds);
         setSelectedSeedId(null);
         setPlantConfirmVisible(true);
+      } else {
+        setActionMenuVisible(true);
       }
       return;
     }
-    onCropTap();
+    if (isEmpty) onCropTap();
+    else setActionMenuVisible(true);
   }
 
   const cropImg = getCropStageAsset(effectiveData.cropType, effectiveData.progressPercent, effectiveData.status);
@@ -484,7 +522,6 @@ export default function GardenPlot(props: GardenPlotProps) {
   const fertilizeLocked = harvestLocked && !isEmpty && !effectiveData.withered;
   const fertilizeUnavailable = !fertilizeDisabled && !fertilizerAvailable;
   const harvestDisabled = !effectiveInteractive;
-  const harvestNotReady = !effectiveData.readyToHarvest;
 
   const effectiveWater = isAuxiliaryPlot ? handleSecondWater : onWater;
   const effectiveWeeds = isAuxiliaryPlot ? handleSecondWeeds : onPullWeeds;
@@ -497,31 +534,51 @@ export default function GardenPlot(props: GardenPlotProps) {
     ? ACTION_IMG.premium_fertilizer
     : ACTION_IMG.standard_fertilizer;
 
+  function runAction(action: () => void, closeMenu = false) {
+    if (closeMenu) setActionMenuVisible(false);
+    action();
+  }
+
+  function handleTearOutPress() {
+    setActionMenuVisible(false);
+    if (isAuxiliaryPlot) {
+      if (protectSeeds) {
+        showPlayerThought('"I shouldn\'t waste any seeds."');
+        return;
+      }
+      setTearOutConfirmVisible(true);
+      return;
+    }
+    onCropTap();
+  }
+
   return (
     <>
-      <View style={styles.card}>
+      <View style={[styles.card, effectiveData.wateredToday && styles.cardWatered]}>
         <View style={styles.topRow}>
-          <TouchableOpacity
-            style={styles.cropWrap}
-            onPress={effectiveInteractive ? handleCropPress : undefined}
-            disabled={!effectiveInteractive}
-            activeOpacity={0.82}
-          >
-            {cropImg ? (
-              <Image source={cropImg} style={styles.cropImg} resizeMode="contain" resizeMethod="resize" />
-            ) : (
-              <View style={styles.cropEmpty}>
-                <Text
-                  style={styles.cropEmptyText}
-                  numberOfLines={2}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.8}
-                >
-                  {effectiveInteractive ? "Tap to\nplant" : "Empty\nbed"}
-                </Text>
-              </View>
-            )}
-          </TouchableOpacity>
+          <Animated.View style={attentionStyle}>
+            <TouchableOpacity
+              style={[styles.cropWrap, attentionPulse && styles.cropWrapAttention]}
+              onPress={effectiveInteractive ? handleCropPress : undefined}
+              disabled={!effectiveInteractive}
+              activeOpacity={0.82}
+            >
+              {cropImg ? (
+                <Image source={cropImg} style={styles.cropImg} resizeMode="contain" resizeMethod="resize" />
+              ) : (
+                <View style={styles.cropEmpty}>
+                  <Text
+                    style={styles.cropEmptyText}
+                    numberOfLines={2}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.8}
+                  >
+                    {effectiveInteractive ? "Tap to\nplant" : "Empty\nbed"}
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </Animated.View>
 
           <View style={styles.infoCol}>
             <Text style={styles.statusLabel}>{statusLabel}</Text>
@@ -542,26 +599,101 @@ export default function GardenPlot(props: GardenPlotProps) {
           </View>
         </View>
 
-        <View style={styles.divider} />
-        <View style={styles.actionsRow}>
-          <ActionBtn img={ACTION_IMG.watering} label="Water" cost={isEmpty ? "" : `-${actionCosts.water}`} done={effectiveData.wateredToday} disabled={waterDisabled} locked={!waterDisabled && waterLocked} onPress={waterLocked ? lockedAction : effectiveWater} />
-          <ActionBtn img={ACTION_IMG.pullweeds} label="Weeds" cost={isEmpty ? "" : `-${actionCosts.pullWeeds}`} done={effectiveData.weedsPulledToday && !effectiveData.withered} disabled={weedsDisabled} locked={!weedsDisabled && weedsLocked} onPress={weedsLocked ? lockedAction : effectiveWeeds} />
-          <ActionBtn
-            img={fertilizerImage}
-            label="Fertilize"
-            cost={isEmpty ? "" : `-${actionCosts.fertilize}`}
-            done={effectiveData.fertilizedToday}
-            disabled={fertilizeDisabled}
-            locked={!fertilizeDisabled && (fertilizeLocked || fertilizeUnavailable)}
-            onPress={fertilizeUnavailable
-              ? () => showPlayerThought('"No fertilizer available."')
-              : fertilizeLocked
-                ? lockedAction
-                : effectiveFertilize}
-          />
-          <ActionBtn img={ACTION_IMG.harvest} label="Harvest" cost="" done={false} disabled={harvestDisabled} locked={harvestNotReady && effectiveInteractive} onPress={effectiveHarvest} isHarvest />
-        </View>
       </View>
+
+      <Modal
+        visible={actionMenuVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setActionMenuVisible(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setActionMenuVisible(false)}>
+          <Pressable style={styles.actionPanel} onPress={(event) => event.stopPropagation()}>
+            <View style={styles.actionPanelHeader}>
+              <Text style={styles.actionPanelTitle}>{effectiveData.readyToHarvest ? "Harvest" : "Tend plant"}</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setActionMenuVisible(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+              >
+                <Text style={styles.closeButtonText}>×</Text>
+              </TouchableOpacity>
+            </View>
+
+            {effectiveData.readyToHarvest ? (
+              <ActionBtn
+                img={ACTION_IMG.harvest}
+                label="Harvest"
+                cost=""
+                done={false}
+                disabled={harvestDisabled}
+                onPress={() => runAction(effectiveHarvest, true)}
+                isHarvest
+              />
+            ) : (
+              <View style={styles.actionList}>
+                <ActionBtn
+                  img={ACTION_IMG.watering}
+                  label="Watering"
+                  cost={`-${actionCosts.water}`}
+                  done={effectiveData.wateredToday}
+                  disabled={waterDisabled}
+                  locked={!waterDisabled && waterLocked}
+                  onPress={() => runAction(waterLocked ? lockedAction : effectiveWater)}
+                />
+                <ActionBtn
+                  img={ACTION_IMG.pullweeds}
+                  label="Weeding"
+                  cost={`-${actionCosts.pullWeeds}`}
+                  done={effectiveData.weedsPulledToday && !effectiveData.withered}
+                  disabled={weedsDisabled}
+                  locked={!weedsDisabled && weedsLocked}
+                  onPress={() => runAction(weedsLocked ? lockedAction : effectiveWeeds)}
+                />
+                <ActionBtn
+                  img={fertilizerImage}
+                  label="Fertilize"
+                  cost={`-${actionCosts.fertilize}`}
+                  done={effectiveData.fertilizedToday}
+                  disabled={fertilizeDisabled}
+                  locked={!fertilizeDisabled && (fertilizeLocked || fertilizeUnavailable)}
+                  onPress={() => runAction(fertilizeUnavailable
+                    ? () => showPlayerThought('"No fertilizer available."')
+                    : fertilizeLocked
+                      ? lockedAction
+                      : effectiveFertilize)}
+                />
+                <TouchableOpacity style={styles.tearOutAction} onPress={handleTearOutPress} activeOpacity={0.75}>
+                  <Text style={styles.tearOutActionText}>Tear out</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={tearOutConfirmVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setTearOutConfirmVisible(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setTearOutConfirmVisible(false)}>
+          <Pressable style={styles.confirmPanel} onPress={(event) => event.stopPropagation()}>
+            <Text style={styles.actionPanelTitle}>Tear it out?</Text>
+            <Text style={styles.confirmText}>Do you want to tear everything out and replant?</Text>
+            <View style={styles.confirmButtons}>
+              <TouchableOpacity style={styles.confirmCancel} onPress={() => setTearOutConfirmVisible(false)}>
+                <Text style={styles.confirmButtonText}>No</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.confirmDestructive} onPress={() => { void handleSecondTearOut(); }}>
+                <Text style={styles.confirmButtonText}>Yes</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <SeedSelectionModal
         visible={plantConfirmVisible}
@@ -606,7 +738,7 @@ function ActionBtn({ img, label, cost, done, disabled, locked, isHarvest, onPres
     >
       <Image source={img} style={[styles.actionIcon, (disabled || locked) && styles.iconDimmed]} resizeMode="contain" resizeMethod="resize" />
       <Text style={[styles.actionLabel, (disabled || locked) && styles.labelDimmed]}>{label}</Text>
-      {cost ? <Text style={[styles.actionCost, (disabled || locked) && styles.labelDimmed]}>{cost}⚡</Text> : null}
+      {cost ? <Text style={[styles.actionCost, (disabled || locked) && styles.labelDimmed]}>{cost} Stamina</Text> : null}
     </TouchableOpacity>
   );
 }
@@ -624,6 +756,7 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 18,
   },
+  cardWatered: { borderColor: "#4A9FE8" },
   topRow: { flexDirection: "row", padding: 14, gap: 14, alignItems: "center" },
   cropWrap: {
     width: 90, height: 90, borderRadius: 12, overflow: "hidden", borderWidth: 2,
@@ -648,20 +781,68 @@ const styles = StyleSheet.create({
   progressFill: { height: "100%", borderRadius: 5 },
   percentText: { color: "rgba(240,232,213,0.6)", fontSize: 11, fontFamily: "Oldenburg" },
   yieldHint: { color: "rgba(196,148,58,0.65)", fontSize: 10, fontFamily: "Oldenburg", marginTop: 2 },
-  divider: { height: 1, backgroundColor: "rgba(196,148,58,0.18)", marginHorizontal: 10 },
-  actionsRow: { flexDirection: "row", gap: 6, padding: 10 },
   actionBtn: {
-    flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 9,
+    width: "100%", flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 11,
     borderRadius: 10, borderWidth: 1, borderColor: "rgba(90,65,30,0.45)",
-    backgroundColor: "rgba(25,14,4,0.90)", gap: 3, minHeight: 70,
+    backgroundColor: "rgba(25,14,4,0.90)", gap: 10, minHeight: 54,
   },
   actionBtnDone: { borderColor: "rgba(78,158,42,0.55)", backgroundColor: "rgba(78,158,42,0.12)" },
   actionBtnLocked: { borderColor: "rgba(60,40,20,0.40)", backgroundColor: "rgba(15,8,2,0.85)", opacity: 0.5 },
   actionBtnDisabled: { opacity: 0.35 },
   actionBtnHarvest: { borderColor: "rgba(196,148,58,0.65)", backgroundColor: "rgba(196,148,58,0.14)" },
-  actionIcon: { width: 28, height: 28 },
+  actionIcon: { width: 32, height: 32 },
   iconDimmed: { opacity: 0.45 },
-  actionLabel: { color: "#F0E8D5", fontSize: 10, fontFamily: "Oldenburg", textAlign: "center", letterSpacing: 0.3 },
-  actionCost: { color: "rgba(240,232,213,0.55)", fontSize: 9, fontFamily: "Oldenburg", textAlign: "center" },
+  actionLabel: { flex: 1, color: "#F0E8D5", fontSize: 14, fontFamily: "Oldenburg", letterSpacing: 0.3 },
+  actionCost: { color: "rgba(240,232,213,0.72)", fontSize: 12, fontFamily: "Oldenburg", fontVariant: ["tabular-nums"] },
   labelDimmed: { opacity: 0.45 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.68)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+  },
+  cropWrapAttention: {
+    borderColor: "#F0C862",
+  },
+  actionPanel: {
+    width: "100%",
+    maxWidth: 380,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: "rgba(196,148,58,0.65)",
+    backgroundColor: "rgba(18,10,3,0.98)",
+    padding: 14,
+    gap: 12,
+  },
+  actionPanelHeader: { flexDirection: "row", alignItems: "center", gap: 12 },
+  actionPanelTitle: { flex: 1, color: "#E8C978", fontSize: 18, fontFamily: "Oldenburg" },
+  closeButton: { width: 38, height: 38, alignItems: "center", justifyContent: "center", borderRadius: 19 },
+  closeButtonText: { color: "#F0E8D5", fontSize: 30, lineHeight: 32 },
+  actionList: { gap: 8 },
+  tearOutAction: {
+    minHeight: 50,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(186,64,49,0.65)",
+    backgroundColor: "rgba(112,28,20,0.35)",
+  },
+  tearOutActionText: { color: "#F0B3A8", fontSize: 14, fontFamily: "Oldenburg" },
+  confirmPanel: {
+    width: "100%",
+    maxWidth: 360,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: "rgba(196,148,58,0.65)",
+    backgroundColor: "rgba(18,10,3,0.98)",
+    padding: 18,
+    gap: 16,
+  },
+  confirmText: { color: "#F0E8D5", fontSize: 13, lineHeight: 20, fontFamily: "Oldenburg" },
+  confirmButtons: { flexDirection: "row", gap: 10 },
+  confirmCancel: { flex: 1, padding: 12, borderRadius: 10, alignItems: "center", backgroundColor: "rgba(90,65,30,0.45)" },
+  confirmDestructive: { flex: 1, padding: 12, borderRadius: 10, alignItems: "center", backgroundColor: "rgba(140,40,28,0.72)" },
+  confirmButtonText: { color: "#F0E8D5", fontSize: 13, fontFamily: "Oldenburg" },
 });

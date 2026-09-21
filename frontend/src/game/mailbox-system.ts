@@ -407,7 +407,7 @@ export async function claimMailboxMessage(messageId: string): Promise<ClaimMailR
     : null;
   if (gardenInventory) for (const reward of gardenRewards) {
     const existing = gardenInventory.find((item) => item.id === reward.itemId && item.itemType === reward.itemType);
-    if (existing) existing.quantity += reward.quantity;
+    if (existing) existing.quantity = Math.min(Number.MAX_SAFE_INTEGER, existing.quantity + reward.quantity);
     else gardenInventory.push({ id: reward.itemId, itemType: reward.itemType, name: ITEM_CATALOG[reward.itemId]?.name ?? reward.itemId, quantity: reward.quantity });
   }
 

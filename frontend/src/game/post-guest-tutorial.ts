@@ -35,7 +35,7 @@ import {
   getEffectiveEndurance,
   normalizePlayerStats,
 } from "@/src/game/player-stats";
-import { loadTavernQuestState } from "@/src/game/tavern-quest-system";
+import { loadTavernQuestState, notifyTavernQuestPrerequisitesChanged } from "@/src/game/tavern-quest-system";
 
 export const POST_GUEST_TUTORIAL_STATE_KEY = "@tutorial:post_guest_state";
 const GARDEN_INVENTORY_KEY = "@garden:inventory";
@@ -318,6 +318,7 @@ export async function purchaseTavernDrinkUpgrade(upgradeId: TavernDrinkUpgradeId
     [PLAYER_BAG_KEY, JSON.stringify(playerBag)],
     [POST_GUEST_TUTORIAL_STATE_KEY, JSON.stringify(nextState)],
   ]);
+  await notifyTavernQuestPrerequisitesChanged();
   return { ok: true, alreadyUnlocked: false, state: nextState, playerBag };
 }
 

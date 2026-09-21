@@ -56,6 +56,7 @@ import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats, type Play
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
 import { isRupertAlchemyIntroPending } from "@/src/game/rupert-alchemy-intro";
 import { setPlaytimePaused } from "@/src/game/playtime-tracker";
+import { UI_NOTIFICATION_DURATION_MS } from "@/src/ui/timings";
 import { loadGuestTutorialIntroStep } from "@/src/game/guest-tutorial";
 import { ELAPSED_DAYS_KEY, prepareTitheForDay } from "@/src/game/tithe-system";
 import {
@@ -118,7 +119,7 @@ type RoomState =
 
 const IMG = {
   room_evening: require("../assets/images/room1_evening.png"),
-  room_morning: require("../assets/images/room1_morning.jpg"),
+  room_morning: require("../assets/images/room1_morning.png"),
   avLaugh:      require("../assets/images/avatar1_laugh.png"),
   avNormal:     require("../assets/images/avatar1_normal.png"),
   avSad:        require("../assets/images/avatar1_sad.png"),
@@ -869,7 +870,7 @@ export default function DormitoryScreen() {
     if (!canAfford(upgrade, sharedResources)) {
       if (upgradeMsgTimer.current) clearTimeout(upgradeMsgTimer.current);
       setUpgradeMsg("Not enough resources.");
-      upgradeMsgTimer.current = setTimeout(() => setUpgradeMsg(null), 2500);
+      upgradeMsgTimer.current = setTimeout(() => setUpgradeMsg(null), UI_NOTIFICATION_DURATION_MS);
       return;
     }
 
@@ -905,7 +906,7 @@ export default function DormitoryScreen() {
     } finally {
       roomUpgradeBusyRef.current = false;
       if (upgradeMsgTimer.current) clearTimeout(upgradeMsgTimer.current);
-      upgradeMsgTimer.current = setTimeout(() => setUpgradeMsg(null), 2500);
+      upgradeMsgTimer.current = setTimeout(() => setUpgradeMsg(null), UI_NOTIFICATION_DURATION_MS);
     }
   }
 

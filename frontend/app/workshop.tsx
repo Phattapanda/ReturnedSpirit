@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -16,6 +16,7 @@ import { DEFAULT_BAG, ITEM_ATTRIBUTE, PLAYER_BAG_KEY, canStack, hasItemAttribute
 import { WORKSHOP_CRAFT_INGREDIENTS_KEY, WORKSHOP_CRAFT_RESULT_KEY, WORKSHOP_CRAFT_TOOL_KEY, WORKSHOP_STORAGE_KEY, loadWorkshopState } from "@/src/game/workshop-system";
 import { createCraftedScroll, SCROLL_BASE_USES } from "@/src/game/scroll-system";
 import { PLAYER_STATS_KEY, normalizePlayerStats } from "@/src/game/player-stats";
+import { UI_NOTIFICATION_DURATION_MS } from "@/src/ui/timings";
 
 const BACKGROUND = require("../assets/images/workshop.png");
 const TOOL_CATEGORIES = [
@@ -65,6 +66,12 @@ export default function WorkshopScreen() {
   const [storageActionIndex, setStorageActionIndex] = useState<number | null>(null);
   const [effectiveness, setEffectiveness] = useState(1);
   const [scrollActivationKey, setScrollActivationKey] = useState(0);
+
+  useEffect(() => {
+    if (!message) return;
+    const timer = setTimeout(() => setMessage(null), UI_NOTIFICATION_DURATION_MS);
+    return () => clearTimeout(timer);
+  }, [message]);
 
   useFocusEffect(useCallback(() => { let active = true; (async () => {
     const state = await loadWorkshopState(); if (state.phase !== "complete") { router.replace("/outside-tavern"); return; }

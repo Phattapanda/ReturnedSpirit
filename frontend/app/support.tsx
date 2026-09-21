@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   View,
   Text,
@@ -13,6 +13,8 @@ import { useRouter } from "expo-router";
 import { Image } from "expo-image";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as ImagePicker from "expo-image-picker";
+import { fetch } from "expo/fetch";
 
 const BG = require("../assets/images/mainpage.png");
 
@@ -20,12 +22,69 @@ export default function Support() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [message, setMessage] = useState("");
+  const [replyEmail, setReplyEmail] = useState("");
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
+  const [screenshot, setScreenshot] = useState<{ uri: string; base64: string } | null>(null);
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const busy = useRef(false);
 
-  const handleSend = () => {
-    if (!message.trim()) return;
-    setSent(true);
-    setMessage("");
+  async function chooseScreenshot() {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], base64: true, quality: 0.8, allowsMultipleSelection: false });
+      if (result.canceled) return;
+      const asset = result.assets[0];
+      if (!asset.base64 || asset.base64.length > 4 * 1024 * 1024 || asset.width * asset.height > 12_000_000) {
+        setSendError("Choose a screenshot under 3 MB and 12 megapixels.");
+        return;
+      }
+      setScreenshot({ uri: asset.uri, base64: asset.base64 });
+      setSendError(null);
+    } catch { setSendError("Could not open the image library. Please try again."); }
+  }
+
+  const handleSend = async () => {
+    if (!message.trim() || busy.current) return;
+    const address = replyEmail.trim();
+    if (address && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
+      setEmailError("Enter a valid email address or leave this field empty.");
+      return;
+    }
+    setEmailError(null);
+    const baseUrl = process.env.EXPO_PUBLIC_BACKEND_URL?.replace(/\/$/, "");
+    if (!baseUrl || !baseUrl.startsWith("https://")) {
+      setSendError("Support sending is not configured yet. Your draft has been kept.");
+      return;
+    }
+    busy.current = true;
+    setSending(true);
+    setSendError(null);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 45000);
+    try {
+      const response = await fetch(`${baseUrl}/api/support`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: message.trim(), reply_email: address || null, screenshot: screenshot?.base64 ?? null }),
+        signal: controller.signal,
+      });
+      const result = await response.json();
+      if (!response.ok || result.accepted !== true) {
+        throw new Error(typeof result.detail === "string" ? result.detail : "The server could not confirm sending. Your draft has been kept.");
+      }
+      setSent(true);
+      setMessage("");
+      setReplyEmail("");
+      setScreenshot(null);
+    } catch (error) {
+      setSendError(error instanceof Error && error.name !== "AbortError" && !error.message.toLowerCase().includes("fetch")
+        ? error.message : "Could not confirm sending. Check your connection. Your draft has been kept; retrying may send a duplicate.");
+    } finally {
+      clearTimeout(timer);
+      busy.current = false;
+      setSending(false);
+    }
   };
 
   return (
@@ -49,14 +108,14 @@ export default function Support() {
         {/* Privacy notice */}
         <View style={styles.notice}>
           <MaterialCommunityIcons name="shield-lock-outline" size={16} color="#8B7355" />
-          <Text style={styles.noticeText}>Anonymous by default — no name or email required.</Text>
+          <Text style={styles.noticeText}>No name or email required. Only add an email address if you would like a reply.</Text>
         </View>
 
         {sent ? (
           <View style={styles.successBox} testID="success-message">
             <MaterialCommunityIcons name="check-circle-outline" size={48} color="#6B7C55" />
-            <Text style={styles.successTitle}>Message Sent!</Text>
-            <Text style={styles.successSub}>Thank you for your feedback. We&apos;ll get back to you soon.</Text>
+            <Text style={styles.successTitle}>Message submitted!</Text>
+            <Text style={styles.successSub}>Thank you for your feedback!</Text>
             <TouchableOpacity testID="send-another-button" style={styles.sendAnotherBtn} onPress={() => setSent(false)}>
               <Text style={styles.sendAnotherText}>Send another</Text>
             </TouchableOpacity>
@@ -69,6 +128,8 @@ export default function Support() {
                 testID="support-message-input"
                 style={styles.messageInput}
                 value={message}
+                editable={!sending}
+                maxLength={5000}
                 onChangeText={setMessage}
                 placeholder="Found a bug, have a suggestion, or just want to say hi?"
                 placeholderTextColor="#A89880"
@@ -78,25 +139,51 @@ export default function Support() {
               />
             </View>
 
+            <Text style={styles.label}>EMAIL ADDRESS (OPTIONAL)</Text>
+            <View style={styles.inputWrapper}>
+              <TextInput
+                testID="support-email-input"
+                accessibilityLabel="Email address, optional, only for a reply"
+                style={styles.emailInput}
+                value={replyEmail}
+                editable={!sending}
+                onChangeText={(value) => { setReplyEmail(value); setEmailError(null); }}
+                placeholder="Only if you would like a reply"
+                placeholderTextColor="#A89880"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                maxLength={254}
+              />
+            </View>
+            <Text selectable style={styles.privacyNote}>Leave this empty to submit without a contact address. Without an email address, we cannot reply to you.</Text>
+            {emailError && <Text accessibilityLiveRegion="polite" style={styles.emailError}>{emailError}</Text>}
+
             <Text style={styles.label}>SCREENSHOT (OPTIONAL)</Text>
-            <TouchableOpacity testID="add-screenshot-button" style={styles.screenshotBtn}>
+            <TouchableOpacity testID="add-screenshot-button" style={styles.screenshotBtn} onPress={() => { void chooseScreenshot(); }} disabled={sending}>
               <MaterialCommunityIcons name="image-plus" size={18} color="#C4614A" />
-              <Text style={styles.screenshotText}>Add a screenshot</Text>
+              <Text style={styles.screenshotText}>{screenshot ? "Replace screenshot" : "Add a screenshot"}</Text>
             </TouchableOpacity>
+            {screenshot && <View style={{ gap: 8 }}>
+              <Image source={{ uri: screenshot.uri }} style={{ width: "100%", height: 180 }} contentFit="contain" accessibilityLabel="Selected screenshot" />
+              <TouchableOpacity disabled={sending} onPress={() => setScreenshot(null)}><Text style={styles.screenshotText}>Remove screenshot</Text></TouchableOpacity>
+            </View>}
+            {sendError && <Text selectable accessibilityLiveRegion="polite" style={styles.emailError}>{sendError}</Text>}
 
             <TouchableOpacity
               testID="send-message-button"
-              style={[styles.sendBtn, !message.trim() && styles.sendBtnDisabled]}
+              style={[styles.sendBtn, (!message.trim() || sending) && styles.sendBtnDisabled]}
               onPress={handleSend}
-              disabled={!message.trim()}
+              disabled={!message.trim() || sending}
             >
               <MaterialCommunityIcons name="send-outline" size={18} color="#2C1810" />
-              <Text style={styles.sendBtnText}>Send message</Text>
+              <Text style={styles.sendBtnText}>{sending ? "Sending…" : "Send message"}</Text>
             </TouchableOpacity>
 
             <Text style={styles.privacyNote}>
-              We only receive your message and (if you add one) the screenshot.
+              Your email address is optional and will only be used to reply to your support request. Avoid including personal information in your message or screenshot if you do not want to share it.
             </Text>
+            <Text selectable style={styles.privacyNote}>By sending, you share your message, selected screenshot and optional contact address with arcades.soijanda@gmail.com through our support server and email provider.</Text>
           </>
         )}
       </ScrollView>
@@ -154,6 +241,8 @@ const styles = StyleSheet.create({
     color: "#2C1810",
     minHeight: 130,
   },
+  emailInput: { padding: 14, fontSize: 15, color: "#2C1810" },
+  emailError: { color: "#A32A20", fontSize: 13 },
   screenshotBtn: {
     flexDirection: "row",
     alignItems: "center",

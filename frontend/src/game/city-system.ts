@@ -29,6 +29,13 @@ export const SUPPORTER_BAG_KEY = "@game:supporter_bag";
 export type SupporterId = "normal" | "healer" | "cleric" | "botanist";
 export type QuestId = "wolves" | "feathers" | "camp" | "healing";
 export type QuestStatus = "offered" | "accepted" | "ready" | "completed";
+export type RankHQuestDefinition = {
+  id: QuestId; variantId: string; type: string; rank: "H" | "G"; title: string; detail: string;
+  rewardCopper: number; reputation: number; targetMonsterId?: string; targetQuantity?: number;
+  requirement?: { itemId: string; quantity: number };
+  investigation?: "documents" | "lost_item" | "provisions";
+  minimumFloor?: number; searchChance?: number; deliveryFloor?: number;
+};
 export type TempleBlessingId = "endurance" | "fortune" | "protection";
 export type MerchantContractId = "herb_bag" | "carrot_bag" | "herb_soup" | "carrot_soup" | "onion_soup" | "onion_bag";
 
@@ -63,12 +70,64 @@ export const SUPPORTERS: Record<SupporterId, SupporterDefinition> = {
   botanist: { id: "botanist", name: "Botanist Porter", rows: 3, columns: 4, slots: 12, description: "+15% herb and mushroom yield, Perception and Luck while searching." },
 };
 
-export const QUESTS = {
-  wolves: { id: "wolves", type: "Battle Quest", rank: "H", title: "Defeat 2 Feral Rabbits", detail: "Defeat two Feral Rabbits in the Forest Dungeon.", rewardCopper: 60, reputation: 7 },
-  feathers: { id: "feathers", type: "Collection Quest", rank: "H", title: "Collect 2× Mushrooms", detail: "Bring two Mushrooms to the Adventurers’ Guild.", rewardCopper: 40, reputation: 5 },
-  camp: { id: "camp", type: "Investigation Quest", rank: "H", title: "Retrieve the Researchers' Documents", detail: "Retrieve the researchers' documents from the abandoned camp in the Forest Dungeon.", rewardCopper: 75, reputation: 3 },
-  healing: { id: "healing", type: "Alchemy Quest", rank: "H", title: "Deliver 1 Low Quality Stamina Potion", detail: "Bring one Low Quality Stamina Potion to the Adventurers’ Guild.", rewardCopper: 60, reputation: 4 },
-} as const;
+const BATTLE_QUESTS: readonly RankHQuestDefinition[] = [
+  ["feral_rabbit", "Feral Rabbit", 55], ["wild_boar", "Wild Boar", 60], ["forest_slime", "Forest Slime", 50],
+  ["wild_wolf", "Wild Wolf", 65], ["goblin_forager", "Goblin Forager", 75], ["ember_chick", "Ember Chick", 70],
+].map(([monsterId, name, reward]) => ({ id: "wolves", variantId: String(monsterId), type: "Battle Quest", rank: "H", title: `Defeat 1 ${name}`, detail: `Defeat one ${name} in the Forest Dungeon.`, rewardCopper: Number(reward), reputation: 7, targetMonsterId: String(monsterId) }));
+const COLLECTION_QUESTS: readonly RankHQuestDefinition[] = [
+  ["slime_gel", "Slime Gel", 1], ["weak_monster_core", "Weak Monster Core", 1], ["tusk", "Tusk", 1], ["fang", "Fang", 1],
+  ["ember_feather", "Ember Feather", 2], ["ember_chicken_egg", "Ember Chicken Egg", 1], ["hide", "Boar Hide", 1], ["wolf_pelt", "Wolf Pelt", 1],
+].map(([itemId, name, quantity]) => ({ id: "feathers", variantId: String(itemId), type: "Collection Quest", rank: "H", title: `Collect ${quantity}× ${name}`, detail: `Bring ${quantity}× ${name} to the Adventurers’ Guild.`, rewardCopper: 40, reputation: 5, requirement: { itemId: String(itemId), quantity: Number(quantity) } }));
+const INVESTIGATION_QUESTS: readonly RankHQuestDefinition[] = [
+  { id: "camp", variantId: "documents", type: "Investigation Quest", rank: "H", title: "Retrieve the Researchers' Documents", detail: "Retrieve the researchers' documents from the abandoned camp in the Forest Dungeon.", rewardCopper: 75, reputation: 3, investigation: "documents", requirement: { itemId: "quest_hunters_documents", quantity: 1 } },
+  { id: "camp", variantId: "lost_item", type: "Investigation Quest", rank: "H", title: "Retrieve a lost item from an adventurer", detail: "Search the Forest Dungeon for an item lost by an adventurer.", rewardCopper: 75, reputation: 3, investigation: "lost_item", requirement: { itemId: "quest_lost_adventurer_item", quantity: 1 } },
+  { id: "camp", variantId: "provisions", type: "Investigation Quest", rank: "H", title: "Bring provisions to the rest area on Floor 10 in the Forest Dungeon.", detail: "Carry the Guild provisions to the Forest Rest Area on Floor 10.", rewardCopper: 75, reputation: 3, investigation: "provisions" },
+];
+const ALCHEMY_QUESTS: readonly RankHQuestDefinition[] = ["blue", "red", "yellow", "brown"].map((color) => ({ id: "healing", variantId: color, type: "Alchemy Quest", rank: "H", title: `Deliver 2× ${color[0].toUpperCase()}${color.slice(1)} Alchemy Powder`, detail: `Bring two ${color} Alchemy Powders to the Adventurers’ Guild.`, rewardCopper: 50, reputation: 4, requirement: { itemId: `alchemy_powder_${color}`, quantity: 2 } }));
+const RANK_G_BATTLE_QUESTS: readonly RankHQuestDefinition[] = [
+  ["ember_chick", "Ember Chick", 2, 100], ["ember_chicken", "Ember Chicken", 2, 140],
+  ["ember_rooster", "Ember Rooster", 2, 200], ["wild_wolf", "Wild Wolf", 3, 170],
+].map(([monsterId, name, quantity, reward]) => ({ id: "wolves", variantId: `g_${monsterId}`, type: "Battle Quest", rank: "G", title: `Defeat ${quantity}× ${name}`, detail: `Defeat ${quantity}× ${name} in the Forest Dungeon.`, rewardCopper: Number(reward), reputation: 7, targetMonsterId: String(monsterId), targetQuantity: Number(quantity) }));
+const RANK_G_COLLECTION_QUESTS: readonly RankHQuestDefinition[] = [
+  ["ember_feather", "Ember Feather", 5], ["ember_chicken_egg", "Ember Chicken Egg", 3], ["wolf_pelt", "Wolf Pelt", 3],
+].map(([itemId, name, quantity]) => ({ id: "feathers", variantId: `g_${itemId}`, type: "Collection Quest", rank: "G", title: `Collect ${quantity}× ${name}`, detail: `Bring ${quantity}× ${name} to the Adventurers’ Guild.`, rewardCopper: 100, reputation: 5, requirement: { itemId: String(itemId), quantity: Number(quantity) } }));
+const RANK_G_INVESTIGATION_QUESTS: readonly RankHQuestDefinition[] = [
+  { id: "camp", variantId: "g_documents", type: "Investigation Quest", rank: "G", title: "Retrieve the Researchers' Documents on floor 10 or later.", detail: "Retrieve the researchers' documents on Floor 10 or later in the Forest Dungeon.", rewardCopper: 150, reputation: 3, investigation: "documents", minimumFloor: 10, requirement: { itemId: "quest_hunters_documents", quantity: 1 } },
+  { id: "camp", variantId: "g_lost_item", type: "Investigation Quest", rank: "G", title: "Retrieve a lost item from an adventurer on floor 10 or later.", detail: "Search on Floor 10 or later in the Forest Dungeon for an item lost by an adventurer.", rewardCopper: 150, reputation: 3, investigation: "lost_item", minimumFloor: 10, searchChance: 0.25, requirement: { itemId: "quest_lost_adventurer_item", quantity: 1 } },
+  { id: "camp", variantId: "g_provisions", type: "Investigation Quest", rank: "G", title: "Bring provisions to the rest area on Floor 20 in the Forest Dungeon.", detail: "Carry the Guild provisions to the Forest Rest Area on Floor 20.", rewardCopper: 150, reputation: 3, investigation: "provisions", deliveryFloor: 20 },
+];
+const RANK_G_ALCHEMY_QUESTS: readonly RankHQuestDefinition[] = [
+  ["potion_stamina_low_grade", "Low Grade Stamina Potion"], ["potion_healing_low_grade", "Low Grade Health Potion"],
+  ["potion_energy_low_grade", "Low Grade Energy Potion"], ["fire_bolt_scroll", "Fire Bolt Scroll"],
+  ["lightning_bolt_scroll", "Lightning Bolt Scroll"], ["ice_field_scroll", "Ice Field Scroll"],
+].map(([itemId, name]) => ({ id: "healing", variantId: `g_${itemId}`, type: "Alchemy Quest", rank: "G", title: `Deliver 1× ${name}`, detail: `Bring one ${name} to the Adventurers’ Guild.`, rewardCopper: 120, reputation: 4, requirement: { itemId, quantity: 1 } }));
+const RANK_H_QUEST_VARIANTS: Record<QuestId, readonly RankHQuestDefinition[]> = { wolves: BATTLE_QUESTS, feathers: COLLECTION_QUESTS, camp: INVESTIGATION_QUESTS, healing: ALCHEMY_QUESTS };
+const RANK_G_QUEST_VARIANTS: Record<QuestId, readonly RankHQuestDefinition[]> = { wolves: RANK_G_BATTLE_QUESTS, feathers: RANK_G_COLLECTION_QUESTS, camp: RANK_G_INVESTIGATION_QUESTS, healing: RANK_G_ALCHEMY_QUESTS };
+const ALL_QUEST_VARIANTS: Record<QuestId, readonly RankHQuestDefinition[]> = {
+  wolves: [...BATTLE_QUESTS, ...RANK_G_BATTLE_QUESTS],
+  feathers: [...COLLECTION_QUESTS, ...RANK_G_COLLECTION_QUESTS],
+  camp: [...INVESTIGATION_QUESTS, ...RANK_G_INVESTIGATION_QUESTS],
+  healing: [...ALCHEMY_QUESTS, ...RANK_G_ALCHEMY_QUESTS],
+};
+export const QUESTS = { wolves: BATTLE_QUESTS[0], feathers: COLLECTION_QUESTS[0], camp: INVESTIGATION_QUESTS[0], healing: ALCHEMY_QUESTS[0] } as const;
+const DEFAULT_RANK_H_QUEST_VARIANTS: Record<QuestId, string> = { wolves: "feral_rabbit", feathers: "slime_gel", camp: "documents", healing: "blue" };
+const DEFAULT_RANK_G_QUEST_VARIANTS: Record<QuestId, string> = { wolves: "g_ember_chick", feathers: "g_ember_feather", camp: "g_documents", healing: "g_potion_stamina_low_grade" };
+
+function questVariantsForRank(id: QuestId, rankIndex: number): readonly RankHQuestDefinition[] {
+  return rankIndex >= 1 ? RANK_G_QUEST_VARIANTS[id] : RANK_H_QUEST_VARIANTS[id];
+}
+
+export function getQuestDefinition(id: QuestId, state: Pick<CityState, "questVariants">): RankHQuestDefinition {
+  return ALL_QUEST_VARIANTS[id].find((definition) => definition.variantId === state.questVariants[id]) ?? QUESTS[id];
+}
+
+function nextQuestVariant(id: QuestId, current: string, week: number, rankIndex: number): string {
+  const rankVariants = questVariantsForRank(id, rankIndex);
+  const choices = rankVariants.filter((definition) => definition.variantId !== current);
+  const available = choices.length ? choices : rankVariants;
+  const category = (Object.keys(RANK_H_QUEST_VARIANTS) as QuestId[]).indexOf(id) + 1;
+  return available[Math.abs((week + 1) * 1103515245 + category * 12345) % available.length].variantId;
+}
 const RANK_H_QUEST_KARMA_POINTS = 3;
 
 export type CityState = {
@@ -85,6 +144,7 @@ export type CityState = {
   adventurerPromotionProgress: number;
   adventurerPromotionCompleted: boolean;
   quests: Record<QuestId, { status: QuestStatus; progress: number }>;
+  questVariants: Record<QuestId, string>;
   questRollWeek: number;
   pendingProcessing: {
     id: string; dueDay: number; meat: number; feathers: number;
@@ -140,6 +200,8 @@ function normalizeCityState(raw: unknown, day: number, weekday: number): CitySta
   const farmPeriod = marketPeriod(day, weekday, 1);
   const savedPeriods = value.marketPurchasePeriods;
   const savedPurchases = value.marketPurchases;
+  const normalizedAdventurerRankIndex = Math.max(0, Math.min(9, Math.floor(value.adventurerRankIndex ?? (value.adventurerPromotionCompleted ? 1 : 0))));
+  const defaultQuestVariants = normalizedAdventurerRankIndex >= 1 ? DEFAULT_RANK_G_QUEST_VARIANTS : DEFAULT_RANK_H_QUEST_VARIANTS;
   return {
     version: 3,
     foodStockDay: value.foodStockDay === day ? day : day,
@@ -155,14 +217,22 @@ function normalizeCityState(raw: unknown, day: number, weekday: number): CitySta
       ? { id: value.supporter.id, runsRemaining: Math.max(0, Math.min(3, Math.floor(value.supporter.runsRemaining))), announcedRunSerial: value.supporter.announcedRunSerial ?? null }
       : null,
     guildReputation: Math.max(0, Math.floor(value.guildReputation ?? 0)),
-    adventurerRankIndex: Math.max(0, Math.min(9, Math.floor(value.adventurerRankIndex ?? (value.adventurerPromotionCompleted ? 1 : 0)))),
+    adventurerRankIndex: normalizedAdventurerRankIndex,
     adventurerPromotionDialogSeen: value.adventurerPromotionDialogSeen === true,
     adventurerPromotionActive: value.adventurerPromotionActive === true,
-    adventurerPromotionProgress: Math.max(0, Math.min(5, Math.floor(value.adventurerPromotionProgress ?? 0))),
+    adventurerPromotionProgress: Math.max(0, Math.min(3, Math.floor(value.adventurerPromotionProgress ?? 0))),
     adventurerPromotionCompleted: value.adventurerPromotionCompleted === true,
     quests: Object.fromEntries((Object.keys(QUESTS) as QuestId[]).map((id) => [id, {
       status: savedQuests[id]?.status ?? "offered", progress: Math.max(0, Math.floor(savedQuests[id]?.progress ?? 0)),
     }])) as CityState["quests"],
+    questVariants: Object.fromEntries((Object.keys(QUESTS) as QuestId[]).map((id) => {
+      const saved = value.questVariants?.[id];
+      const savedStatus = savedQuests[id]?.status ?? "offered";
+      const activeQuest = savedStatus === "accepted" || savedStatus === "ready";
+      const validForCurrentRank = questVariantsForRank(id, normalizedAdventurerRankIndex).some((definition) => definition.variantId === saved);
+      const validActiveLegacyQuest = activeQuest && ALL_QUEST_VARIANTS[id].some((definition) => definition.variantId === saved);
+      return [id, validForCurrentRank || validActiveLegacyQuest ? saved : defaultQuestVariants[id]];
+    })) as CityState["questVariants"],
     questRollWeek: Math.floor(day / 7),
     pendingProcessing: Array.isArray(value.pendingProcessing) ? value.pendingProcessing : [],
     merchantReputation: normalizedMerchantReputation,
@@ -188,7 +258,11 @@ export async function loadCityState(): Promise<CityState> {
   const state = normalizeCityState(raw ? JSON.parse(raw) : null, day, guestState.calendarWeekday);
   const previousWeek = raw ? Math.floor(Number((JSON.parse(raw) as Partial<CityState>).questRollWeek ?? 0)) : state.questRollWeek;
   if (state.questRollWeek !== previousWeek) {
-    for (const id of Object.keys(QUESTS) as QuestId[]) if (state.quests[id].status === "offered") state.quests[id] = { status: "offered", progress: 0 };
+    for (const id of Object.keys(QUESTS) as QuestId[]) {
+      if (state.quests[id].status === "accepted" || state.quests[id].status === "ready") continue;
+      state.questVariants[id] = nextQuestVariant(id, state.questVariants[id], state.questRollWeek, state.adventurerRankIndex);
+      state.quests[id] = { status: "offered", progress: 0 };
+    }
   }
   const due = state.pendingProcessing.filter((entry) => entry.dueDay <= day);
   if (due.length) {
@@ -290,19 +364,26 @@ export async function beginAdventurerPromotionExam(): Promise<CityState> {
   if (state.adventurerRankIndex !== 0 || state.guildReputation < 50) return state;
   state.adventurerPromotionDialogSeen = true;
   state.adventurerPromotionActive = true;
+  state.adventurerPromotionProgress = 0;
   return saveCityState(state);
 }
 
 export async function completeAdventurerPromotionExam(): Promise<CityActionResult> {
   const state = await loadCityState();
-  if (!state.adventurerPromotionActive || state.adventurerPromotionProgress < 5) {
+  if (!state.adventurerPromotionActive || state.adventurerPromotionProgress < 3) {
     return { ok: false, message: "The Promotion Examination is not complete yet." };
   }
   state.adventurerRankIndex = Math.max(1, state.adventurerRankIndex);
   state.adventurerPromotionActive = false;
   state.adventurerPromotionCompleted = true;
+  for (const id of Object.keys(QUESTS) as QuestId[]) {
+    if (state.quests[id].status === "accepted" || state.quests[id].status === "ready") continue;
+    state.quests[id] = { status: "offered", progress: 0 };
+    state.questVariants[id] = DEFAULT_RANK_G_QUEST_VARIANTS[id];
+  }
   await saveCityState(state);
-  return { ok: true, message: "Promotion Examination passed. Adventurer Rank G reached." };
+  await addCurrencyCopper(300);
+  return { ok: true, message: "Promotion Examination passed. Adventurer Rank G reached. 3 Silver Coins awarded." };
 }
 
 export function hasMerchantAptitudePouch(bag: PlayerBagData): boolean {
@@ -790,20 +871,72 @@ export async function deliverSupporterBagAfterDungeonRun(): Promise<boolean> {
   return true;
 }
 
-export async function hasActiveCampQuest(): Promise<boolean> {
+export async function hasActiveCampQuest(floor = 1): Promise<boolean> {
   const state = await loadCityState();
-  return state.quests.camp.status === "accepted" && state.quests.camp.progress === 0;
+  const definition = getQuestDefinition("camp", state);
+  return state.quests.camp.status === "accepted"
+    && state.quests.camp.progress === 0
+    && definition.investigation === "documents"
+    && floor >= (definition.minimumFloor ?? 1);
 }
 
 export async function markCampDocumentsFound(): Promise<void> {
   const state = await loadCityState();
-  if (state.quests.camp.status !== "accepted") return;
+  if (state.quests.camp.status !== "accepted" || getQuestDefinition("camp", state).investigation !== "documents") return;
   state.quests.camp.progress = 1; state.quests.camp.status = "ready"; await saveCityState(state);
 }
 
+export async function activeLostItemSearchChance(floor: number): Promise<number> {
+  const state = await loadCityState();
+  const definition = getQuestDefinition("camp", state);
+  const active = state.quests.camp.status === "accepted"
+    && state.quests.camp.progress === 0
+    && definition.investigation === "lost_item"
+    && floor >= (definition.minimumFloor ?? 1);
+  return active ? (definition.searchChance ?? 0.33) : 0;
+}
+
+export async function markLostAdventurerItemFound(): Promise<void> {
+  const state = await loadCityState();
+  if (state.quests.camp.status !== "accepted" || getQuestDefinition("camp", state).investigation !== "lost_item") return;
+  state.quests.camp.progress = 1;
+  state.quests.camp.status = "ready";
+  await saveCityState(state);
+}
+
+export async function deliverGuildProvisionsAtFloor(bag: PlayerBagData, floor: number): Promise<{ bag: PlayerBagData; delivered: boolean }> {
+  const state = await loadCityState();
+  const definition = getQuestDefinition("camp", state);
+  if (state.quests.camp.status !== "accepted" || definition.investigation !== "provisions" || floor !== (definition.deliveryFloor ?? 10)) {
+    return { bag, delivered: false };
+  }
+  if (itemCount(bag, "quest_guild_provisions") < 1) return { bag, delivered: false };
+  const nextBag = consumeItems(bag, "quest_guild_provisions", 1);
+  state.quests.camp.progress = 1;
+  state.quests.camp.status = "ready";
+  await saveCityState(state);
+  return { bag: nextBag, delivered: true };
+}
+
 export async function acceptQuest(id: QuestId): Promise<CityActionResult> {
-  const state = await loadCityState(); if (state.quests[id].status !== "offered") return { ok: false, message: "That quest is already in my journal." };
-  state.quests[id] = { status: "accepted", progress: 0 }; await saveCityState(state); return { ok: true, message: `${QUESTS[id].title} accepted.` };
+  const state = await loadCityState();
+  if (state.quests[id].status !== "offered") return { ok: false, message: "That quest is already in my journal." };
+  const definition = getQuestDefinition(id, state);
+  if (id === "camp" && definition.investigation === "provisions") {
+    const bag = await loadBag();
+    const provisions = createItem("quest_guild_provisions");
+    const plan = planAddToNextFreeBagSlot(provisions, bag);
+    if (!plan.ok) return { ok: false, message: "I need one free Player Bag slot for the Guild provisions." };
+    state.quests[id] = { status: "accepted", progress: 0 };
+    await AsyncStorage.multiSet([
+      [PLAYER_BAG_KEY, JSON.stringify({ ...bag, slots: plan.updatedSlots })],
+      [CITY_STATE_KEY, JSON.stringify(state)],
+    ]);
+    return { ok: true, message: `${definition.title} accepted. The Provisions were placed in my Player Bag.` };
+  }
+  state.quests[id] = { status: "accepted", progress: 0 };
+  await saveCityState(state);
+  return { ok: true, message: `${definition.title} accepted.` };
 }
 
 function itemCount(bag: PlayerBagData, id: string): number { return bag.slots.reduce((sum, item) => sum + (item?.id === id ? item.quantity : 0), 0); }
@@ -811,10 +944,10 @@ function itemCount(bag: PlayerBagData, id: string): number { return bag.slots.re
 export function isQuestReadyToTurnIn(id: QuestId, state: CityState, bag: PlayerBagData): boolean {
   const quest = state.quests[id];
   if (quest.status !== "accepted" && quest.status !== "ready") return false;
-  if (id === "wolves") return quest.progress >= 2;
-  if (id === "feathers") return itemCount(bag, "mushroom") >= 2;
-  if (id === "camp") return itemCount(bag, "quest_hunters_documents") >= 1;
-  return id === "healing" && itemCount(bag, "potion_stamina_low_grade") >= 1;
+  const definition = getQuestDefinition(id, state);
+  if (id === "wolves") return quest.progress >= (definition.targetQuantity ?? 1);
+  if (definition.investigation === "provisions") return quest.status === "ready" && quest.progress >= 1;
+  return !!definition.requirement && itemCount(bag, definition.requirement.itemId) >= definition.requirement.quantity;
 }
 
 function consumeItems(bag: PlayerBagData, id: string, quantity: number): PlayerBagData {
@@ -826,10 +959,10 @@ function consumeItems(bag: PlayerBagData, id: string, quantity: number): PlayerB
 export async function turnInQuest(id: QuestId): Promise<CityActionResult> {
   const state = await loadCityState(); const quest = state.quests[id]; if (quest.status !== "accepted" && quest.status !== "ready") return { ok: false, message: "That quest is not ready to turn in." };
   let bag = await loadBag(); const requirementMet = isQuestReadyToTurnIn(id, state, bag);
-  const requirement = id === "feathers" ? ["mushroom", 2] as const : id === "camp" ? ["quest_hunters_documents", 1] as const : id === "healing" ? ["potion_stamina_low_grade", 1] as const : null;
-  if (requirementMet && requirement) bag = consumeItems(bag, requirement[0], requirement[1]);
   if (!requirementMet) return { ok: false, message: "The quest requirements are not complete yet." };
-  const def = QUESTS[id]; state.guildReputation += def.reputation; state.quests[id] = { status: "completed", progress: quest.progress };
+  const def = getQuestDefinition(id, state);
+  if (def.requirement) bag = consumeItems(bag, def.requirement.itemId, def.requirement.quantity);
+  state.guildReputation += def.reputation; state.quests[id] = { status: "completed", progress: quest.progress };
   await AsyncStorage.multiSet([[PLAYER_BAG_KEY, JSON.stringify(bag)], [CITY_STATE_KEY, JSON.stringify(state)]]);
   await Promise.all([addCurrencyCopper(def.rewardCopper), addKarmaPoints(RANK_H_QUEST_KARMA_POINTS)]);
   return { ok: true, message: `Quest complete: ${formatCurrencyAmount(def.rewardCopper)} and ${def.reputation} Guild Reputation awarded.` };
@@ -848,19 +981,20 @@ export async function recordMonsterDefeat(monsterId: string): Promise<void> {
     elder_ember_rooster: 15,
   };
   await addKarmaPoints(karmaReward[monsterId] ?? 3);
-  if (monsterId !== "feral_rabbit" && monsterId !== "ember_rooster") return;
+  if (![...BATTLE_QUESTS, ...RANK_G_BATTLE_QUESTS].some((quest) => quest.targetMonsterId === monsterId) && monsterId !== "ember_rooster") return;
   const state = await loadCityState();
   let changed = false;
-  if (monsterId === "feral_rabbit") {
+  if (getQuestDefinition("wolves", state).targetMonsterId === monsterId) {
     const quest = state.quests.wolves;
     if (quest.status === "accepted") {
-      quest.progress = Math.min(2, quest.progress + 1);
-      if (quest.progress >= 2) quest.status = "ready";
+      const target = getQuestDefinition("wolves", state).targetQuantity ?? 1;
+      quest.progress = Math.min(target, quest.progress + 1);
+      if (quest.progress >= target) quest.status = "ready";
       changed = true;
     }
   }
   if (monsterId === "ember_rooster" && state.adventurerPromotionActive) {
-    state.adventurerPromotionProgress = Math.min(5, state.adventurerPromotionProgress + 1);
+    state.adventurerPromotionProgress = Math.min(3, state.adventurerPromotionProgress + 1);
     changed = true;
   }
   if (changed) await saveCityState(state);

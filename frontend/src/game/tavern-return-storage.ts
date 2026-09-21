@@ -64,15 +64,45 @@ export function normalizeGardenInventory(value: unknown): GardenInventoryItem[] 
     try { candidate = JSON.parse(value); } catch { candidate = null; }
   }
   if (!Array.isArray(candidate)) return [];
-  return candidate
-    .filter((item): item is GardenInventoryItem => (
-      !!item
-      && typeof item.id === "string"
-      && typeof item.itemType === "string"
-      && typeof item.name === "string"
-      && Number(item.quantity) > 0
-    ))
-    .map((item) => ({ ...item, quantity: Math.floor(Number(item.quantity)) }));
+  const normalized: GardenInventoryItem[] = [];
+  const stackIndexes = new Map<string, number>();
+
+  for (const rawItem of candidate) {
+    if (!rawItem || typeof rawItem !== "object") continue;
+    const item = rawItem as GardenInventoryItem;
+    const numericQuantity = Number(item.quantity);
+    if (
+      typeof item.id !== "string"
+      || typeof item.itemType !== "string"
+      || typeof item.name !== "string"
+      || !Number.isFinite(numericQuantity)
+      || numericQuantity <= 0
+    ) continue;
+
+    const fertilizer = item.itemType === "fertilizer" ? getGardenFertilizerConfig(item.id) : null;
+    const normalizedItem = {
+      ...item,
+      id: fertilizer?.id ?? item.id,
+      name: fertilizer?.name ?? item.name,
+      quantity: Math.min(Number.MAX_SAFE_INTEGER, Math.floor(numericQuantity)),
+    };
+
+    // Seeds and fertilizers are quantity stacks. Compact duplicated entries from
+    // older saves so a large reward can never create hundreds of rendered rows.
+    if (normalizedItem.itemType === "seed" || normalizedItem.itemType === "fertilizer") {
+      const stackKey = `${normalizedItem.itemType}:${normalizedItem.id}`;
+      const existingIndex = stackIndexes.get(stackKey);
+      if (existingIndex !== undefined) {
+        const existing = normalized[existingIndex];
+        existing.quantity = Math.min(Number.MAX_SAFE_INTEGER, existing.quantity + normalizedItem.quantity);
+        continue;
+      }
+      stackIndexes.set(stackKey, normalized.length);
+    }
+    normalized.push(normalizedItem);
+  }
+
+  return normalized;
 }
 
 function addGardenItem(inventory: GardenInventoryItem[], item: BagItem): void {

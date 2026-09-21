@@ -12,7 +12,7 @@ import { GARDEN_INVENTORY_KEY, normalizeGardenInventory } from "@/src/game/taver
 
 export const TAVERN_QUEST_STATE_KEY = "@game:tavern_quests";
 
-export type TavernQuestId = "clean_guest_area" | "build_second_plot" | "serve_food" | "serve_water";
+export type TavernQuestId = "clean_guest_area" | "build_second_plot" | "serve_food" | "serve_water" | "standard_ale_ingredients";
 export type BrewQuestItemId = "dried_hop_cones" | "malted_barley" | "brewers_yeast";
 
 export type TavernQuestState = {
@@ -21,6 +21,7 @@ export type TavernQuestState = {
   foodServed: number;
   waterServed: number;
   cleanRewardSynchronized: boolean;
+  aleIngredientsDialogueSeen: boolean;
   purchasedBrewItems: Partial<Record<BrewQuestItemId, boolean>>;
 };
 
@@ -31,10 +32,12 @@ export const DEFAULT_TAVERN_QUEST_STATE: TavernQuestState = {
     build_second_plot: false,
     serve_food: false,
     serve_water: false,
+    standard_ale_ingredients: false,
   },
   foodServed: 0,
   waterServed: 0,
   cleanRewardSynchronized: false,
+  aleIngredientsDialogueSeen: false,
   purchasedBrewItems: {},
 };
 
@@ -51,10 +54,12 @@ function normalizeState(raw: unknown): TavernQuestState {
       build_second_plot: claimed.build_second_plot === true,
       serve_food: claimed.serve_food === true,
       serve_water: claimed.serve_water === true,
+      standard_ale_ingredients: claimed.standard_ale_ingredients === true,
     },
     foodServed: Math.min(5, Math.max(0, Math.floor(Number(value.foodServed) || 0))),
     waterServed: Math.min(5, Math.max(0, Math.floor(Number(value.waterServed) || 0))),
     cleanRewardSynchronized: value.cleanRewardSynchronized === true,
+    aleIngredientsDialogueSeen: value.aleIngredientsDialogueSeen ?? claimed.serve_water === true,
     purchasedBrewItems: {
       dried_hop_cones: value.purchasedBrewItems?.dried_hop_cones === true,
       malted_barley: value.purchasedBrewItems?.malted_barley === true,
@@ -105,12 +110,46 @@ export function recordTavernService(kind: "food" | "water"): Promise<TavernQuest
 }
 
 export type ClaimTavernQuestResult =
-  | { ok: true; state: TavernQuestState; reward: "potion" | "carrot_seed" | "copper" | "ale_upgrade"; playerBag?: ReturnType<typeof normalizePlayerBagData> }
+  | { ok: true; state: TavernQuestState; reward: "potion" | "carrot_seed" | "copper" | "ale_upgrade" | "fertilizer"; playerBag?: ReturnType<typeof normalizePlayerBagData> }
   | { ok: false; reason: "bag_full" | "not_ready"; state: TavernQuestState };
 
-export async function claimTavernQuest(id: TavernQuestId): Promise<ClaimTavernQuestResult> {
+export function claimTavernQuest(id: TavernQuestId): Promise<ClaimTavernQuestResult> {
+  const task = writeQueue.then(() => claimTavernQuestNow(id));
+  writeQueue = task.catch(() => undefined);
+  return task;
+}
+
+export function markAleIngredientsDialogueSeen(): Promise<TavernQuestState> {
+  const task = writeQueue.then(async () => {
+    const state = await loadTavernQuestState();
+    return state.claimed.serve_water ? saveState({ ...state, aleIngredientsDialogueSeen: true }) : state;
+  });
+  writeQueue = task.catch(() => undefined);
+  return task;
+}
+
+async function claimTavernQuestNow(id: TavernQuestId): Promise<ClaimTavernQuestResult> {
   const state = await loadTavernQuestState();
   if (state.claimed[id]) return { ok: false, reason: "not_ready", state };
+
+  if (id === "standard_ale_ingredients") {
+    const { loadPostGuestTutorialState } = await import("@/src/game/post-guest-tutorial");
+    const post = await loadPostGuestTutorialState();
+    if (!state.claimed.serve_water || !state.aleIngredientsDialogueSeen || !post.aleServiceUnlocked) {
+      return { ok: false, reason: "not_ready", state };
+    }
+    const inventory = normalizeGardenInventory(await AsyncStorage.getItem(GARDEN_INVENTORY_KEY));
+    const fertilizer = inventory.find((item) => item.id === "standard_fertilizer");
+    if (fertilizer) fertilizer.quantity += 5;
+    else inventory.push({ id: "standard_fertilizer", itemType: "fertilizer", name: "Standard Fertilizer", quantity: 5 });
+    const next = { ...state, claimed: { ...state.claimed, standard_ale_ingredients: true } };
+    await AsyncStorage.multiSet([
+      [GARDEN_INVENTORY_KEY, JSON.stringify(inventory)],
+      [TAVERN_QUEST_STATE_KEY, JSON.stringify(next)],
+    ]);
+    listeners.forEach((listener) => listener(next));
+    return { ok: true, state: next, reward: "fertilizer" };
+  }
 
   if (id === "clean_guest_area") {
     const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);

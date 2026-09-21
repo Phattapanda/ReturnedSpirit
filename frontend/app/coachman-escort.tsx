@@ -32,7 +32,6 @@ const PUNCH = require("../assets/images/punch.png");
 const CARCASS = require("../assets/images/monster_carcass.png");
 const BACKGROUND = require("../assets/images/battle_tutorial.png");
 const WOLF_MAX_LIFE = 18;
-const AVATAR3_BATTLE_TUTORIAL_SCALE_MULTIPLIER = 1.1;
 
 type Phase = "journey" | "combat" | "victory" | "post" | "leaving";
 
@@ -165,8 +164,7 @@ export default function CoachmanEscortScreen() {
       setLife(Math.max(1, Number.parseInt(rawLife[1] ?? String(loadedStats.maximumLife), 10) || loadedStats.maximumLife));
       const avatarId = normalizePlayerAvatarId(rawAvatar[1]);
       setPlayerPortrait(getPlayerDialogCharacter(avatarId, "normal", require("../assets/images/avatar1_normal.png")));
-      const dialogScale = getPlayerDialogScale(avatarId);
-      setPlayerScale(avatarId === 3 ? dialogScale * AVATAR3_BATTLE_TUTORIAL_SCALE_MULTIPLIER : dialogScale);
+      setPlayerScale(getPlayerDialogScale(avatarId, "normal"));
       setPlayerAspectRatio(getPlayerDialogAspectRatio(avatarId));
       setCombatBag(rawBag[1] ? normalizePlayerBagData(JSON.parse(rawBag[1])) : DEFAULT_BAG);
       if (!isWalking) Animated.timing(blackFade, { toValue: 0, duration: 550, useNativeDriver: true }).start();

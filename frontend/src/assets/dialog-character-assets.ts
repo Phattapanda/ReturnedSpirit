@@ -3,8 +3,9 @@ import type { PlayerAvatarId } from "@/src/game/player-avatar";
 
 export type DialogExpression = "normal" | "laugh" | "sad" | "sick" | "tired";
 export const PLAYER_DIALOG_SCALE = 0.8;
-export const AVATAR2_DIALOG_SCALE = 0.6984;
-export const AVATAR3_DIALOG_SCALE = 0.8;
+export const AVATAR2_DIALOG_SCALE = 0.95;
+export const AVATAR2_DIALOG_LOW_STAMINA_SCALE = 0.92;
+export const AVATAR3_DIALOG_SCALE = 1;
 export const INTRO_PLAYER_DIALOG_SCALE = 0.8;
 export const RUPERT_DIALOG_SCALE = 0.95;
 export const OLD_FARMER_DIALOG_SCALE = 0.72;
@@ -20,8 +21,10 @@ export const MERCHANT_GUILD_RECEPTIONIST_ASSETS = {
   portrait: require("../../assets/images/receptionist_merchant.png"),
 } as const;
 
-export function getPlayerDialogScale(avatarId: PlayerAvatarId): number {
-  if (avatarId === 2) return AVATAR2_DIALOG_SCALE;
+export function getPlayerDialogScale(avatarId: PlayerAvatarId, expression: DialogExpression = "normal"): number {
+  if (avatarId === 2) return expression === "tired" || expression === "sick"
+    ? AVATAR2_DIALOG_LOW_STAMINA_SCALE
+    : AVATAR2_DIALOG_SCALE;
   if (avatarId === 3) return AVATAR3_DIALOG_SCALE;
   return PLAYER_DIALOG_SCALE;
 }
@@ -67,7 +70,7 @@ export const DIALOG_CHARACTER_ASSETS = {
   },
   avatar3: {
     normal: require("../../assets/images/dialog/dialogue_avatar3_normal.png"),
-    laugh: require("../../assets/images/dialog/dialogue_avatar3_normal_laugh.png"),
+    laugh: require("../../assets/images/dialog/dialogue_avatar3_laugh.png"),
     sad: require("../../assets/images/dialog/dialogue_avatar3_sad.png"),
     sick: require("../../assets/images/dialog/dialogue_avatar3_sick.png"),
     tired: require("../../assets/images/dialog/dialogue_avatar3_tired.png"),
