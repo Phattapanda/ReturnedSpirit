@@ -11,6 +11,7 @@ import {
   StyleSheet,
   ScrollView,
   TextInput,
+  KeyboardAvoidingView,
   Platform,
   Keyboard,
   useWindowDimensions,
@@ -1220,7 +1221,6 @@ export default function KitchenScreen({
   // ── Name input
   const [nameInputOpen, setNameInputOpen] = useState(false);
   const [nameInputVal, setNameInputVal] = useState("");
-  const [keyboardTop, setKeyboardTop] = useState<number | null>(null);
 
   // ── Tooltip
   const [tooltipVisible, setTooltipVisible] = useState(false);
@@ -1444,18 +1444,6 @@ export default function KitchenScreen({
     return () => { active = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ts]);
-
-  // Some Android devices overlay the keyboard while others resize the app.
-  // Store the keyboard's top edge and offset only the portion that actually
-  // overlaps the current visible window, avoiding both coverage and a double
-  // jump on resize-mode devices.
-  useEffect(() => {
-    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-    const showSub = Keyboard.addListener(showEvent, (event) => setKeyboardTop(event.endCoordinates.screenY));
-    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardTop(null));
-    return () => { showSub.remove(); hideSub.remove(); };
-  }, []);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Initial load
@@ -4846,28 +4834,33 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   });
 
   return (
-    <View
-      ref={rootRef}
+    <KeyboardAvoidingView
       style={styles.root}
-      onTouchStart={(event) => {
-        touchStartRef.current = { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY };
-      }}
-      onTouchEnd={(event) => {
-        if (!smallCrateOpen || !touchStartRef.current) return;
-        const x = event.nativeEvent.pageX;
-        const y = event.nativeEvent.pageY;
-        const distance = Math.hypot(x - touchStartRef.current.x, y - touchStartRef.current.y);
-        touchStartRef.current = null;
-        if (distance > 8) return;
-        const panel = layouts.current.cratePanel;
-        if (panel && inRect(x, y, panel)) return;
-        const crateSlotIndex = tableItemsRef.current.findIndex((item) => item?.id === "crate1");
-        const crateSlotRect = crateSlotIndex >= 0 ? layouts.current.tableSlots[crateSlotIndex] : null;
-        if (crateSlotRect && inRect(x, y, crateSlotRect)) return;
-        setSmallCrateOpen(false);
-        updateCrateDropHover(false);
-      }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      enabled={nameInputOpen}
     >
+      <View
+        ref={rootRef}
+        style={styles.root}
+        onTouchStart={(event) => {
+          touchStartRef.current = { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY };
+        }}
+        onTouchEnd={(event) => {
+          if (!smallCrateOpen || !touchStartRef.current) return;
+          const x = event.nativeEvent.pageX;
+          const y = event.nativeEvent.pageY;
+          const distance = Math.hypot(x - touchStartRef.current.x, y - touchStartRef.current.y);
+          touchStartRef.current = null;
+          if (distance > 8) return;
+          const panel = layouts.current.cratePanel;
+          if (panel && inRect(x, y, panel)) return;
+          const crateSlotIndex = tableItemsRef.current.findIndex((item) => item?.id === "crate1");
+          const crateSlotRect = crateSlotIndex >= 0 ? layouts.current.tableSlots[crateSlotIndex] : null;
+          if (crateSlotRect && inRect(x, y, crateSlotRect)) return;
+          setSmallCrateOpen(false);
+          updateCrateDropHover(false);
+        }}
+      >
       {/* ── Hidden portrait preload – forces RN/browser to decode all portrait images
            immediately on mount. Combined with AssetManager preload in game-loading.tsx
            this guarantees zero-delay portrait display. ── */}
@@ -5416,7 +5409,6 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
           characterScale={kitchenDialogPlayerSpeaking ? getPlayerDialogScale(playerAvatarId, getDialogExpressionForStamina(staminaCurrent)) : RUPERT_DIALOG_SCALE}
           characterAspectRatio={kitchenDialogPlayerSpeaking ? getPlayerDialogAspectRatio(playerAvatarId) : undefined}
           speakerName={kitchenDialogSpeaker}
-          bottomOffset={ts === "NAME_INPUT" && keyboardTop !== null ? Math.max(0, H - keyboardTop) : 0}
           onSkip={dlgActive ? (dlgIdx < dlgLines.length - 1 ? skipDialogToLastLine : advanceDialog) : undefined}
           actions={ts === "NAME_INPUT" && nameInputOpen ? (
             <View style={styles.nameDialogActions}>
@@ -6061,7 +6053,8 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
         );
       })()}
       <ScrollActivationOverlay activationKey={scrollActivationKey} />
-    </View>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -6388,7 +6381,7 @@ const styles = StyleSheet.create({
   kitchenDialogContinue: { width: "100%", minHeight: 44, justifyContent: "center", marginTop: 0 },
   kitchenContinueIcon: { position: "absolute", right: 18 },
   kitchenChoiceStack: { width: "100%", gap: 8 },
-  nameDialogActions: { width: "100%", gap: 8, alignItems: "center" },
+  nameDialogActions: { width: "100%", flexDirection: "row", gap: 8, alignItems: "center" },
   dialogActionRow: { width: "100%", flexDirection: "row", gap: 10, marginTop: 4 },
   dialogContinueBtn: { flex: 1, marginTop: 0 },
   skipDialogBtn: {
@@ -6400,13 +6393,13 @@ const styles = StyleSheet.create({
   confirmBtn: {
     flexGrow: 0,
     flexShrink: 0,
-    alignSelf: "center",
     alignItems: "center",
     justifyContent: "center",
-    width: 150,
-    minWidth: 150,
-    paddingHorizontal: 24,
-    marginTop: 12,
+    width: 118,
+    minWidth: 118,
+    minHeight: 50,
+    paddingHorizontal: 14,
+    marginTop: 0,
   },
   confirmIcon: { position: "absolute", right: 18 },
   continueTxt: { color: "#F5E6C8", fontSize: 15, fontFamily: "Oldenburg", letterSpacing: 0.6 },
@@ -6422,7 +6415,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 12,
     paddingHorizontal: 16, paddingVertical: 13, fontSize: 16, color: "#F0E8D5",
     borderWidth: 1, borderColor: "rgba(196,148,58,0.38)",
-    width: "100%", marginTop: 8, fontFamily: "Oldenburg",
+    flex: 1, minWidth: 0, marginTop: 0, fontFamily: "Oldenburg",
   },
 
   // Modals
