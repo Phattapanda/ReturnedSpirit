@@ -1,0 +1,36 @@
+{
+  "summary": "Tested the new POST /api/support endpoint (Emergent managed email relay via Resend proxy) and the frontend /support screen. Backend: created /app/backend/tests/test_support.py (pytest, 7 tests) - ALL 7 PASSED (2 happy paths + 5 validation-rejection cases). Confirmed happy paths (message only, message + delivered@resend.dev) return {accepted:true} with HTTP 200; empty message, missing message, invalid reply_email, unknown extra field, and whitespace-only message all correctly return HTTP 400. Frontend: reached /support via the Main Menu Support button (direct navigation to /support redirects to '/' because the app manages routing through the main menu), typed an invalid email 'not-an-email' + a message and tapped send-message-button — the validation error 'Enter a valid email address or leave this field empty.' rendered, and success-message did NOT appear (no network call fired). Cleared the email field and tapped Send again — success-message testID rendered with the exact text 'Message submitted!' and the follow-up 'Thank you for your feedback!' plus the Send another button. Total backend send calls during this run: 2 (well under the 10/hour process quota).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/support", "issue": "Rate-limit slot (attempts.append) is consumed BEFORE Pydantic validation in submit_support (support_mail.py:190 vs 198). Malformed/validation-failing requests also count against the 10/hour process quota, so an abusive/broken client can exhaust the quota with 400s. Consider incrementing the counter only after successful validation (or only after successful proxy send)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_support.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "OPTIONAL: Move the rate-limit slot allocation in submit_support (support_mail.py) to AFTER successful validation so 400-generating requests don't burn quota.",
+    "OPTIONAL doc: /support route redirects to '/' if reached directly (deep-link). If deep-link should work standalone, register a proper Expo Router route guard; otherwise fine as-is because Support is only entered from the Main Menu button in-app."
+  ],
+  "critical_code_review_comments": [
+    "support_mail.py:31-32 uses os.environ['EMERGENT_EMAIL_KEY'] / ['EMAIL_FROM_NAME'] which will crash on import if either is missing. Good fail-fast pattern, matches project convention.",
+    "support_mail.py:36 SUPPORT_ADDRESS is a server-side constant, never caller-controlled — correctly avoids open-relay risk.",
+    "support_mail.py:47 screenshot field is accepted for backward compat and intentionally NOT forwarded to the email service — verified: only presence is signalled via a note in the HTML.",
+    "support_mail.py:99-123 _assert_safe_email enforces Emergent email guardrails (no forms, no credential-asking phrases, https-only links, no shorteners/IP hosts, anchor-text/href host parity) — correctly called for every send.",
+    "support_mail.py:126-145 send_email raises HTTPException(502) on proxy 4xx/5xx and HTTPException(500) on transport errors; confirmation-email failure is caught and logged so the main support request still returns 200 — good UX.",
+    "support.tsx:55-59 frontend refuses to send unless EXPO_PUBLIC_BACKEND_URL is defined and https:// — good hardening.",
+    "support.tsx:66-88 correctly parses response, checks accepted===true, transitions to sent state and clears form fields; preserves draft on failure via the error branch."
+  ],
+  "updated_files": ["/app/backend/tests/test_support.py (new)"],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100% (2/2 flows)"},
+  "seed_data_creation": "None. Backend sends went to fixed owner arcades.soijanda@gmail.com and confirmation to delivered@resend.dev (Resend test address); 2 successful sends during the run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "POST /api/support is fully working via Emergent managed email (Resend proxy). Rate limit is 10/hour per backend process; validation failures also count toward the quota (minor issue noted). Frontend /support screen is only reachable via the Main Menu Support button, direct URL navigation redirects to '/' — factor this into any future automation. testIDs available on the Support screen: back-button, support-message-input, support-email-input, add-screenshot-button, send-message-button, success-message, send-another-button. Always use delivered@resend.dev as the reply_email during automated testing to avoid real inboxes.",
+  "rca_of_issue": "N/A — no regression, feature implementation verified working end-to-end."
+}
