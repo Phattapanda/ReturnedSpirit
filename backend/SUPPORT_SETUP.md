@@ -24,12 +24,17 @@ To send from your own domain later, verify a domain and update the integration.
 - The player's message and optional reply address are included only in the email
   to the owner. The confirmation email to the player uses a fixed template and
   does not echo the player's message.
-- Screenshots selected in the app are **not** forwarded: the managed email
-  service does not support attachments. The owner email notes that a screenshot
-  was attached in-app.
+- Screenshots selected in the app **are** forwarded: they are re-encoded
+  server-side (stripping EXIF/GPS/filename), uploaded to Emergent Object Storage,
+  and embedded as an `<img>` in the owner email. Email clients load the image
+  from a public, token-guarded backend route `GET /api/support/screenshot/{token}`
+  (unguessable 32-hex token). Requires `EMERGENT_LLM_KEY` in backend/.env.
 - A conservative process-wide quota of 10 valid requests/hour limits abuse. For a
   public multi-worker deployment, add a shared gateway rate limit.
-- The app does not persist submissions or IP addresses.
+- Support requests are not persisted, but forwarded **screenshots are stored** in
+  object storage together with a `support_screenshots` token→path record so the
+  email image link keeps working. There is no delete API; use soft-deletes if you
+  add cleanup. Screenshots can contain personal data in visible pixels.
 
 ## Testing
 

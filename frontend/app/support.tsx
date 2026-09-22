@@ -18,10 +18,19 @@ import { fetch } from "expo/fetch";
 
 const BG = require("../assets/images/mainpage.png");
 
+const CATEGORIES = [
+  { key: "bug", label: "Bug" },
+  { key: "idea", label: "Idea" },
+  { key: "other", label: "Other" },
+] as const;
+
+type CategoryKey = (typeof CATEGORIES)[number]["key"];
+
 export default function Support() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [message, setMessage] = useState("");
+  const [category, setCategory] = useState<CategoryKey>("other");
   const [replyEmail, setReplyEmail] = useState("");
   const [emailError, setEmailError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
@@ -66,7 +75,7 @@ export default function Support() {
       const response = await fetch(`${baseUrl}/api/support`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: message.trim(), reply_email: address || null, screenshot: screenshot?.base64 ?? null }),
+        body: JSON.stringify({ message: message.trim(), category, reply_email: address || null, screenshot: screenshot?.base64 ?? null }),
         signal: controller.signal,
       });
       const result = await response.json();
@@ -76,6 +85,7 @@ export default function Support() {
       setSent(true);
       setMessage("");
       setReplyEmail("");
+      setCategory("other");
       setScreenshot(null);
     } catch (error) {
       setSendError(error instanceof Error && error.name !== "AbortError" && !error.message.toLowerCase().includes("fetch")
@@ -122,6 +132,26 @@ export default function Support() {
           </View>
         ) : (
           <>
+            <Text style={styles.label}>CATEGORY</Text>
+            <View style={styles.categoryRow}>
+              {CATEGORIES.map((cat) => {
+                const active = category === cat.key;
+                return (
+                  <TouchableOpacity
+                    key={cat.key}
+                    testID={`support-category-${cat.key}`}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: active }}
+                    style={[styles.chip, active && styles.chipActive]}
+                    onPress={() => setCategory(cat.key)}
+                    disabled={sending}
+                  >
+                    <Text style={[styles.chipText, active && styles.chipTextActive]}>{cat.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
             <Text style={styles.label}>MESSAGE</Text>
             <View style={styles.inputWrapper}>
               <TextInput
@@ -229,6 +259,23 @@ const styles = StyleSheet.create({
   },
   noticeText: { flex: 1, fontSize: 13, color: "#8B7355" },
   label: { fontSize: 11, fontWeight: "700", color: "#8B7355", letterSpacing: 1.2 },
+  categoryRow: { flexDirection: "row", gap: 10 },
+  chip: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "rgba(0,0,0,0.12)",
+    backgroundColor: "rgba(255,255,255,0.7)",
+  },
+  chipActive: {
+    borderColor: "#C4614A",
+    backgroundColor: "rgba(196,97,74,0.14)",
+  },
+  chipText: { fontSize: 15, fontWeight: "600", color: "#8B7355" },
+  chipTextActive: { color: "#C4614A" },
   inputWrapper: {
     backgroundColor: "rgba(255,255,255,0.8)",
     borderRadius: 12,

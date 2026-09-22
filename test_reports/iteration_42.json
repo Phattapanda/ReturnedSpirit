@@ -1,0 +1,37 @@
+{
+  "summary": "Tested the two new Support features (category selector + screenshot forwarding) end-to-end. Backend: rewrote /app/backend/tests/test_support.py to 11 pytest tests covering category=bug/idea/other happy paths, invalid category='spam' (400), missing/empty/whitespace/invalid-email validation (400), screenshot upload with tiny 320x200 PNG (200 + support_screenshots doc verified persisted in test_database with hex token + storage_path + content_type=image/jpeg + created_at), GET /api/support/screenshot/{token} returning 200 with Content-Type image/jpeg and JPEG magic FFD8FF, GET with non-hex token -> 404, GET with unknown 32-char hex -> 404. ALL 11 PASSED (1.87s). Frontend: launched the Expo web preview at 390x844, closed the Early Access modal via aria-label + testid, tapped the main-menu-support button, verified the CATEGORY chips (support-category-bug, support-category-idea, support-category-other) render, tapped Bug then Idea (visual confirmed only Idea active - orange border/text), filled support-message-input with a TEST_ message, tapped send-message-button, and observed the success state ('Message submitted!' + 'Thank you for your feedback!' + Send another) inside the success-message testID container. Backend also logged 200 for the ensuing POST /api/support. The confirmed screenshot rate-limit fix (attempts.append happens AFTER validation, support_mail.py:342) is verified — the iter-41 minor issue is resolved. Total valid sends in this run: ~5 (well under 10/hour).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_support.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "support_mail.py:342 - attempts.append(now) is now correctly placed AFTER Pydantic validation. Iter-41 minor issue (400s draining the 10/hr quota) is resolved.",
+    "support_mail.py:117-137 clean_screenshot re-encodes to JPEG-only pixel data (drops EXIF/GPS), enforces PNG/JPEG/WEBP source, 3MB and 12MP caps, and uses HTTPException(400) with a user-friendly message. Good.",
+    "support_mail.py:280-282 _public_base derives the host from x-forwarded-host/host and hardcodes https:// - correct for the K8s ingress and produces safe absolute https URLs that pass _assert_safe_email (G3).",
+    "support_mail.py:307-319 GET /api/support/screenshot/{token} enforces a strict 32-char hex Regex before any DB/storage lookup - prevents path traversal / storage probing. Cache-Control: 1-year is correct since tokens are opaque + unguessable.",
+    "support_mail.py:293-297 support_screenshots doc stores token/storage_path/content_type/created_at only (no PII, no player IP, no message). Good privacy hygiene.",
+    "support_mail.py:285-304 _store_screenshot swallows non-HTTPException storage errors so a broken object-store never fails the whole support submission - the request still returns 200, image is just omitted from the email. Sensible degradation.",
+    "support.tsx:42-54 chooseScreenshot uses base64:true with ImagePicker and enforces a 3MB/12MP client cap before setting state - matches the backend cap so users get an early message.",
+    "support.tsx:75-84 sends {message, category, reply_email, screenshot} correctly; on non-200 or accepted!==true it preserves the draft (does NOT clear message/category/screenshot). Good UX."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_support.py (rewrite to cover new category + screenshot features, added pymongo assertions on support_screenshots collection)"
+  ],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "100% (chips render + selection + send flow all pass)"},
+  "seed_data_creation": "None (test-only sends). One new support_screenshots doc was created in test_database.support_screenshots during the screenshot-upload test; document contains only token/storage_path/content_type/created_at (no PII).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Both new Support features (category selector + screenshot forwarding) are fully working. Backend tests live at /app/backend/tests/test_support.py (11 tests, uses pytest-xdist, needs pymongo which is now installed globally). The rate-limit slot is consumed only for VALID requests (post-Pydantic), so validation failures do not drain the 10/hour process quota. Frontend testIDs on Support: support-category-{bug|idea|other}, support-message-input, support-email-input, add-screenshot-button, send-message-button, success-message, send-another-button, back-button. To reach Support: close Early Access modal (aria-label 'Close Early Access notice' or testid 'early-access-close') then tap [data-testid='main-menu-support']. accessibilityState.selected does NOT surface as aria-selected in RN Web - rely on visual (chipActive style: orange border + orange text) or check the applied style, not aria-selected attribute.",
+  "rca_of_issue": "N/A — no regression, both new features verified working end-to-end (backend API + MongoDB persistence + storage upload + image GET route + UI chips + send flow)."
+}

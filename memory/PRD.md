@@ -37,8 +37,16 @@ merchant, quests, mailbox, progression). Local save via async storage.
 
 ## Backlog / remaining
 - P1: Custom sender domain for support emails (currently managed default sender).
-- P2: Screenshot forwarding in support emails (managed service has no attachments).
 - P2: Shared gateway rate limit for public multi-worker deployment.
+- P2: Scheduled cleanup / soft-delete for stored support screenshots.
+
+## Implemented — Support extras (2026-09-22)
+- Category selector (Bug / Idea / Other) in the Support form; sent to backend and
+  included in the support email subject + body.
+- Screenshot forwarding: re-encoded server-side (EXIF stripped), uploaded to
+  Emergent Object Storage, embedded as <img> in the owner email via public
+  token-guarded route GET /api/support/screenshot/{token}. Tested 11/11 backend +
+  frontend (testing_agent iteration 42).
 
 ## Next tasks
 - On future GitHub updates: fetch origin/main, reset --hard, re-remove
