@@ -6,8 +6,9 @@ import { PROGRESSION_STATE_KEY } from "@/src/game/progression";
 import { PLAYER_AVATAR_KEY } from "@/src/game/player-avatar";
 import { advanceToNextRun } from "@/src/game/run-system";
 import { deliverMailboxMessage, type MailReward } from "@/src/game/mailbox-system";
-import { GUEST_STATE_KEY, loadGuestState, type GuestId } from "@/src/game/guest-system";
+import { GUEST_PROFILES, GUEST_STATE_KEY, loadGuestState, type GuestId } from "@/src/game/guest-system";
 import { ALL_SNAPSHOT_KEYS, createSnapshot } from "@/src/game/save-manager";
+import { ensureStartingPackageForCurrentRun } from "@/src/game/starting-package-purchase";
 import { EMBER_ROOSTER_ENCOUNTER_SEEN_KEY } from "@/src/game/encounter-cinematics";
 import { GUEST_TUTORIAL_INTRO_KEY } from "@/src/game/guest-tutorial";
 import {
@@ -40,15 +41,35 @@ import {
  * Creates the clean runtime state for the following life while preserving
  * account/run progression and the traits carried into that run.
  */
-export type NextRunFreeItem = "stamina_potions" | "healing_potions" | "iron_shortswords" | "leather_armor" | "onion_bag";
+export type NextRunFreeItem = "stamina_potions" | "healing_potions" | "energy_potions" | "onion_bag" | "nails" | "paint" | "seeds";
 export type NextRunBonuses = {
   betterValues?: boolean;
-  growthPoints?: boolean;
-  copper?: 0 | 100 | 300;
+  incomeBonusPacks?: number;
+  startingSilver?: number;
+  growthPointPacks?: number;
   preserveFavor?: boolean;
   skipRupertTutorials?: boolean;
-  freeItem?: NextRunFreeItem | null;
+  freeItems?: NextRunFreeItem[];
 };
+
+const NEXT_RUN_FREE_ITEMS = new Set<NextRunFreeItem>(["stamina_potions", "healing_potions", "energy_potions", "onion_bag", "nails", "paint", "seeds"]);
+
+function normalizedCount(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
+}
+
+export function normalizeNextRunBonuses(raw: NextRunBonuses | null | undefined): NextRunBonuses {
+  return {
+    betterValues: raw?.betterValues === true,
+    incomeBonusPacks: normalizedCount(raw?.incomeBonusPacks),
+    startingSilver: normalizedCount(raw?.startingSilver),
+    growthPointPacks: normalizedCount(raw?.growthPointPacks),
+    preserveFavor: raw?.preserveFavor === true,
+    skipRupertTutorials: raw?.skipRupertTutorials === true,
+    freeItems: [...new Set((raw?.freeItems ?? []).filter((item): item is NextRunFreeItem => NEXT_RUN_FREE_ITEMS.has(item)))],
+  };
+}
 
 function rupertTutorialSkipEntries(): [string, string][] {
   const postGuestState = {
@@ -126,21 +147,28 @@ function rupertTutorialSkipEntries(): [string, string][] {
   ];
 }
 
-function nextRunPackageReward(choice: NextRunFreeItem): MailReward {
-  if (choice === "stamina_potions") return { type: "item", itemId: "potion_stamina_low_grade", quantity: 3 };
-  if (choice === "healing_potions") return { type: "item", itemId: "potion_healing_low_grade", quantity: 3 };
-  if (choice === "iron_shortswords") return { type: "item", itemId: "weapon_iron_shortsword", quantity: 2 };
-  if (choice === "leather_armor") return { type: "item", itemId: "armor_leather_bracers", quantity: 2 };
-  return { type: "item", itemId: "bag_onion", quantity: 1, containedItem: "onion", containedQuantity: 15 };
+function nextRunPackageRewards(choice: NextRunFreeItem): MailReward[] {
+  if (choice === "stamina_potions") return [{ type: "item", itemId: "potion_stamina_low_grade", quantity: 3 }];
+  if (choice === "healing_potions") return [{ type: "item", itemId: "potion_healing_low_grade", quantity: 3 }];
+  if (choice === "energy_potions") return [{ type: "item", itemId: "potion_energy_low_grade", quantity: 3 }];
+  if (choice === "onion_bag") return [{ type: "item", itemId: "bag_onion", quantity: 1, containedItem: "onion", containedQuantity: 50 }];
+  if (choice === "nails") return [{ type: "shared_resource", resourceId: "nails", quantity: 10 }];
+  if (choice === "paint") return [{ type: "shared_resource", resourceId: "paint", quantity: 4 }];
+  return [
+    { type: "garden_item", itemId: "seed_herb", quantity: 3, itemType: "seed" },
+    { type: "garden_item", itemId: "seed_carrot", quantity: 3, itemType: "seed" },
+    { type: "garden_item", itemId: "seed_potato", quantity: 3, itemType: "seed" },
+  ];
 }
 
 export async function prepareNextRun(slotNumber: number, bonuses: NextRunBonuses = {}): Promise<{ playerName: string }> {
+  bonuses = normalizeNextRunBonuses(bonuses);
   const [playerName, avatarId] = await Promise.all([
     AsyncStorage.getItem("@game:player_name"),
     AsyncStorage.getItem(PLAYER_AVATAR_KEY),
   ]);
 
-  const preservedGuests: GuestId[] = bonuses.preserveFavor ? ["old_farmer", "coachman"] : [];
+  const preservedGuests: GuestId[] = bonuses.preserveFavor ? GUEST_PROFILES.map((guest) => guest.id) : [];
   const progression = await advanceToNextRun(slotNumber, preservedGuests);
   const nextGuestState = await loadGuestState();
   const rawAdvancedStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
@@ -151,7 +179,8 @@ export async function prepareNextRun(slotNumber: number, bonuses: NextRunBonuses
     runBaseUpgrades,
     maximumStamina: DEFAULT_PLAYER_STATS.maximumStamina + runBaseUpgrades * 10,
     maximumLife: DEFAULT_PLAYER_STATS.maximumLife + runBaseUpgrades * 5,
-    growthPoints: bonuses.growthPoints ? 30 : 0,
+    growthPoints: Math.max(0, Math.floor(bonuses.growthPointPacks ?? 0)) * 10,
+    incomeBonusPercent: Math.max(0, Math.floor(bonuses.incomeBonusPacks ?? 0)) * 10,
     statusEffects: advancedStats.statusEffects,
   };
 
@@ -163,7 +192,7 @@ export async function prepareNextRun(slotNumber: number, bonuses: NextRunBonuses
     [ELAPSED_DAYS_KEY, "0"],
     ["@game:save_location", "kitchen"],
     ["@game:stamina_spent_today", "0"],
-    [CURRENCY_KEY, String(DEFAULT_CURRENCY_COPPER + (bonuses.copper ?? 0))],
+    [CURRENCY_KEY, String(DEFAULT_CURRENCY_COPPER + Math.max(0, Math.floor(bonuses.startingSilver ?? 0)) * 100)],
     [PLAYER_STATS_KEY, JSON.stringify(cleanStats)],
     ["@game:stamina", "0"],
     ["@game:life", "0"],
@@ -173,16 +202,18 @@ export async function prepareNextRun(slotNumber: number, bonuses: NextRunBonuses
     [NEXT_RUN_INTRO_PENDING_KEY, "true"],
     ...(bonuses.skipRupertTutorials ? rupertTutorialSkipEntries() : []),
   ]);
-  if (bonuses.freeItem) {
+  const freeItems = [...new Set(bonuses.freeItems ?? [])];
+  if (freeItems.length > 0) {
     await deliverMailboxMessage({
       id: `city-guard-next-run:${progression.runNumber}`,
       sender: "City Guard",
       senderKind: "system",
       subject: "Recovered belongings",
       body: "Hello, we found this nearby. There was a name tag attached indicating it belongs to you. You should take better care of your belongings. - City Guard",
-      rewards: [nextRunPackageReward(bonuses.freeItem)],
+      rewards: freeItems.flatMap(nextRunPackageRewards),
     });
   }
+  await ensureStartingPackageForCurrentRun();
   await createSnapshot(slotNumber, "manual");
   return { playerName: playerName?.trim() || "Adventurer" };
 }

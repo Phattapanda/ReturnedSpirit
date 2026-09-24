@@ -78,7 +78,7 @@ export function rollPlayerPhysicalDamage(
   const maximum = Math.max(minimum, entry?.damageMax ?? 0);
   const weaponDamage = minimum + Math.floor(Math.max(0, Math.min(0.999999, randomValue)) * (maximum - minimum + 1));
   const enhancedDamage = weapon?.weaponEnhanced ? Math.ceil(weaponDamage * 1.2) : weaponDamage;
-  return Math.max(0, enhancedDamage + Math.max(0, Math.floor(strength)) - Math.max(0, Math.floor(monsterPhysicalDefense)));
+  return Math.max(1, enhancedDamage + Math.max(0, Math.floor(strength)) - Math.max(0, Math.floor(monsterPhysicalDefense)));
 }
 
 export function rollPlayerAttackHit(weapon: BagItem | null, randomValue = Math.random()): boolean {
@@ -93,7 +93,7 @@ export function calculateIncomingPhysicalDamage(
 ): number {
   const baseArmorDefense = armor ? ITEM_CATALOG[armor.id]?.physicalDefense ?? 0 : 0;
   const armorDefense = armor?.armorEnhanced ? Math.ceil(baseArmorDefense * 1.2) : baseArmorDefense;
-  return Math.max(0, Math.floor(physicalAttack) - Math.max(0, Math.floor(endurance)) - armorDefense);
+  return Math.max(1, Math.floor(physicalAttack) - Math.max(0, Math.floor(endurance)) - armorDefense);
 }
 
 export async function saveEquippedBag(bag: PlayerBagData): Promise<PlayerBagData> {

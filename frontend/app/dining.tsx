@@ -27,7 +27,7 @@ import DiningGuestArea, {
   type GuestServiceSourcePoint,
 } from "@/src/components/GuestCard";
 import GuestTutorialDialog, { type GuestTutorialDialogLine } from "@/src/components/GuestTutorialDialog";
-import { COACHMAN_DIALOG_SCALE, DIALOG_CHARACTER_ASSETS, OLD_FARMER_DIALOG_SCALE, RUPERT_DIALOG_SCALE, getDialogExpressionForStamina, getPlayerDialogAspectRatio, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
+import { COACHMAN_DIALOG_SCALE, DIALOG_CHARACTER_ASSETS, MERCHANT_DIALOG_SCALE, OLD_FARMER_DIALOG_SCALE, RUPERT_DIALOG_SCALE, getDialogExpressionForStamina, getPlayerDialogAspectRatio, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
 import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
 import StatusModal from "@/src/components/StatusModal";
 import QuestBookButton from "@/src/components/quest-book";
@@ -71,7 +71,7 @@ import {
   type BagItem,
   type PlayerBagData,
 } from "@/src/game/item-system";
-import { addCurrencyCopper } from "@/src/game/currency-system";
+import { addIncomeCopper } from "@/src/game/currency-system";
 import { recordTavernService } from "@/src/game/tavern-quest-system";
 import {
   addGuestFavor,
@@ -742,6 +742,8 @@ export default function DiningScreen() {
       ? OLD_FARMER_DIALOG_SCALE
       : currentTutorialLine.portrait === "coachman"
         ? COACHMAN_DIALOG_SCALE
+      : currentTutorialLine.portrait === "merchant"
+        ? MERCHANT_DIALOG_SCALE
       : currentTutorialLine.portrait === "player"
         ? getPlayerDialogScale(playerAvatarId, getDialogExpressionForStamina(staminaCurrent))
         : currentTutorialLine.portrait === "rupert" || currentTutorialLine.portrait === "rupert_laugh" || currentTutorialLine.portrait === "rupert_sad"
@@ -995,7 +997,7 @@ export default function DiningScreen() {
       if (action === "water") {
         setServiceBusy(true);
         await markGuestServed(guestId, "water");
-        await addCurrencyCopper(beveragePriceForGuest(guestId));
+        await addIncomeCopper(beveragePriceForGuest(guestId));
         setServiceBusy(false);
         showStandaloneServiceDialog(
           { speaker, portrait, text: beverageDepartureLine(guestId) },
@@ -1074,7 +1076,7 @@ export default function DiningScreen() {
         runTransfer(mealImage, W * 0.5 - 18, headerH + 165, start.x - 18, start.y - 18, () => {
           audioManager.playSoundEffect("bling", { maxDurationMs: 2000 });
           void runCoinTransfer(start.x - 14, start.y - 14, async () => {
-            await addCurrencyCopper(price);
+            await addIncomeCopper(price);
             setServiceBusy(false);
             showStandaloneServiceDialog(
               { speaker, portrait, text: seasonedMealPraise(activeMeal, guest.profile) ?? '"Thank you. That was just what I needed."' },
@@ -1100,7 +1102,7 @@ export default function DiningScreen() {
         setServiceBusy(true);
         if (tavernBeverage.alcoholic) await addGuestFavor("local_boozer", 1);
         await markGuestServed("local_boozer", "water");
-        await addCurrencyCopper(beveragePriceForGuest("local_boozer"));
+        await addIncomeCopper(beveragePriceForGuest("local_boozer"));
         setServiceBusy(false);
         showStandaloneServiceDialog(
           {
@@ -1144,7 +1146,7 @@ export default function DiningScreen() {
       runTransfer(mealImage, W * 0.5 - 18, headerH + 165, start.x - 18, start.y - 18, () => {
         audioManager.playSoundEffect("bling", { maxDurationMs: 2000 });
         void runCoinTransfer(start.x - 14, start.y - 14, async () => {
-          await addCurrencyCopper(price);
+          await addIncomeCopper(price);
           setServiceBusy(false);
           showStandaloneServiceDialog(
             {
@@ -1168,7 +1170,7 @@ export default function DiningScreen() {
       if (action === "water") {
         setServiceBusy(true);
         await markGuestServed("coachman", "water");
-        await addCurrencyCopper(beveragePriceForGuest("coachman"));
+        await addIncomeCopper(beveragePriceForGuest("coachman"));
         setServiceBusy(false);
         showStandaloneServiceDialog(
           { speaker: "Coachman", portrait: "coachman", text: beverageDepartureLine("coachman") },
@@ -1205,7 +1207,7 @@ export default function DiningScreen() {
         runTransfer(mealImage, W * 0.5 - 18, headerH + 165, start.x - 18, start.y - 18, () => {
           audioManager.playSoundEffect("bling", { maxDurationMs: 2000 });
           void runCoinTransfer(start.x - 14, start.y - 14, async () => {
-            await addCurrencyCopper(price);
+            await addIncomeCopper(price);
             setServiceBusy(false);
             showStandaloneServiceDialog(
               { speaker: "Coachman", portrait: "coachman", text: seasonedMealPraise(activeMeal, guest.profile) ?? coachmanMealReaction(reaction.reaction) },
@@ -1248,7 +1250,7 @@ export default function DiningScreen() {
             W * 0.42 - 14,
             headerH + 330,
             async () => {
-              await addCurrencyCopper(OLD_FARMER_SELL_PRICE_COPPER);
+              await addIncomeCopper(OLD_FARMER_SELL_PRICE_COPPER);
               setServiceBusy(false);
               showServiceDialog(
                 { speaker: "Old Farmer", portrait: "old_farmer", text: '"Delicious. Here are 9 Copper."' },
@@ -1363,7 +1365,7 @@ export default function DiningScreen() {
     if (guestTutorialHasReached(tutorialStep, "service_complete") && action === "water") {
       setServiceBusy(true);
       await markGuestServed("old_farmer", "water");
-      await addCurrencyCopper(beveragePriceForGuest("old_farmer"));
+      await addIncomeCopper(beveragePriceForGuest("old_farmer"));
       setServiceBusy(false);
       showStandaloneServiceDialog(
         { speaker: "Old Farmer", portrait: "old_farmer", text: beverageDepartureLine("old_farmer") },
@@ -1400,7 +1402,7 @@ export default function DiningScreen() {
       runTransfer(mealImage, W * 0.5 - 18, headerH + 165, start.x - 18, start.y - 18, () => {
         audioManager.playSoundEffect("bling", { maxDurationMs: 2000 });
         void runCoinTransfer(start.x - 14, start.y - 14, async () => {
-          await addCurrencyCopper(price);
+          await addIncomeCopper(price);
           setServiceBusy(false);
           showStandaloneServiceDialog(
             { speaker: "Old Farmer", portrait: "old_farmer", text: seasonedMealPraise(activeMeal, guest.profile) ?? farmerMealReaction(reaction.reaction) },
@@ -1602,7 +1604,7 @@ export default function DiningScreen() {
             </View>
           </View>
 
-          <QuestBookButton onBagUpdated={setPlayerBag} />
+          <QuestBookButton bagTargetRef={bagButtonRef} onBagUpdated={setPlayerBag} />
           <View style={styles.rightHeaderColumn}>
             <View style={styles.rightHeader}>
               <View style={styles.dayBadge}>
@@ -1887,6 +1889,7 @@ const locationAction = guestDormitoryBlocked
               { icon: "book-outline" as const, label: "Logbook", action: () => { setShowMenu(false); router.push("/logbook"); } },
               { icon: "save-outline" as const, label: "Save", action: handleManualSave },
               { icon: "home-outline" as const, label: "Main Menu", action: handleMainMenu },
+              { icon: "mail-outline" as const, label: "Support", action: () => { setShowMenu(false); router.push("/support"); } },
               { icon: "settings-outline" as const, label: "Settings", action: () => { setShowMenu(false); router.push("/settings"); } },
             ].map((item) => (
               <TouchableOpacity

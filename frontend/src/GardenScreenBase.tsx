@@ -2192,7 +2192,7 @@ setExploreUnlocked(exploreAvailable);
               <Text style={styles.statBarText}>{lifeCurrent}/{playerStats.maximumLife}</Text>
             </View>
           </View>
-          <QuestBookButton onBagUpdated={setPlayerBag} />
+          <QuestBookButton bagTargetRef={bagIconViewRef} onBagUpdated={setPlayerBag} />
           <View style={styles.rightHeaderColumn}>
             <View style={styles.rightHeader}>
               <View style={styles.dayBadge}><Text style={styles.dayText}>{DAYS[dayIdx]}</Text></View>
@@ -2718,6 +2718,7 @@ return (
               } },
               { icon: "save-outline" as const, label: "Save", action: handleManualSave },
               { icon: "home-outline" as const, label: "Main Menu", action: handleMainMenu },
+              { icon: "mail-outline" as const, label: "Support", action: () => { setShowMenu(false); router.push("/support"); } },
               { icon: "settings-outline" as const, label: "Settings", action: () => { setShowMenu(false); router.push("/settings"); } },
             ].map((item) => (
               <TouchableOpacity key={item.label} style={styles.menuRow} onPress={item.action} activeOpacity={0.7}>

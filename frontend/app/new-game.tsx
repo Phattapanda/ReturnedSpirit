@@ -147,6 +147,7 @@ export default function NewGame() {
       "@kitchen:craft_ingredients",
       "@kitchen:craft_tool_slot",
       "@kitchen:discovered_recipes",
+      "@workshop:discovered_alchemy_recipes",
       // Room / Dormitory state
       "@room:has_entered",
       "@room:has_seen_evening_thought",

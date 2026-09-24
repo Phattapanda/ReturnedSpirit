@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import { loadCurrencyCopper, saveCurrencyCopper } from "@/src/game/currency-system";
+import { addIncomeCopper } from "@/src/game/currency-system";
 import { addGuestFavor, loadGuestState } from "@/src/game/guest-system";
 import {
   ITEM_ATTRIBUTE,
@@ -127,7 +127,7 @@ export async function acceptCoachmanEscort(withCopperBonus: boolean): Promise<Co
   const state = await loadCoachmanEscortState();
   if (state.phase === "accepted" || state.phase === "journey" || state.phase === "combat" || state.phase === "post_combat" || state.phase === "city_arrival" || state.phase === "city_exploration" || state.phase === "complete") return state;
   if (!withCopperBonus) await addGuestFavor("coachman", 10);
-  if (withCopperBonus) await saveCurrencyCopper((await loadCurrencyCopper()) + 50);
+  if (withCopperBonus) await addIncomeCopper(50);
   const delivered = await deliverEquipmentToKitchen();
   return saveCoachmanEscortState({ ...state, phase: "accepted", equipmentPending: !delivered, bonusCopperAccepted: withCopperBonus });
 }

@@ -2,7 +2,7 @@
   "expo": {
     "name": "A Returned Spirit",
     "slug": "returned-spirit",
-    "version": "1.0.0",
+    "version": "1.0.5",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "returned-spirit",
@@ -18,6 +18,7 @@
         "backgroundColor": "#000000"
       },
       "package": "com.emergent.deutschgame.b8t357",
+      "versionCode": 105,
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS"
@@ -55,7 +56,8 @@
       "expo-secure-store",
       "expo-status-bar",
       "expo-video",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-iap"
     ],
     "experiments": {
       "typedRoutes": true

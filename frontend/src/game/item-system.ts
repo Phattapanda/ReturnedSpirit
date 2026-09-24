@@ -89,19 +89,19 @@ export const DEFAULT_BAG: PlayerBagData = {
   bagId: "bag1",
   level: 1,
   rows: 2,
-  columns: 3,
-  slotCount: 6,
+  columns: 4,
+  slotCount: 8,
   maxStackSize: 9,
   unlocked: false,
-  slots: Array(6).fill(null),
+  slots: Array(8).fill(null),
 };
 
 export const BACKPACK_BAG: Omit<PlayerBagData, "unlocked" | "slots"> = {
   bagId: "bag2",
   level: 2,
   rows: 3,
-  columns: 3,
-  slotCount: 9,
+  columns: 4,
+  slotCount: 12,
   maxStackSize: 9,
 };
 
@@ -124,8 +124,8 @@ export const BIG_BACKPACK_BAG: Omit<PlayerBagData, "unlocked" | "slots"> = {
   bagId: "bag3",
   level: 3,
   rows: 4,
-  columns: 4,
-  slotCount: 16,
+  columns: 5,
+  slotCount: 20,
   maxStackSize: 9,
 };
 
@@ -186,7 +186,7 @@ export function normalizePlayerBagData(bag: Partial<PlayerBagData>): PlayerBagDa
   };
 }
 
-/** Upgrade an owned Backpack to the city's 4 x 4 Big Backpack. */
+/** Upgrade an owned Backpack to the city's 4 x 5 Big Backpack. */
 export function upgradeToBigBackpack(bag: PlayerBagData): PlayerBagData {
   const normalized = normalizePlayerBagData(bag);
   if (normalized.bagId === BIG_BACKPACK_BAG.bagId) return normalized;
@@ -437,8 +437,8 @@ export type ItemCatalogEntry = {
  *   quest_item  — a progression item consumed by a quest or upgrade
  */
 export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
-  bag2: { name: "Backpack", description: "A roomy 3 × 3 upgrade for the Shoulder Bag.", attributes: [ITEM_ATTRIBUTE.STORAGE] },
-  bag3: { name: "Big Backpack", description: "A spacious 4 × 4 backpack upgrade sold in the city.", attributes: [ITEM_ATTRIBUTE.STORAGE] },
+  bag2: { name: "Backpack", description: "A roomy 3 × 4 upgrade for the Shoulder Bag.", attributes: [ITEM_ATTRIBUTE.STORAGE] },
+  bag3: { name: "Big Backpack", description: "A spacious 4 × 5 backpack upgrade sold in the city.", attributes: [ITEM_ATTRIBUTE.STORAGE] },
   crate1: { name: "Small Crate", description: "A finished 2 × 3 Kitchen storage crate.", attributes: [ITEM_ATTRIBUTE.STORAGE] },
   monster_carcass: { name: "Monster Carcass", description: "A defeated monster. Process it in the Kitchen with a Butchering Knife.", attributes: [ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 1 },
   malted_barley: { name: "Malted Barley", description: "Quest item.", attributes: [ITEM_ATTRIBUTE.QUEST_ITEM] },
@@ -479,7 +479,8 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
   alchemy_powder_white: { name: "White Alchemy Powder", description: "A processed alchemical ingredient ground with a Mortar and Pestle.", attributes: [ITEM_ATTRIBUTE.INGREDIENT, ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 22 },
   alchemy_powder_black: { name: "Black Alchemy Powder", description: "A processed alchemical ingredient ground with a Mortar and Pestle.", attributes: [ITEM_ATTRIBUTE.INGREDIENT, ITEM_ATTRIBUTE.MATERIAL], baseSellPriceCopper: 22 },
   spices: { name: "Spices", description: "A fragrant blend crafted from Herbs and Nuts. Used to season cooked dishes.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
-  recipe: { name: "Recipe", description: "Try a new recipe.", attributes: [], baseSellPriceCopper: 50 },
+  recipe: { name: "Recipe", description: "Reveals a new recipe for the Kitchen.", attributes: [], baseSellPriceCopper: 50 },
+  alchemy_recipe: { name: "Alchemy Recipe", description: "Reveals a new recipe for the Workshop.", attributes: [], baseSellPriceCopper: 50 },
   scroll: { name: "Scroll", description: "A blank, non-stackable scroll for crafting magic and enhancement scrolls.", attributes: [ITEM_ATTRIBUTE.MATERIAL] },
   fire_bolt_scroll: { name: "Fire Bolt Scroll", description: "Fire magic: 25 damage, 90% accuracy. Ignores Defense; Fire Resistance and Immunity apply. 5 uses.", attributes: [ITEM_ATTRIBUTE.WEAPON], baseSellPriceCopper: 100 },
   ice_field_scroll: { name: "Ice Field Scroll", description: "Ice magic: 20 damage, 110% accuracy. Ignores Defense; Ice Resistance and Immunity apply. 7 uses.", attributes: [ITEM_ATTRIBUTE.WEAPON], baseSellPriceCopper: 100 },

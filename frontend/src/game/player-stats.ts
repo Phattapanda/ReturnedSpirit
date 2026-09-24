@@ -22,6 +22,7 @@ export type PlayerStats = {
   luck: number;
   effectiveness: number;
   growthPoints: number;
+  incomeBonusPercent: number;
   statusEffects: StatusEffectState;
 };
 
@@ -39,6 +40,7 @@ export const DEFAULT_PLAYER_STATS: PlayerStats = {
   luck: 1,
   effectiveness: 1,
   growthPoints: 0,
+  incomeBonusPercent: 0,
   statusEffects: DEFAULT_STATUS_EFFECT_STATE,
 };
 
@@ -76,6 +78,7 @@ export function normalizePlayerStats(raw: unknown): PlayerStats {
     luck: normalizedInteger(candidate.luck, 1, 1),
     effectiveness: normalizedInteger(candidate.effectiveness, 1, 1),
     growthPoints: normalizedInteger(candidate.growthPoints, 0),
+    incomeBonusPercent: normalizedInteger(candidate.incomeBonusPercent, 0),
     statusEffects: normalizeStatusEffectState(candidate.statusEffects, candidate.activeStaminaBuffs),
   };
 }

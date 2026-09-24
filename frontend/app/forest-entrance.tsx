@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
-import { Animated, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions, type ImageSourcePropType } from "react-native";
+import { ActivityIndicator, Animated, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions, type ImageSourcePropType } from "react-native";
 import Reanimated, { runOnJS, useAnimatedStyle, useSharedValue, withSequence, withTiming } from "react-native-reanimated";
 import { useEventListener } from "expo";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -9,16 +9,18 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import SceneBackground from "@/src/components/SceneBackground";
-import TravelHeader from "@/src/components/travel-header";
+import TravelHeader, { type TravelLootTargets } from "@/src/components/travel-header";
 import DeathAngelOverlay from "@/src/components/death-angel-overlay";
 import ItemDurabilityBadge from "@/src/components/item-durability-badge";
 import ScrollActivationOverlay from "@/src/components/scroll-activation-overlay";
 import { getItemImageSource } from "@/src/components/PlayerBag";
+import InventorySortButton from "@/src/components/inventory-sort-button";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { useHaptics } from "@/src/feedback/haptics-provider";
 import {
   FOREST_FLOOR_COUNT, FOREST_FORWARD_STAMINA_COST, FOREST_MONSTERS, FOREST_REST_FLOORS,
-  getForestAmbushPreview, getForestAttackPreview, getForestHideChance, getForestSearchPreview,
+  getForestActivityStaminaCost, getForestAmbushPreview, getForestAttackPreview, getForestHideChance, getForestSearchPreview,
+  applyBurningAfterForestAction,
   ambushHiddenForestMonster, attackForestMonster, castEquippedForestScroll, bandageAtForestRestArea, defendAgainstForestMonster, escapeForestCombat,
   collectPendingForestCarcass, dismissPendingForestLoot, enterForestDungeon, forestAreaForFloor, goForwardInForest, hideFromForestMonster, leaveForestDungeon, letHiddenForestMonsterPass, searchForestArea,
   type DungeonActionResult, type ForestDungeonState, type ForestMonsterId,
@@ -29,10 +31,12 @@ import type { NextRunBonuses } from "@/src/game/next-run";
 import { ACCURACY_HIT_CHANCE_PER_POINT, DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, normalizePlayerStats } from "@/src/game/player-stats";
 import { completeDungeonDayTransition } from "@/src/game/dungeon-day-transition";
 import { EMBER_ROOSTER_ENCOUNTER_SEEN_KEY } from "@/src/game/encounter-cinematics";
-import { activeSupporter, discardSupporterItem, eatSupporterItem, loadSupporterBag, moveSupporterItemToPlayer, type SupporterId } from "@/src/game/city-system";
+import { activeSupporter, discardSupporterItem, eatSupporterItem, loadSupporterBag, moveSupporterItemToPlayer, sortSupporterBag, type SupporterId } from "@/src/game/city-system";
 import { DEFAULT_BAG, ITEM_ATTRIBUTE, ITEM_CATALOG, PLAYER_BAG_KEY, hasItemAttribute, isConsumable, isEdible, normalizePlayerBagData, type BagItem, type PlayerBagData } from "@/src/game/item-system";
+import { nextInventorySortMode, type InventorySortMode } from "@/src/game/inventory-sort";
 import { setGameplayBackBlocked } from "@/src/components/gameplay-back-guard";
 import { PLAYER_AVATAR_KEY, type PlayerAvatarId } from "@/src/game/player-avatar";
+import { getForestVideoSource, preloadForestAssets } from "@/src/game/forest-assets";
 
 const BACKGROUNDS: Record<ReturnType<typeof forestAreaForFloor>, ImageSourcePropType> = {
   "Forest Edge": require("../assets/images/forest_edge.png"),
@@ -43,8 +47,6 @@ const BACKGROUNDS: Record<ReturnType<typeof forestAreaForFloor>, ImageSourceProp
 };
 const ELDER_EMBER_ROOSTER_BACKGROUND = require("../assets/images/forest_heart_boss.png");
 const HUNTERS_CAMP_BACKGROUND = require("../assets/images/hunters_camp.png");
-const EMBER_ROOSTER_ENCOUNTER_VIDEO = require("../assets/video/encounter_ember_rooster.mp4");
-const ELDER_EMBER_ROOSTER_ENCOUNTER_VIDEO = require("../assets/video/entrance_boss_elder_ember_rooster.mp4");
 const ENCOUNTER_SKIP_HOLD_MS = 900;
 const MONSTER_IMAGES: Record<ForestMonsterId, ImageSourcePropType> = {
   forest_slime: require("../assets/images/forest_slime.png"),
@@ -75,13 +77,13 @@ function CombatMessage({ message }: { message: string }) {
   const sentences = message.match(/[^.!?]+[.!?]?/g) ?? [message];
   return <Text selectable style={styles.message}>{sentences.map((sentence, index) => {
     const cleanSentence = sentence.trim();
-    const received = /hits me for \d+ damage|lose \d+ Life/i.test(cleanSentence);
+    const received = /hits me for \d+ (?:physical )?damage|Burning deals \d+ fire damage|lose \d+ Life/i.test(cleanSentence);
     const dealt = /I hit .* for \d+ damage|strike critically for \d+ damage|strikes for \d+ damage|Scroll hits .* for \d+/i.test(cleanSentence);
     return <Text key={`${index}-${cleanSentence}`} style={received ? styles.damageReceived : dealt ? styles.damageDealt : undefined}>{index > 0 ? " " : ""}{cleanSentence}</Text>;
   })}</Text>;
 }
 
-function LootFlightOverlay({ flights, width, height, headerHeight }: { flights: NonNullable<DungeonActionResult["lootFlights"]>; width: number; height: number; headerHeight: number }) {
+function LootFlightOverlay({ flights, width, height, headerHeight, targets }: { flights: NonNullable<DungeonActionResult["lootFlights"]>; width: number; height: number; headerHeight: number; targets: TravelLootTargets | null }) {
   const progress = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     progress.setValue(0);
@@ -90,14 +92,19 @@ function LootFlightOverlay({ flights, width, height, headerHeight }: { flights: 
   return <View pointerEvents="none" style={StyleSheet.absoluteFill}>{flights.map((flight, index) => {
     const image = getItemImageSource(flight.item.id);
     if (!image) return null;
-    const targetX = flight.destination === "supporter" ? width * 0.52 : width * 0.78;
+    const fallbackTarget = { x: flight.destination === "supporter" ? width * 0.52 : width * 0.78, y: headerHeight + 117 };
+    const target = flight.destination === "supporter"
+      ? targets?.supporter ?? targets?.player ?? fallbackTarget
+      : targets?.player ?? fallbackTarget;
+    const startCenterX = width * 0.5 + index * 5;
+    const startCenterY = height * 0.40 + 25 + index * 4;
     return <Animated.Image key={`${flight.item.id}-${index}`} source={image} resizeMode="contain" style={[styles.lootFlightImage, {
-      left: width * 0.5 - 25 + index * 5,
-      top: height * 0.40 + index * 4,
+      left: startCenterX - 25,
+      top: startCenterY - 25,
       opacity: progress.interpolate({ inputRange: [0, 0.75, 1], outputRange: [1, 1, 0] }),
       transform: [
-        { translateX: progress.interpolate({ inputRange: [0, 1], outputRange: [0, targetX - width * 0.5] }) },
-        { translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [0, headerHeight + 92 - height * 0.40] }) },
+        { translateX: progress.interpolate({ inputRange: [0, 1], outputRange: [0, target.x - startCenterX] }) },
+        { translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [0, target.y - startCenterY] }) },
         { scale: progress.interpolate({ inputRange: [0, 1], outputRange: [1, 0.45] }) },
       ],
     }]} />;
@@ -134,9 +141,11 @@ export default function ForestEntranceScreen() {
   const [emberRoosterEncounterSeen, setEmberRoosterEncounterSeen] = useState<boolean | null>(null);
   const [encounterVideoVisible, setEncounterVideoVisible] = useState(false);
   const [bossEncounterVideoVisible, setBossEncounterVideoVisible] = useState(false);
+  const [bossEncounterFirstFrame, setBossEncounterFirstFrame] = useState(false);
   const [supporter, setSupporter] = useState<Awaited<ReturnType<typeof activeSupporter>>>(null);
   const [supporterBag, setSupporterBag] = useState<PlayerBagData | null>(null);
   const [supporterBagOpen, setSupporterBagOpen] = useState(false);
+  const [supporterNextSortMode, setSupporterNextSortMode] = useState<InventorySortMode>("type");
   const [contractVisible, setContractVisible] = useState(false);
   const [floorTransitionActive, setFloorTransitionActive] = useState(false);
   const [supporterAction, setSupporterAction] = useState<{ slot: number; item: BagItem } | null>(null);
@@ -144,6 +153,7 @@ export default function ForestEntranceScreen() {
   const [scrollActivationKey, setScrollActivationKey] = useState(0);
   const [defeatedMonsterVisible, setDefeatedMonsterVisible] = useState(false);
   const [lootFlights, setLootFlights] = useState<NonNullable<DungeonActionResult["lootFlights"]>>([]);
+  const [lootTargets, setLootTargets] = useState<TravelLootTargets | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const contractShown = useRef(false);
   const returnFade = useRef(new Animated.Value(0)).current;
@@ -168,10 +178,12 @@ export default function ForestEntranceScreen() {
   const bossEncounterVideoVisibleRef = useRef(false);
   const bossEncounterCompletionRef = useRef(false);
   const bossEncounterPlayedRef = useRef(false);
-  const encounterVideoPlayer = useVideoPlayer(EMBER_ROOSTER_ENCOUNTER_VIDEO, (player) => {
+  const bossEncounterPlaybackStartedRef = useRef(false);
+  const bossEncounterRetryRef = useRef(0);
+  const encounterVideoPlayer = useVideoPlayer(getForestVideoSource("ember_rooster_encounter"), (player) => {
     player.loop = false;
   });
-  const bossEncounterVideoPlayer = useVideoPlayer(ELDER_EMBER_ROOSTER_ENCOUNTER_VIDEO, (player) => {
+  const bossEncounterVideoPlayer = useVideoPlayer(getForestVideoSource("boss_encounter"), (player) => {
     player.loop = false;
   });
 
@@ -205,16 +217,52 @@ export default function ForestEntranceScreen() {
     setBossEncounterVideoVisible(false);
   }, [bossEncounterVideoPlayer]);
 
+  const startBossEncounterPlayback = useCallback(() => {
+    if (!bossEncounterVideoVisibleRef.current || bossEncounterCompletionRef.current || bossEncounterPlaybackStartedRef.current) return;
+    if (bossEncounterVideoPlayer.status !== "readyToPlay") return;
+    bossEncounterPlaybackStartedRef.current = true;
+    try {
+      bossEncounterVideoPlayer.currentTime = 0;
+      bossEncounterVideoPlayer.play();
+    } catch {
+      bossEncounterPlaybackStartedRef.current = false;
+    }
+  }, [bossEncounterVideoPlayer]);
+
+  const retryBossEncounterPlayback = useCallback(async () => {
+    if (!bossEncounterVideoVisibleRef.current || bossEncounterCompletionRef.current) return;
+    if (bossEncounterRetryRef.current >= 1) {
+      finishBossEncounter();
+      return;
+    }
+    bossEncounterRetryRef.current += 1;
+    bossEncounterPlaybackStartedRef.current = false;
+    try {
+      await preloadForestAssets();
+      await bossEncounterVideoPlayer.replaceAsync(getForestVideoSource("boss_encounter"));
+      startBossEncounterPlayback();
+    } catch {
+      finishBossEncounter();
+    }
+  }, [bossEncounterVideoPlayer, finishBossEncounter, startBossEncounterPlayback]);
+
   useEventListener(bossEncounterVideoPlayer, "playToEnd", finishBossEncounter);
 
   useEventListener(bossEncounterVideoPlayer, "statusChange", ({ status }) => {
-    // A decoding error must never block the boss battle.
-    if (status === "error") finishBossEncounter();
+    if (status === "readyToPlay") startBossEncounterPlayback();
+    // Retry one cold-cache/decode failure before falling through to combat.
+    if (status === "error") void retryBossEncounterPlayback();
   });
 
   useFocusEffect(useCallback(() => {
     let active = true;
-    Promise.all([enterForestDungeon(), AsyncStorage.getItem("@game:life"), loadProgressionState(), AsyncStorage.getItem(PLAYER_STATS_KEY), AsyncStorage.getItem(EMBER_ROOSTER_ENCOUNTER_SEEN_KEY), AsyncStorage.getItem(PLAYER_BAG_KEY)]).then(([loaded, rawLife, progression, rawStats, rawEncounterSeen, rawBag]) => {
+    Promise.all([preloadForestAssets(), enterForestDungeon(), AsyncStorage.getItem("@game:life"), loadProgressionState(), AsyncStorage.getItem(PLAYER_STATS_KEY), AsyncStorage.getItem(EMBER_ROOSTER_ENCOUNTER_SEEN_KEY), AsyncStorage.getItem(PLAYER_BAG_KEY)]).then(async ([, loaded, rawLife, progression, rawStats, rawEncounterSeen, rawBag]) => {
+      // A save may resume directly inside the Dungeon and bypass Outside Tavern.
+      // Refresh both players with the verified local cache files before exposing combat.
+      await Promise.all([
+        encounterVideoPlayer.replaceAsync(getForestVideoSource("ember_rooster_encounter")),
+        bossEncounterVideoPlayer.replaceAsync(getForestVideoSource("boss_encounter")),
+      ]);
       if (!active) return;
       setState(loaded);
       setCurrentLife(Math.max(0, Number.parseInt(rawLife ?? "1", 10) || 0));
@@ -224,7 +272,7 @@ export default function ForestEntranceScreen() {
       setMaximumLife(loadedStats.maximumLife);
       setCombatBag(rawBag ? normalizePlayerBagData(JSON.parse(rawBag)) : DEFAULT_BAG);
       setEmberRoosterEncounterSeen(rawEncounterSeen === "true");
-    }).catch(() => setMessage("The dungeon state could not be loaded."));
+    }).catch(() => { if (active) setMessage("The Forest files or dungeon state could not be loaded."); });
     return () => {
       active = false;
       encounterVideoVisibleRef.current = false;
@@ -239,6 +287,7 @@ export default function ForestEntranceScreen() {
   const area = forestAreaForFloor(floorNumber);
   const floor = state?.floors[String(floorNumber)] ?? null;
   const monsterState = floor?.monster ?? null;
+  const monsterPhase = monsterState?.phase;
   const monster = monsterState ? FOREST_MONSTERS[monsterState.id] : null;
   const background = floor?.searchLocation === "Hunter's Camp"
     ? HUNTERS_CAMP_BACKGROUND
@@ -285,6 +334,9 @@ export default function ForestEntranceScreen() {
     }
     if (bossEncounterPlayedRef.current || bossEncounterVideoVisibleRef.current) return;
     bossEncounterCompletionRef.current = false;
+    bossEncounterPlaybackStartedRef.current = false;
+    bossEncounterRetryRef.current = 0;
+    setBossEncounterFirstFrame(false);
     bossEncounterVideoVisibleRef.current = true;
     setBossEncounterVideoVisible(true);
   }, [isBossEncounter]);
@@ -292,27 +344,24 @@ export default function ForestEntranceScreen() {
   useEffect(() => {
     if (!bossEncounterVideoVisible) return;
     stopGameplayMusic(0);
-    try {
-      bossEncounterVideoPlayer.currentTime = 0;
-      bossEncounterVideoPlayer.play();
-    } catch {
-      finishBossEncounter();
-    }
+    if (bossEncounterVideoPlayer.status === "readyToPlay") startBossEncounterPlayback();
+    else if (bossEncounterVideoPlayer.status === "error") void retryBossEncounterPlayback();
     return () => {
       try { bossEncounterVideoPlayer.pause(); } catch {}
+      bossEncounterPlaybackStartedRef.current = false;
     };
-  }, [bossEncounterVideoPlayer, bossEncounterVideoVisible, finishBossEncounter, stopGameplayMusic]);
+  }, [bossEncounterVideoPlayer, bossEncounterVideoVisible, retryBossEncounterPlayback, startBossEncounterPlayback, stopGameplayMusic]);
 
   useEffect(() => {
     if (currentLife <= 0) { stopGameplayMusic(500); return; }
     if (encounterVideoVisible || bossEncounterVideoVisible || (isEmberRoosterEncounter && emberRoosterEncounterSeen !== true) || (isBossEncounter && !bossEncounterPlayedRef.current)) { stopGameplayMusic(0); return; }
     if (isRestArea) { crossfadeTo("rest-area", 650); return; }
-    if (monsterState?.phase === "combat") {
+    if (monsterPhase === "noticed" || monsterPhase === "hidden" || monsterPhase === "combat") {
       crossfadeTo(monster?.boss ? "boss-battle" : currentLife * 2 >= maximumLife ? "battle-over50" : "battle-under50", 600);
       return;
     }
-    stopGameplayMusic(600);
-  }, [bossEncounterVideoVisible, crossfadeTo, currentLife, emberRoosterEncounterSeen, encounterVideoVisible, isBossEncounter, isEmberRoosterEncounter, isRestArea, maximumLife, monster?.boss, monsterState?.phase, stopGameplayMusic]);
+    crossfadeTo("forest", 650);
+  }, [bossEncounterVideoVisible, crossfadeTo, currentLife, emberRoosterEncounterSeen, encounterVideoVisible, isBossEncounter, isEmberRoosterEncounter, isRestArea, maximumLife, monster?.boss, monsterPhase, stopGameplayMusic]);
 
   useEffect(() => { if (floor?.message) setMessage(floor.message); }, [floor?.message, floorNumber]);
 
@@ -331,7 +380,14 @@ export default function ForestEntranceScreen() {
 
   async function openSupporterBag() {
     setSupporterBag(await loadSupporterBag());
+    setSupporterNextSortMode("type");
     setSupporterBagOpen(true);
+  }
+
+  async function handleSortSupporterBag() {
+    const sorted = await sortSupporterBag(supporterNextSortMode);
+    if (sorted) setSupporterBag(sorted);
+    setSupporterNextSortMode((current) => nextInventorySortMode(current));
   }
 
   async function supporterItemAction(action: "switch" | "eat" | "discard") {
@@ -384,7 +440,7 @@ export default function ForestEntranceScreen() {
     if (busy) return;
     setBusy(true); triggerHaptic("choice");
     try {
-      const result = await action();
+      const result = await applyBurningAfterForestAction(await action());
       if (result.scrollActivated) {
         setScrollActivationKey((current) => current + 1);
         await new Promise((resolve) => setTimeout(resolve, 560));
@@ -435,7 +491,7 @@ export default function ForestEntranceScreen() {
     try {
       // Resolve the movement first, but keep rendering the current floor until
       // the screen is fully black so the next background never flashes early.
-      const result = await goForwardInForest();
+      const result = await applyBurningAfterForestAction(await goForwardInForest());
       if (!result.ok) {
         setMessage(result.message);
         setCurrentLife(result.life);
@@ -451,7 +507,7 @@ export default function ForestEntranceScreen() {
       await animateFloorTransitionValue(floorBlackOpacity, 1, 190);
 
       setState({ ...result.state, floors: { ...result.state.floors } });
-      setMessage(result.message);
+      setMessage(result.life <= 0 ? "YOU DIED." : result.message);
       setCurrentLife(result.life);
       setHeaderRefreshKey((value) => value + 1);
       floorBackgroundScale.value = 1;
@@ -576,7 +632,16 @@ export default function ForestEntranceScreen() {
     combatStats,
     combatBag,
     supporter?.definition.id === "botanist",
+    floor.searchesCompleted,
   ) : null, [combatBag, combatStats, floor, supporter?.definition.id]);
+  const forwardStaminaCost = useMemo(
+    () => getForestActivityStaminaCost(FOREST_FORWARD_STAMINA_COST, combatStats, combatBag),
+    [combatBag, combatStats],
+  );
+  const bandageStaminaCost = useMemo(
+    () => getForestActivityStaminaCost(10, combatStats, combatBag),
+    [combatBag, combatStats],
+  );
   const searchChanceLabel = searchPreview
     ? Number.isInteger(searchPreview.successChance)
       ? String(searchPreview.successChance)
@@ -604,9 +669,9 @@ export default function ForestEntranceScreen() {
     if (!state || !floor) return null;
     if (currentLife <= 0) return <View style={styles.deathCard}><Text style={styles.deathTitle}>YOU DIED.</Text><Text style={styles.deathText}>Death is waiting.</Text></View>;
     if (isRestArea) return <>
-      <ActionButton label="Bandage Wounds" subtitle="10 Stamina · Restore 20% Maximum Life" disabled={busy} onPress={() => { void perform(() => bandageAtForestRestArea(false)); }} />
-      <ActionButton label="Bandage Wounds with Herb" subtitle="10 Stamina + 1 Herb · Restore 30% Maximum Life" disabled={busy} onPress={() => { void perform(() => bandageAtForestRestArea(true)); }} />
-      <ActionButton label="Continue" subtitle={`${FOREST_FORWARD_STAMINA_COST} Stamina`} disabled={busy} onPress={() => { void goForwardWithTransition(); }} />
+      <ActionButton label="Bandage Wounds" subtitle={`${bandageStaminaCost} Stamina · Restore 20% Maximum Life`} disabled={busy} onPress={() => { void perform(() => bandageAtForestRestArea(false)); }} />
+      <ActionButton label="Bandage Wounds with Herb" subtitle={`${bandageStaminaCost} Stamina + 1 Herb · Restore 30% Maximum Life`} disabled={busy} onPress={() => { void perform(() => bandageAtForestRestArea(true)); }} />
+      <ActionButton label="Continue" subtitle={`${forwardStaminaCost} Stamina`} disabled={busy} onPress={() => { void goForwardWithTransition(); }} />
       <ActionButton label="Leave Dungeon" disabled={busy} onPress={() => { void leaveSafely(); }} />
     </>;
     if (monsterState?.phase === "noticed") return <View style={styles.combatGrid}>
@@ -624,18 +689,24 @@ export default function ForestEntranceScreen() {
       <ActionButton label="Defend" subtitle="30% + Luck dodge" disabled={busy} onPress={() => { void perform(defendAgainstForestMonster); }} />
       <ActionButton label="Escape" subtitle="50% + Luck chance" danger disabled={busy} onPress={() => { void perform(escapeForestCombat); }} />
     </View>;
-    if (floor.carcassPending) return <View style={styles.combatGrid}>
-      <ActionButton label="Collect Battle Loot" subtitle="Free space in either bag is required" disabled={busy} onPress={() => { void perform(collectPendingForestCarcass); }} />
-      <ActionButton label="Dismiss" subtitle="Leave the remaining loot behind" danger disabled={busy} onPress={() => { void perform(dismissPendingForestLoot); }} />
+    if (floor.carcassPending) return <View style={styles.pendingLootSection}>
+      <Text style={styles.pendingLootTitle}>Loot on the ground</Text>
+      <Text style={styles.pendingLootText}>{floor.pendingLoot.length > 0
+        ? floor.pendingLoot.map((item) => `${item.quantity}× ${item.name}`).join(" · ")
+        : "1× Monster Carcass"}</Text>
+      <View style={styles.combatGrid}>
+        <ActionButton label="Collect Battle Loot" subtitle="Free space in either bag is required" disabled={busy} onPress={() => { void perform(collectPendingForestCarcass); }} />
+        <ActionButton label="Dismiss" subtitle="Leave the remaining loot behind" danger disabled={busy} onPress={() => { void perform(dismissPendingForestLoot); }} />
+      </View>
     </View>;
     if (bossCleared) return <ActionButton label="Leave Cleared Dungeon" subtitle="Return safely to the tavern" disabled={busy} onPress={() => { void leaveSafely(); }} />;
     return <>
-      <ActionButton label="Search the area" subtitle={floor.searchAvailable && !floor.searched && searchPreview ? `${searchPreview.staminaCost} Stamina · ${searchChanceLabel}% success chance` : "Already searched"} disabled={busy || !floor.searchAvailable || floor.searched} onPress={() => { void perform(searchForestArea); }} />
-      <ActionButton label="Go forward" subtitle={`${FOREST_FORWARD_STAMINA_COST} Stamina`} disabled={busy} onPress={() => { void goForwardWithTransition(); }} />
+      <ActionButton label={floor.searchesCompleted === 0 ? "Search the area" : "Search more thoroughly"} subtitle={floor.searchAvailable && floor.searchesCompleted < 2 && searchPreview ? `${searchPreview.staminaCost} Stamina · ${searchChanceLabel}% success chance` : "Already searched twice"} disabled={busy || !floor.searchAvailable || floor.searchesCompleted >= 2} onPress={() => { void perform(searchForestArea); }} />
+      <ActionButton label="Go forward" subtitle={`${forwardStaminaCost} Stamina`} disabled={busy} onPress={() => { void goForwardWithTransition(); }} />
     </>;
   // perform is intentionally bound to current screen state.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attackPreviews, bossCleared, busy, combatStats, currentLife, floor, isRestArea, monsterState?.phase, router, searchChanceLabel, searchPreview, state]);
+  }, [attackPreviews, bandageStaminaCost, bossCleared, busy, combatStats, currentLife, floor, forwardStaminaCost, isRestArea, monsterState?.phase, router, searchChanceLabel, searchPreview, state]);
 
   return <View style={styles.root}>
     <Reanimated.View pointerEvents="none" style={[StyleSheet.absoluteFill, floorBackgroundStyle]}>
@@ -646,6 +717,7 @@ export default function ForestEntranceScreen() {
       locationName={locationName}
       showPortraitRow
       onHeaderHeightChange={setHeaderHeight}
+      onLootTargetsChange={setLootTargets}
       refreshKey={headerRefreshKey}
       supporterImage={supporter ? SUPPORTER_IMAGES[supporter.definition.id] : undefined}
       onSupporterPress={() => { void openSupporterBag(); }}
@@ -674,7 +746,7 @@ export default function ForestEntranceScreen() {
         <View style={styles.actionPanel}>{actionContent}</View>
       </>}
     </ScrollView>
-    {lootFlights.length > 0 ? <LootFlightOverlay flights={lootFlights} width={screenWidth} height={screenHeight} headerHeight={headerHeight} /> : null}
+    {lootFlights.length > 0 ? <LootFlightOverlay flights={lootFlights} width={screenWidth} height={screenHeight} headerHeight={headerHeight} targets={lootTargets} /> : null}
     <DeathAngelOverlay visible={currentLife <= 0} karmaPoints={karmaPoints} busy={busy} error={deathError} onRepeatFight={() => { void repeatFight(); }} onKarmaTavernReturn={() => { void karmaReturnToTavern(); }} onStartNextRun={(bonuses, avatarId) => { void startNextRun(bonuses, avatarId); }} />
     <Modal visible={contractVisible && !!supporter} transparent animationType="fade" onRequestClose={() => setContractVisible(false)}>
       <View style={styles.warningBackdrop}><View style={styles.supporterPanel}>
@@ -686,7 +758,10 @@ export default function ForestEntranceScreen() {
     </Modal>
     <Modal visible={supporterBagOpen} transparent animationType="fade" onRequestClose={() => setSupporterBagOpen(false)}>
       <View style={styles.warningBackdrop}><View style={styles.supporterBagPanel}>
-        <Text style={styles.warningTitle}>Supporter Bag</Text>
+        <View style={styles.supporterBagHeader}>
+          <Text style={styles.warningTitle}>Supporter Bag</Text>
+          <InventorySortButton mode={supporterNextSortMode} onPress={() => { void handleSortSupporterBag(); }} disabled={!supporterBag?.slots.some(Boolean)} />
+        </View>
         <Text style={styles.supporterHint}>Long press an item for its description and actions.</Text>
         <View style={styles.supporterGrid}>{supporterBag?.slots.map((item, slot) => {
           const image = item ? getItemImageSource(item.id) : undefined;
@@ -737,8 +812,15 @@ export default function ForestEntranceScreen() {
             nativeControls={false}
             contentFit="cover"
             playsInline
+            onFirstFrameRender={() => setBossEncounterFirstFrame(true)}
           />
         </View>
+        {!bossEncounterFirstFrame ? (
+          <View pointerEvents="none" style={styles.encounterLoading}>
+            <ActivityIndicator size="large" color="#F5E6C8" />
+            <Text style={styles.encounterLoadingText}>Preparing encounter…</Text>
+          </View>
+        ) : null}
         <HoldToSkipEncounter onSkip={finishBossEncounter} />
       </View>
     ) : null}
@@ -820,7 +902,11 @@ const styles = StyleSheet.create({
   messageCard: { borderRadius: 12, borderWidth: 1, borderColor: "rgba(196,148,58,0.48)", backgroundColor: "rgba(14,8,2,0.86)", padding: 10 }, message: { color: "#F0E8D5", fontSize: 12, lineHeight: 18, textAlign: "center" },
   damageReceived: { color: "#FF554D", fontWeight: "800" },
   damageDealt: { color: "#65D77A", fontWeight: "800" },
-  actionPanel: { marginTop: "auto", gap: 8, borderRadius: 17, borderCurve: "continuous", borderWidth: 1.5, borderColor: "rgba(196,148,58,0.58)", backgroundColor: "rgba(18,9,2,0.94)", padding: 11 }, combatGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  actionPanel: { marginTop: "auto", gap: 8, borderRadius: 17, borderCurve: "continuous", borderWidth: 1.5, borderColor: "rgba(196,148,58,0.58)", backgroundColor: "rgba(18,9,2,0.94)", padding: 11 },
+  combatGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  pendingLootSection: { gap: 8 },
+  pendingLootTitle: { color: "#F6D68A", fontFamily: "Oldenburg", fontSize: 14, textAlign: "center" },
+  pendingLootText: { color: "#F7E9C9", fontFamily: "Oldenburg", fontSize: 12, lineHeight: 17, textAlign: "center" },
   restAreaActionPanel: { marginTop: 0 },
   actionButton: { minHeight: 54, flexGrow: 1, flexBasis: "46%", alignItems: "center", justifyContent: "center", gap: 3, borderRadius: 11, borderCurve: "continuous", borderWidth: 1, borderColor: "rgba(196,148,58,0.48)", backgroundColor: "rgba(65,39,10,0.86)", paddingHorizontal: 10, paddingVertical: 9 },
   dangerButton: { borderColor: "rgba(181,73,51,0.72)", backgroundColor: "rgba(98,28,18,0.78)" }, disabledButton: { opacity: 0.36 }, actionText: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 14, textAlign: "center" }, dangerText: { color: "#FFE0D8" }, actionSubtitle: { color: "rgba(240,232,213,0.58)", fontSize: 9, textAlign: "center" },
@@ -837,6 +923,7 @@ const styles = StyleSheet.create({
   contractPortrait: { width: 112, height: 112, borderRadius: 56, borderWidth: 2, borderColor: "#9A82E4" },
   lastRun: { color: "#FF4E45", fontWeight: "800" }, remainingRuns: { color: "#F5E6C8", fontWeight: "800" },
   supporterBagPanel: { width: "100%", maxWidth: 430, maxHeight: "82%", gap: 12, padding: 18, borderRadius: 18, borderCurve: "continuous", borderWidth: 1.5, borderColor: "#7D62C8", backgroundColor: "#130E20" },
+  supporterBagHeader: { minHeight: 32, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
   supporterHint: { color: "#BEB2D8", fontSize: 11, textAlign: "center" }, supporterGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 6 },
   supporterSlot: { width: 70, height: 70, borderRadius: 10, alignItems: "center", justifyContent: "center", padding: 5, backgroundColor: "rgba(63,48,96,0.76)", borderWidth: 1, borderColor: "rgba(154,130,228,0.55)" },
   supporterSlotText: { color: "#F5EFFF", fontSize: 9, lineHeight: 12, textAlign: "center" },
@@ -846,6 +933,8 @@ const styles = StyleSheet.create({
   returnFade: { zIndex: 5000, alignItems: "center", justifyContent: "center", paddingHorizontal: 28, backgroundColor: "#000" },
   returnNarration: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 18, lineHeight: 27, textAlign: "center" },
   encounterVideoOverlay: { zIndex: 6000, backgroundColor: "#000" },
+  encounterLoading: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", gap: 12, backgroundColor: "#000" },
+  encounterLoadingText: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 14 },
   skipWrap: { position: "absolute", left: 28, right: 28, alignItems: "center" },
   skipText: { color: "rgba(255,255,255,0.88)", fontSize: 13, letterSpacing: 0.4, marginBottom: 8, textShadowColor: "rgba(0,0,0,0.75)", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 4 },
   skipTrack: { width: 150, height: 3, borderRadius: 2, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.22)" },

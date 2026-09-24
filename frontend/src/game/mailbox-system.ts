@@ -139,13 +139,15 @@ export const BONUS_CODE_CATALOG: Readonly<Record<string, BonusCodeDefinition>> =
       { type: "item", itemId: "goldenapple", quantity: 10 },
     ],
   },
-  STARTINGPACKAGE7DAYS: {
-    sender: "The Developer",
-    subject: "7-Day Starting Package",
-    body: "Your seven-day starting package has begun.",
-    rewards: [],
-    dailySilver: { days: 7, amount: 1 },
-  },
+};
+
+const STARTING_PACKAGE_ID = "STARTINGPACKAGE7DAYS";
+const STARTING_PACKAGE_DEFINITION: BonusCodeDefinition = {
+  sender: "The Developer",
+  subject: "7-Day Starting Package",
+  body: "Your seven-day starting package has begun.",
+  rewards: [],
+  dailySilver: { days: 7, amount: 1 },
 };
 
 function positiveInteger(value: unknown): number {
@@ -531,6 +533,32 @@ export async function redeemBonusCode(rawCode: string): Promise<RedeemBonusCodeR
   };
   await AsyncStorage.setItem(MAILBOX_STATE_KEY, JSON.stringify(nextState));
   return { ok: true, state: nextState, messageId };
+}
+
+/** Activates the purchased package once for the current run without exposing a redeemable code. */
+export async function activatePurchasedStartingPackage(): Promise<MailboxState> {
+  const state = await loadMailboxState();
+  if (state.redeemedCodes.includes(STARTING_PACKAGE_ID)) return state;
+
+  const scheduleDefinition = STARTING_PACKAGE_DEFINITION.dailySilver!;
+  const currentDaySerial = (await loadGuestState()).calendarDaySerial;
+  const schedule: DailyMailboxSchedule = {
+    id: `purchase:${STARTING_PACKAGE_ID}`,
+    sender: STARTING_PACKAGE_DEFINITION.sender,
+    totalLetters: scheduleDefinition.days,
+    deliveredLetters: 1,
+    silverPerLetter: scheduleDefinition.amount,
+    lastDeliveredDaySerial: currentDaySerial,
+  };
+  const initialMessage = createDailyCoinLetter(schedule, 1);
+  return saveMailboxState({
+    ...state,
+    redeemedCodes: [...state.redeemedCodes, STARTING_PACKAGE_ID],
+    dailySchedules: [...state.dailySchedules, schedule],
+    messages: state.messages.some((message) => message.id === initialMessage.id)
+      ? state.messages
+      : [...state.messages, initialMessage],
+  });
 }
 
 export function mailboxRewardLabel(reward: MailReward): string {

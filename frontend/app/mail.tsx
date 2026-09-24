@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Animated, PanResponder, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Alert, Animated, Image, PanResponder, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -18,13 +18,15 @@ import {
   mailboxRewardLabel,
   markMailboxMessageRead,
   redeemBonusCode,
-  type MailSenderKind,
   type MailboxState,
 } from "@/src/game/mailbox-system";
 import { loadCityState } from "@/src/game/city-system";
 import { UI_NOTIFICATION_DURATION_MS } from "@/src/ui/timings";
 
 type MailboxView = "inbox" | "send";
+
+const LETTER_UNREAD_IMAGE = require("../assets/images/letter.png");
+const LETTER_READ_IMAGE = require("../assets/images/letter_open.png");
 
 type MailTextSegment = {
   text: string;
@@ -50,14 +52,6 @@ function splitBoldMailText(text: string): MailTextSegment[] {
     cursor = boldEnd + 2;
   }
   return segments;
-}
-
-function senderIcon(kind: MailSenderKind): React.ComponentProps<typeof Ionicons>["name"] {
-  if (kind === "developer") return "code-slash-outline";
-  if (kind === "npc") return "person-outline";
-  if (kind === "guild") return "shield-outline";
-  if (kind === "adventurer") return "compass-outline";
-  return "mail-outline";
 }
 
 function SwipeToDelete({ enabled, protectedMessage = false, onProtectedDelete, onDelete, children }: {
@@ -326,7 +320,11 @@ export default function MailScreen() {
                     ]}>
                       <TouchableOpacity style={styles.messageHeader} onPress={() => openMessage(message.id)} activeOpacity={0.8}>
                         <View style={styles.senderIcon}>
-                          <Ionicons name={senderIcon(message.senderKind)} size={22} color={dimReadHeader ? "#8E877A" : "#F2D78E"} />
+                          <Image
+                            source={message.read ? LETTER_READ_IMAGE : LETTER_UNREAD_IMAGE}
+                            style={styles.letterIcon}
+                            resizeMode="contain"
+                          />
                         </View>
                         <View style={styles.messageHeaderText}>
                           <View style={styles.senderRow}>
@@ -483,9 +481,9 @@ const styles = StyleSheet.create({
   swipeHint: { color: "rgba(240,232,213,0.48)", fontSize: 11, textAlign: "center", paddingTop: 4 },
   messageHeader: { minHeight: 68, flexDirection: "row", alignItems: "center", gap: 10, padding: 10 },
   senderIcon: {
-    width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center",
-    borderWidth: 1, borderColor: "rgba(196,148,58,0.42)", backgroundColor: "rgba(12,6,1,0.62)",
+    width: 50, height: 46, alignItems: "center", justifyContent: "center",
   },
+  letterIcon: { width: 50, height: 46 },
   messageHeaderText: { flex: 1, gap: 4 },
   senderRow: { flexDirection: "row", alignItems: "center", gap: 7 },
   sender: { color: "#C4943A", fontFamily: "Oldenburg", fontSize: 11 },

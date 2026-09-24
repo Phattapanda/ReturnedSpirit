@@ -3,7 +3,7 @@ import { audioEngine } from "@/src/audio/audioEngine";
 
 import {
   CURRENCY_KEY,
-  addCurrencyCopper,
+  addIncomeCopper,
   formatCurrencyAmount,
   loadCurrencyCopper,
   notifyCurrencyChanged,
@@ -22,6 +22,7 @@ import { loadCoachmanEscortState, setCoachmanEscortPhase } from "@/src/game/coac
 import { getButcheringDefinition, rollButcheringOutputs } from "@/src/game/butchering-system";
 import { addKarmaPoints } from "@/src/game/progression";
 import { GARDEN_INVENTORY_KEY, normalizeGardenInventory } from "@/src/game/tavern-return-storage";
+import { sortInventorySlots, type InventorySortMode } from "@/src/game/inventory-sort";
 
 export const CITY_STATE_KEY = "@game:next_city";
 export const SUPPORTER_BAG_KEY = "@game:supporter_bag";
@@ -382,7 +383,7 @@ export async function completeAdventurerPromotionExam(): Promise<CityActionResul
     state.questVariants[id] = DEFAULT_RANK_G_QUEST_VARIANTS[id];
   }
   await saveCityState(state);
-  await addCurrencyCopper(300);
+  await addIncomeCopper(300);
   return { ok: true, message: "Promotion Examination passed. Adventurer Rank G reached. 3 Silver Coins awarded." };
 }
 
@@ -522,7 +523,7 @@ export async function buyCityItem(id: string, priceCopper: number, quantity = 1)
     if ((await loadCurrencyCopper()) < priceCopper) return { ok: false, message: "I do not have enough coins." };
     await saveCurrencyCopper((await loadCurrencyCopper()) - priceCopper);
     await AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(upgradeToBigBackpack(bag)));
-    return { ok: true, message: "Backpack upgraded to the 4 × 4 Big Backpack." };
+    return { ok: true, message: "Backpack upgraded to the 4 × 5 Big Backpack." };
   }
   const item = createItem(id);
   item.quantity = Math.max(1, Math.floor(quantity));
@@ -624,6 +625,13 @@ function matchingContractSlot(bag: PlayerBagData, requirement: MerchantContractD
     && item.quantity >= requirement.quantity);
 }
 
+export function isMerchantContractReadyToTurnIn(id: MerchantContractId, bag: PlayerBagData): boolean {
+  const requirement = MERCHANT_CONTRACTS[id].requirement;
+  return requirement.containedItem
+    ? matchingContractSlot(bag, requirement) >= 0
+    : itemCount(bag, requirement.itemId) >= requirement.quantity;
+}
+
 export async function acceptMerchantContract(id: MerchantContractId): Promise<CityActionResult> {
   const state = await loadCityState();
   if (!state.merchantContractOfferIds.includes(id)) return { ok: false, message: "That contract is not currently offered." };
@@ -635,6 +643,17 @@ export async function acceptMerchantContract(id: MerchantContractId): Promise<Ci
   state.merchantContractOfferIds = state.merchantContractOfferIds.filter((entry) => entry !== id);
   await saveCityState(state);
   return { ok: true, message: `${MERCHANT_CONTRACTS[id].title} accepted.` };
+}
+
+export async function abortMerchantContract(id: MerchantContractId): Promise<CityActionResult> {
+  const state = await loadCityState();
+  const active = state.activeMerchantContracts.find((entry) => entry.id === id);
+  if (!active) return { ok: false, message: "I have not accepted that quest." };
+  state.activeMerchantContracts = state.activeMerchantContracts.filter((entry) => entry !== active);
+  if (!state.merchantContractOfferIds.includes(id) && state.merchantContractOfferIds.length < 3) state.merchantContractOfferIds.push(id);
+  state.merchantReputation = Math.max(0, state.merchantReputation - 5);
+  await saveCityState(state);
+  return { ok: true, message: `${MERCHANT_CONTRACTS[id].title} aborted. 5 Merchant Reputation lost.` };
 }
 
 export async function fulfillMerchantContract(id: MerchantContractId): Promise<CityActionResult> {
@@ -656,9 +675,8 @@ export async function fulfillMerchantContract(id: MerchantContractId): Promise<C
   state.completedMerchantContracts = [...state.completedMerchantContracts, { id, completedDay: (await loadGuestState()).calendarDaySerial }].slice(-30);
   state.merchantReputation += definition.reputation;
   if (state.merchantReputation >= 51) state.merchantContractTierUnlocked = true;
-  const balance = await loadCurrencyCopper();
-  await AsyncStorage.multiSet([[PLAYER_BAG_KEY, JSON.stringify(nextBag)], [CITY_STATE_KEY, JSON.stringify(state)], [CURRENCY_KEY, String(balance + definition.rewardCopper)]]);
-  notifyCurrencyChanged(balance + definition.rewardCopper);
+  await AsyncStorage.multiSet([[PLAYER_BAG_KEY, JSON.stringify(nextBag)], [CITY_STATE_KEY, JSON.stringify(state)]]);
+  await addIncomeCopper(definition.rewardCopper);
   return { ok: true, message: `Contract fulfilled: ${formatCurrencyAmount(definition.rewardCopper)} and ${definition.reputation} Merchant Reputation awarded.` };
 }
 
@@ -709,7 +727,7 @@ export async function sellCityItem(slot: number): Promise<CityActionResult> {
   if (!item) return { ok: false, message: "That slot is empty." };
   if (item.equipped || (ITEM_CATALOG[item.id]?.attributes ?? []).includes(ITEM_ATTRIBUTE.QUEST_ITEM)) return { ok: false, message: "That item cannot be sold." };
   const price = citySellPrice(item.id); const next = removeBagItem(bag, slot, 1);
-  await AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(next)); await addCurrencyCopper(price);
+  await AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(next)); await addIncomeCopper(price);
   return { ok: true, message: `Sold 1× ${item.name} for ${formatCurrencyAmount(price)}.` };
 }
 
@@ -761,6 +779,14 @@ export async function loadSupporterBag(): Promise<PlayerBagData | null> {
     return { bagId: `supporter_${def.id}`, level: 1, rows: def.rows, columns: def.columns, slotCount: def.slots, maxStackSize: 9, unlocked: true, slots: Array.from({ length: def.slots }, (_, index) => slots[index] ?? null) };
   }
   return { bagId: `supporter_${def.id}`, level: 1, rows: def.rows, columns: def.columns, slotCount: def.slots, maxStackSize: 9, unlocked: true, slots: Array(def.slots).fill(null) };
+}
+
+export async function sortSupporterBag(mode: InventorySortMode): Promise<PlayerBagData | null> {
+  const bag = await loadSupporterBag();
+  if (!bag) return null;
+  const sorted = { ...bag, slots: sortInventorySlots(bag.slots, mode) };
+  await AsyncStorage.setItem(SUPPORTER_BAG_KEY, JSON.stringify(sorted));
+  return sorted;
 }
 
 export async function moveSupporterItemToPlayer(slot: number): Promise<CityActionResult> {
@@ -939,6 +965,22 @@ export async function acceptQuest(id: QuestId): Promise<CityActionResult> {
   return { ok: true, message: `${definition.title} accepted.` };
 }
 
+export async function abortQuest(id: QuestId): Promise<CityActionResult> {
+  const state = await loadCityState();
+  const quest = state.quests[id];
+  if (quest.status !== "accepted" && quest.status !== "ready") return { ok: false, message: "That quest is not active." };
+  const definition = getQuestDefinition(id, state);
+  let bag = await loadBag();
+  if (definition.investigation === "provisions") bag = consumeItems(bag, "quest_guild_provisions", 1);
+  state.quests[id] = { status: "offered", progress: 0 };
+  state.guildReputation = Math.max(0, state.guildReputation - 5);
+  await AsyncStorage.multiSet([
+    [PLAYER_BAG_KEY, JSON.stringify(bag)],
+    [CITY_STATE_KEY, JSON.stringify(state)],
+  ]);
+  return { ok: true, message: `${definition.title} aborted. 5 Guild Reputation lost.` };
+}
+
 function itemCount(bag: PlayerBagData, id: string): number { return bag.slots.reduce((sum, item) => sum + (item?.id === id ? item.quantity : 0), 0); }
 
 export function isQuestReadyToTurnIn(id: QuestId, state: CityState, bag: PlayerBagData): boolean {
@@ -964,7 +1006,7 @@ export async function turnInQuest(id: QuestId): Promise<CityActionResult> {
   if (def.requirement) bag = consumeItems(bag, def.requirement.itemId, def.requirement.quantity);
   state.guildReputation += def.reputation; state.quests[id] = { status: "completed", progress: quest.progress };
   await AsyncStorage.multiSet([[PLAYER_BAG_KEY, JSON.stringify(bag)], [CITY_STATE_KEY, JSON.stringify(state)]]);
-  await Promise.all([addCurrencyCopper(def.rewardCopper), addKarmaPoints(RANK_H_QUEST_KARMA_POINTS)]);
+  await Promise.all([addIncomeCopper(def.rewardCopper), addKarmaPoints(RANK_H_QUEST_KARMA_POINTS)]);
   return { ok: true, message: `Quest complete: ${formatCurrencyAmount(def.rewardCopper)} and ${def.reputation} Guild Reputation awarded.` };
 }
 

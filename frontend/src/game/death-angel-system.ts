@@ -1,18 +1,20 @@
-import { prepareNextRun, type NextRunBonuses } from "@/src/game/next-run";
+import { normalizeNextRunBonuses, prepareNextRun, type NextRunBonuses } from "@/src/game/next-run";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { PLAYER_STATS_KEY, normalizePlayerStats } from "@/src/game/player-stats";
 import { addKarmaPoints, spendKarmaPoints } from "@/src/game/progression";
 import { leaveForestDungeon, restoreForestFightSnapshot, type DungeonActionResult } from "@/src/game/forest-dungeon-system";
 
-export const REPEAT_FIGHT_KP_COST = 10;
-export const KARMA_TAVERN_RETURN_COST = 100;
+export const REPEAT_FIGHT_KP_COST = 5;
+export const KARMA_TAVERN_RETURN_COST = 50;
 
 export function nextRunBonusCost(bonuses: NextRunBonuses): number {
-  return (bonuses.betterValues ? 10 : 0) +
-    (bonuses.growthPoints ? 10 : 0) +
-    (bonuses.copper === 100 ? 5 : bonuses.copper === 300 ? 15 : 0) +
-    (bonuses.preserveFavor ? 25 : 0) +
-    (bonuses.skipRupertTutorials ? 10 : 0);
+  const normalized = normalizeNextRunBonuses(bonuses);
+  return (normalized.betterValues ? 10 : 0) +
+    (normalized.incomeBonusPacks ?? 0) * 10 +
+    (normalized.startingSilver ?? 0) * 3 +
+    (normalized.growthPointPacks ?? 0) * 3 +
+    (normalized.preserveFavor ? 20 : 0) +
+    (normalized.skipRupertTutorials ? 2 : 0);
 }
 
 export async function repeatForestFight(): Promise<DungeonActionResult | null> {
@@ -38,12 +40,18 @@ export async function returnToTavernAfterForestDeath(): Promise<Awaited<ReturnTy
 }
 
 export async function beginChosenNextRun(slotNumber: number, bonuses: NextRunBonuses): Promise<"ok" | "insufficient_kp"> {
+  bonuses = normalizeNextRunBonuses(bonuses);
   const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
   if (normalizePlayerStats(rawStats ? JSON.parse(rawStats) : null).runBaseUpgrades >= 10) {
     bonuses = { ...bonuses, betterValues: false };
   }
   const cost = nextRunBonusCost(bonuses);
   if (cost > 0 && !await spendKarmaPoints(cost)) return "insufficient_kp";
-  await prepareNextRun(slotNumber, bonuses);
-  return "ok";
+  try {
+    await prepareNextRun(slotNumber, bonuses);
+    return "ok";
+  } catch (error) {
+    if (cost > 0) await addKarmaPoints(cost);
+    throw error;
+  }
 }

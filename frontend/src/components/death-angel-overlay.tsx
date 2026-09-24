@@ -39,10 +39,19 @@ type Props = {
 const FREE_ITEMS: { id: NextRunFreeItem; label: string }[] = [
   { id: "stamina_potions", label: "3× Low Grade Stamina Potions" },
   { id: "healing_potions", label: "3× Low Grade Healing Potions" },
-  { id: "iron_shortswords", label: "2× Iron Shortsword" },
-  { id: "leather_armor", label: "2× Leather Armor" },
-  { id: "onion_bag", label: "1× Bag with Onions (15)" },
+  { id: "energy_potions", label: "3× Low Grade Energy Potions" },
+  { id: "onion_bag", label: "1× Bag with 50 Onions" },
+  { id: "nails", label: "10× Nails" },
+  { id: "paint", label: "4× Paint" },
+  { id: "seeds", label: "3× Herb Seed, 3× Carrot Seed, 3× Potato Seed" },
 ];
+
+const EMPTY_CART: NextRunBonuses = {
+  incomeBonusPacks: 0,
+  startingSilver: 0,
+  growthPointPacks: 0,
+  freeItems: [],
+};
 
 export default function DeathAngelOverlay({ visible, karmaPoints, busy = false, error, onRepeatFight, onKarmaTavernReturn, onStartNextRun }: Props) {
   const insets = useSafeAreaInsets();
@@ -55,8 +64,8 @@ export default function DeathAngelOverlay({ visible, karmaPoints, busy = false, 
   const [runBaseUpgrades, setRunBaseUpgrades] = useState(0);
   const [showNewRun, setShowNewRun] = useState(false);
   const [avatarCommitted, setAvatarCommitted] = useState(false);
-  const [bonuses, setBonuses] = useState<NextRunBonuses>({ copper: 0, freeItem: null });
-  const [pendingBonuses, setPendingBonuses] = useState<NextRunBonuses>({ copper: 0, freeItem: null });
+  const [bonuses, setBonuses] = useState<NextRunBonuses>(EMPTY_CART);
+  const [pendingBonuses, setPendingBonuses] = useState<NextRunBonuses>(EMPTY_CART);
   const meetingPlayer = useVideoPlayer(MEETING_DEATH_VIDEO, (player) => { player.loop = false; });
   const rebirthPlayer = useVideoPlayer(REBIRTH_VIDEO, (player) => { player.loop = false; });
 
@@ -96,8 +105,8 @@ export default function DeathAngelOverlay({ visible, karmaPoints, busy = false, 
       setAvatarReady(false);
       setShowNewRun(false);
       setAvatarCommitted(false);
-      setBonuses({ copper: 0, freeItem: null });
-      setPendingBonuses({ copper: 0, freeItem: null });
+      setBonuses(EMPTY_CART);
+      setPendingBonuses(EMPTY_CART);
       return;
     }
 
@@ -125,8 +134,19 @@ export default function DeathAngelOverlay({ visible, karmaPoints, busy = false, 
   if (!visible) return null;
   const cost = nextRunBonusCost(bonuses);
 
-  function toggle(key: "betterValues" | "growthPoints" | "preserveFavor" | "skipRupertTutorials") {
+  function changeQuantity(key: "incomeBonusPacks" | "startingSilver" | "growthPointPacks", delta: number) {
+    setBonuses((current) => ({ ...current, [key]: Math.max(0, Math.floor(current[key] ?? 0) + delta) }));
+  }
+
+  function toggleSingle(key: "betterValues" | "preserveFavor" | "skipRupertTutorials") {
     setBonuses((current) => ({ ...current, [key]: !current[key] }));
+  }
+
+  function toggleFreeItem(id: NextRunFreeItem) {
+    setBonuses((current) => {
+      const selected = current.freeItems ?? [];
+      return { ...current, freeItems: selected.includes(id) ? selected.filter((item) => item !== id) : [...selected, id] };
+    });
   }
 
   function beginRebirth() {
@@ -165,24 +185,37 @@ export default function DeathAngelOverlay({ visible, karmaPoints, busy = false, 
           <Text style={styles.mainButtonText}>Repeat Fight</Text><Text style={styles.cost}>{REPEAT_FIGHT_KP_COST} KP · Restore fight-start state and items</Text>
         </TouchableOpacity> : null}
         {onKarmaTavernReturn ? <TouchableOpacity style={[styles.mainButton, karmaPoints < KARMA_TAVERN_RETURN_COST && styles.disabled]} disabled={busy || karmaPoints < KARMA_TAVERN_RETURN_COST} onPress={onKarmaTavernReturn}>
-          <Text style={styles.mainButtonText}>Go back to the tavern</Text><Text style={styles.cost}>{KARMA_TAVERN_RETURN_COST} KP · Return with 1 Stamina and 1 Life, keep your items</Text>
+          <Text style={styles.mainButtonText}>Return to Tavern</Text><Text style={styles.cost}>{KARMA_TAVERN_RETURN_COST} KP · Return with 1 Stamina and 1 Life, keep your items</Text>
         </TouchableOpacity> : null}
         <TouchableOpacity style={styles.mainButton} disabled={busy} onPress={() => setShowNewRun(true)}>
-          <Text style={styles.mainButtonText}>Begin from the Start</Text><Text style={styles.cost}>Free · Choose optional blessings</Text>
+          <Text style={styles.mainButtonText}>Begin from the Start</Text><Text style={styles.cost}>Free · Open the next-run shop</Text>
         </TouchableOpacity>
       </View> : <View style={styles.optionsPanel}>
-        <Text style={styles.optionsTitle}>Blessings for the next run</Text>
-        {runBaseUpgrades >= 10 ? <Text style={styles.cost}>Better starting values: Maximum reached.</Text> : <Option selected={!!bonuses.betterValues} label="Better starting values" cost={`10 KP · ${100 + (runBaseUpgrades + 1) * 10} Maximum Stamina, ${30 + (runBaseUpgrades + 1) * 5} Maximum Life`} onPress={() => toggle("betterValues")} />}
-        <Option selected={!!bonuses.growthPoints} label="30 Growth Points" cost="10 KP" onPress={() => toggle("growthPoints")} />
-        <Option selected={!!bonuses.skipRupertTutorials} label="Skip Rupert’s Tutorials" cost="10 KP · Unlock basic tavern features from Day 1" onPress={() => toggle("skipRupertTutorials")} />
-        <Option selected={bonuses.copper === 100} label="Start with 1 Silver Coin" cost="5 KP · 1 Silver Coin" onPress={() => setBonuses((current) => ({ ...current, copper: current.copper === 100 ? 0 : 100 }))} />
-        <Option selected={bonuses.copper === 300} label="Start with 3 Silver Coins" cost="15 KP · 3 Silver Coins" onPress={() => setBonuses((current) => ({ ...current, copper: current.copper === 300 ? 0 : 300 }))} />
-        <Option selected={!!bonuses.preserveFavor} label="Keep Guest Favor" cost="25 KP" onPress={() => toggle("preserveFavor")} />
-        <Text style={styles.freeTitle}>Free recovered item package — choose one</Text>
-        {FREE_ITEMS.map((item) => <Option key={item.id} selected={bonuses.freeItem === item.id} label={item.label} cost="Delivered to the Courier’s Chest by City Guard" onPress={() => setBonuses((current) => ({ ...current, freeItem: current.freeItem === item.id ? null : item.id }))} />)}
+        <Text style={styles.optionsTitle}>Next-Run Shop</Text>
+        <View style={styles.cartHeader}><Text style={styles.cartHeaderBonus}>Bonus</Text><Text style={styles.cartHeaderCost}>Cost</Text><Text style={styles.cartHeaderAdd}>Add</Text></View>
+        <CartRow
+          label="Permanent better starting values"
+          detail={runBaseUpgrades >= 10 ? "Maximum reached" : `${100 + (runBaseUpgrades + 1) * 10} Maximum Stamina · ${30 + (runBaseUpgrades + 1) * 5} Maximum Life`}
+          cost="10 KP"
+          quantity={bonuses.betterValues ? 1 : 0}
+          onAdd={() => toggleSingle("betterValues")}
+          onRemove={() => toggleSingle("betterValues")}
+          addDisabled={runBaseUpgrades >= 10 || !!bonuses.betterValues}
+        />
+        <CartRow label="+10% income next run" detail={`${Math.max(0, bonuses.incomeBonusPacks ?? 0) * 10}% selected`} cost="10 KP" quantity={bonuses.incomeBonusPacks ?? 0} onAdd={() => changeQuantity("incomeBonusPacks", 1)} onRemove={() => changeQuantity("incomeBonusPacks", -1)} />
+        <CartRow label="Starting Silver" detail="1 Silver Coin per purchase" cost="3 KP" quantity={bonuses.startingSilver ?? 0} onAdd={() => changeQuantity("startingSilver", 1)} onRemove={() => changeQuantity("startingSilver", -1)} />
+        <CartRow label="10 Growth Points" detail="10 Growth Points per purchase" cost="3 KP" quantity={bonuses.growthPointPacks ?? 0} onAdd={() => changeQuantity("growthPointPacks", 1)} onRemove={() => changeQuantity("growthPointPacks", -1)} />
+        <CartRow label="Keep Guest Favor" detail="Only applies to the next run" cost="20 KP" quantity={bonuses.preserveFavor ? 1 : 0} onAdd={() => toggleSingle("preserveFavor")} onRemove={() => toggleSingle("preserveFavor")} addDisabled={!!bonuses.preserveFavor} />
+        <CartRow label="Skip Rupert’s Tutorial" detail="Unlock basic tavern features from Day 1" cost="2 KP" quantity={bonuses.skipRupertTutorials ? 1 : 0} onAdd={() => toggleSingle("skipRupertTutorials")} onRemove={() => toggleSingle("skipRupertTutorials")} addDisabled={!!bonuses.skipRupertTutorials} />
+        <Text style={styles.freeTitle}>Free one-time supplies</Text>
+        {FREE_ITEMS.map((item) => {
+          const selected = bonuses.freeItems?.includes(item.id) ?? false;
+          return <CartRow key={item.id} label={item.label} detail="Delivered to the Courier’s Chest" cost="Free" quantity={selected ? 1 : 0} onAdd={() => toggleFreeItem(item.id)} onRemove={() => toggleFreeItem(item.id)} addDisabled={selected} />;
+        })}
         <Text style={[styles.total, cost > karmaPoints && styles.totalInsufficient]}>Total: {cost} KP</Text>
+        <Text style={styles.savedKarmaNote}>Unused Karma Points are saved and will not be lost.</Text>
         <TouchableOpacity style={[styles.confirmButton, (busy || cost > karmaPoints) && styles.disabled]} disabled={busy || cost > karmaPoints} onPress={beginRebirth}>
-          <Text style={styles.confirmText}>Confirm</Text>
+          <Text style={styles.confirmText}>Confirm Cart</Text>
         </TouchableOpacity>
         <TouchableOpacity disabled={busy} onPress={() => setShowNewRun(false)}><Text style={styles.back}>Back</Text></TouchableOpacity>
       </View>}
@@ -203,11 +236,16 @@ export default function DeathAngelOverlay({ visible, karmaPoints, busy = false, 
   </View>;
 }
 
-function Option({ selected, label, cost, onPress }: { selected: boolean; label: string; cost: string; onPress: () => void }) {
-  return <TouchableOpacity style={[styles.option, selected && styles.optionSelected]} onPress={onPress} activeOpacity={0.8}>
-    <View style={[styles.check, selected && styles.checkSelected]}><Text style={styles.checkText}>{selected ? "✓" : ""}</Text></View>
-    <View style={styles.optionText}><Text style={styles.optionLabel}>{label}</Text><Text style={styles.optionCost}>{cost}</Text></View>
-  </TouchableOpacity>;
+function CartRow({ label, detail, cost, quantity, onAdd, onRemove, addDisabled = false }: { label: string; detail: string; cost: string; quantity: number; onAdd: () => void; onRemove: () => void; addDisabled?: boolean }) {
+  return <View style={styles.cartRow}>
+    <View style={styles.cartBonus}><Text style={styles.optionLabel}>{label}</Text><Text style={styles.optionCost}>{detail}</Text></View>
+    <Text style={styles.cartCost}>{cost}</Text>
+    <View style={styles.cartControls}>
+      {quantity > 0 ? <TouchableOpacity accessibilityLabel={`Remove ${label}`} style={styles.cartButton} onPress={onRemove}><Text style={styles.cartButtonText}>−</Text></TouchableOpacity> : null}
+      {quantity > 0 ? <Text style={styles.cartQuantity}>{quantity}</Text> : null}
+      <TouchableOpacity accessibilityLabel={`Add ${label}`} style={[styles.cartButton, addDisabled && styles.cartButtonDisabled]} disabled={addDisabled} onPress={onAdd}><Text style={styles.cartButtonText}>+</Text></TouchableOpacity>
+    </View>
+  </View>;
 }
 
 const styles = StyleSheet.create({
@@ -223,10 +261,22 @@ const styles = StyleSheet.create({
   mainButton: { borderRadius: 13, borderCurve: "continuous", borderWidth: 1.5, borderColor: "rgba(196,148,58,0.72)", backgroundColor: "rgba(32,20,8,0.88)", padding: 15, alignItems: "center", gap: 5 },
   mainButtonText: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 16 }, cost: { color: "rgba(240,232,213,0.68)", fontSize: 10, textAlign: "center" },
   optionsPanel: { width: "100%", maxWidth: 400, gap: 8, backgroundColor: "rgba(0,0,0,0.62)", borderRadius: 15, borderCurve: "continuous", padding: 12 }, optionsTitle: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 16, textAlign: "center" },
+  cartHeader: { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingBottom: 2 },
+  cartHeaderBonus: { flex: 1, color: "rgba(240,232,213,0.62)", fontFamily: "Oldenburg", fontSize: 9, textTransform: "uppercase" },
+  cartHeaderCost: { width: 50, color: "rgba(240,232,213,0.62)", fontFamily: "Oldenburg", fontSize: 9, textAlign: "center", textTransform: "uppercase" },
+  cartHeaderAdd: { width: 84, color: "rgba(240,232,213,0.62)", fontFamily: "Oldenburg", fontSize: 9, textAlign: "center", textTransform: "uppercase" },
+  cartRow: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: 7, borderRadius: 11, borderCurve: "continuous", borderWidth: 1, borderColor: "rgba(196,148,58,0.34)", backgroundColor: "rgba(255,255,255,0.04)", padding: 9 },
+  cartBonus: { flex: 1, gap: 2 },
+  cartCost: { width: 50, color: "#E4C882", fontFamily: "Oldenburg", fontSize: 10, textAlign: "center", fontVariant: ["tabular-nums"] },
+  cartControls: { width: 84, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 4 },
+  cartButton: { width: 30, height: 30, borderRadius: 15, borderWidth: 1, borderColor: "#C4943A", backgroundColor: "rgba(126,89,26,0.72)", alignItems: "center", justifyContent: "center" },
+  cartButtonDisabled: { opacity: 0.28 },
+  cartButtonText: { color: "#FFF4D8", fontSize: 20, fontWeight: "700", lineHeight: 23 },
+  cartQuantity: { minWidth: 14, color: "#FFF4D8", fontFamily: "Oldenburg", fontSize: 11, textAlign: "center", fontVariant: ["tabular-nums"] },
   option: { flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 11, borderWidth: 1, borderColor: "rgba(196,148,58,0.34)", backgroundColor: "rgba(255,255,255,0.04)", padding: 10 },
   optionSelected: { borderColor: "#C4943A", backgroundColor: "rgba(196,148,58,0.2)" }, check: { width: 23, height: 23, borderRadius: 6, borderWidth: 1, borderColor: "rgba(196,148,58,0.52)", alignItems: "center", justifyContent: "center" },
   checkSelected: { backgroundColor: "#8A5B19" }, checkText: { color: "#FFF", fontWeight: "800" }, optionText: { flex: 1, gap: 2 }, optionLabel: { color: "#F0E8D5", fontFamily: "Oldenburg", fontSize: 12 }, optionCost: { color: "rgba(240,232,213,0.62)", fontSize: 9, lineHeight: 13 },
-  freeTitle: { color: "#C4943A", fontFamily: "Oldenburg", fontSize: 12, textAlign: "center", paddingTop: 5 }, total: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 14, textAlign: "center", fontVariant: ["tabular-nums"], paddingTop: 5 }, totalInsufficient: { color: "#FF8A73" },
+  freeTitle: { color: "#C4943A", fontFamily: "Oldenburg", fontSize: 12, textAlign: "center", paddingTop: 5 }, total: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 14, textAlign: "center", fontVariant: ["tabular-nums"], paddingTop: 5 }, totalInsufficient: { color: "#FF8A73" }, savedKarmaNote: { color: "rgba(240,232,213,0.72)", fontSize: 10, lineHeight: 15, textAlign: "center" },
   confirmButton: { minHeight: 52, borderRadius: 12, backgroundColor: "rgba(126,89,26,0.92)", borderWidth: 1.5, borderColor: "#C4943A", alignItems: "center", justifyContent: "center" }, confirmText: { color: "#FFF4D8", fontFamily: "Oldenburg", fontSize: 15 },
   back: { color: "#D0C2AE", textAlign: "center", textDecorationLine: "underline", paddingVertical: 8 }, disabled: { opacity: 0.35 },
   avatarScene: { flex: 1, alignItems: "center", justifyContent: "center", gap: 24, paddingHorizontal: 18, backgroundColor: "#000" },

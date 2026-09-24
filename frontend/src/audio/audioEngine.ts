@@ -19,6 +19,7 @@ import { loadGameSettings } from '@/src/settings/game-settings';
 
 export type ThemeKey = 'main-menu' | 'main-menu-feathered-banner' | 'main-menu-marketgate-riot' | 'main-menu-stonegate-dance'
   | 'kitchen' | 'garden' | 'dining' | 'dining-dawn' | 'dormitory-morning' | 'dormitory-evening'
+  | 'adventurers-guild' | 'merchant-guild' | 'artisans-quarter' | 'forest'
   | 'battle-over50' | 'battle-under50' | 'rest-area' | 'boss-battle' | null;
 export type LocationKey = 'main-menu' | 'kitchen' | 'garden' | 'dining' | 'dormitory' | null;
 export type TimeOfDayKey = 'morning' | 'evening';
@@ -38,6 +39,10 @@ const THEME_SOURCES: Record<NonNullable<ThemeKey>, number> = {
   'dining-dawn':        require('../../assets/audio/dininghall_dawn_theme.mp3'),
   'dormitory-morning':  require('../../assets/audio/Room-Morning-Theme.mp3'),
   'dormitory-evening':  require('../../assets/audio/Room-Evening-Theme.mp3'),
+  'adventurers-guild':  require('../../assets/audio/adventurers_guild_theme.mp3'),
+  'merchant-guild':     require('../../assets/audio/merchant_guild_theme.mp3'),
+  'artisans-quarter':   require('../../assets/audio/artisans_quarter_theme.mp3'),
+  forest:               require('../../assets/audio/forest_theme.mp3'),
   'battle-over50':      require('../../assets/audio/battle_theme_over50.mp3'),
   'battle-under50':     require('../../assets/audio/battle_theme_under50.mp3'),
   'rest-area':          require('../../assets/audio/rest_area.mp3'),
@@ -275,7 +280,19 @@ class AudioEngine {
   // ── Crossfade entry point ───────────────────────────────────────────────────
 
   crossfadeTo(themeKey: ThemeKey, durationMs = 3000): void {
-    if (!this.audioUnlocked) return;
+    if (!this.audioUnlocked) {
+      if (themeKey === null) {
+        this.stopGameplayMusic(Math.min(durationMs, 1500));
+        return;
+      }
+      const queuedRequestId = ++this.crossfadeRequestId;
+      void this.unlockAudio().then(() => {
+        if (queuedRequestId === this.crossfadeRequestId) this.crossfadeTo(themeKey, durationMs);
+      }).catch((error) => {
+        if (__DEV__) console.warn('[AudioEngine] unlock before crossfade failed:', error);
+      });
+      return;
+    }
 
     // Same theme already active → no-op
     if (themeKey === this.currentThemeKey && this.activeChannel !== null && themeKey !== null) return;

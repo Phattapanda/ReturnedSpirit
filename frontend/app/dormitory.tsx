@@ -49,6 +49,7 @@ import ItemDurabilityBadge from "@/src/components/item-durability-badge";
 import StatusModal from "@/src/components/StatusModal";
 import QuestBookButton from "@/src/components/quest-book";
 import PlayerBag, { BagIconButton, getItemImageSource } from "@/src/components/PlayerBag";
+import InventorySortButton from "@/src/components/inventory-sort-button";
 import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
 import TavernLocationTransition from "@/src/components/tavern-location-transition";
 import { notifyLocationStatusChanged } from "@/src/components/location-status-badges";
@@ -71,6 +72,7 @@ import {
   type BagItem,
   type PlayerBagData,
 } from "@/src/game/item-system";
+import { nextInventorySortMode, sortInventorySlots, type InventorySortMode } from "@/src/game/inventory-sort";
 import {
   DEFAULT_PLAYER_AVATAR_ID,
   PLAYER_AVATAR_KEY,
@@ -214,6 +216,7 @@ export default function DormitoryScreen() {
   const [roomStorageUnlocked, setRoomStorageUnlocked] = useState(false);
   const [roomStorage, setRoomStorage] = useState<(BagItem | null)[]>(Array(ROOM_STORAGE_INITIAL_SLOT_COUNT).fill(null));
   const roomStorageRef = useRef<(BagItem | null)[]>(Array(ROOM_STORAGE_INITIAL_SLOT_COUNT).fill(null));
+  const [roomStorageNextSortMode, setRoomStorageNextSortMode] = useState<InventorySortMode>("type");
   const storageTransferBusyRef = useRef(false);
 
   // ── Player thought bubble
@@ -966,6 +969,15 @@ export default function DormitoryScreen() {
     }
   }
 
+  async function handleSortRoomStorage() {
+    if (storageTransferBusyRef.current) return;
+    const nextStorage = sortInventorySlots(roomStorageRef.current, roomStorageNextSortMode);
+    roomStorageRef.current = nextStorage;
+    setRoomStorage(nextStorage);
+    setRoomStorageNextSortMode((current) => nextInventorySortMode(current));
+    await AsyncStorage.setItem(DSK.STORAGE, JSON.stringify(nextStorage));
+  }
+
   async function moveRoomStorageItemToBag(storageSlotIdx: number) {
     if (!roomStorageUnlocked || storageTransferBusyRef.current) return;
     const plan = planContainerItemToBag(roomStorageRef.current, storageSlotIdx, playerBag);
@@ -1092,7 +1104,7 @@ export default function DormitoryScreen() {
             </View>
           </View>
 
-          <QuestBookButton onBagUpdated={setPlayerBag} />
+          <QuestBookButton bagTargetRef={bagDropTargetRef} onBagUpdated={setPlayerBag} />
           <View style={styles.rightHeaderColumn}>
             <View style={styles.rightHeader}>
               <View style={styles.dayBadge}>
@@ -1180,8 +1192,11 @@ export default function DormitoryScreen() {
         {roomStorageUnlocked && roomState !== "LOADING" && roomState !== "ENTERING_ROOM_FIRST_TIME" && (
           <View style={styles.inlineStoragePanel}>
             <View style={styles.inlineStorageTitleRow}>
-              <Ionicons name="grid-outline" size={18} color="#C4943A" />
-              <Text style={styles.inlineStorageTitle}>Room Storage</Text>
+              <View style={styles.inlineStorageTitleGroup}>
+                <Ionicons name="grid-outline" size={18} color="#C4943A" />
+                <Text style={styles.inlineStorageTitle}>Room Storage</Text>
+              </View>
+              <InventorySortButton mode={roomStorageNextSortMode} onPress={() => { void handleSortRoomStorage(); }} disabled={!roomStorage.some(Boolean)} />
             </View>
             <View style={styles.storageGrid}>
               {Array.from({ length: roomStorage.length / ROOM_STORAGE_COLUMNS }, (_, row) => (
@@ -1216,6 +1231,7 @@ export default function DormitoryScreen() {
               { icon: "book-outline" as const,   label: "Logbook",   action: () => { setShowMenu(false); router.push("/logbook"); } },
               { icon: "save-outline" as const,   label: "Save",      action: handleManualSave },
               { icon: "home-outline" as const,   label: "Main Menu", action: handleMainMenu },
+              { icon: "mail-outline" as const, label: "Support", action: () => { setShowMenu(false); router.push("/support"); } },
               { icon: "settings-outline" as const, label: "Settings", action: () => { setShowMenu(false); router.push("/settings"); } },
             ].map((item) => (
               <TouchableOpacity
@@ -1702,7 +1718,8 @@ const styles = StyleSheet.create({
     borderColor: "rgba(196,148,58,0.35)",
     overflow: "visible",
   },
-  inlineStorageTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  inlineStorageTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  inlineStorageTitleGroup: { flexDirection: "row", alignItems: "center", gap: 8 },
   inlineStorageTitle: { color: "#F0E8D5", fontSize: 14, fontFamily: "Oldenburg", letterSpacing: 0.5 },
   storageSub2: { color: "rgba(196,148,58,0.35)", fontSize: 11, fontStyle: "italic", textAlign: "center", marginTop: 10 },
   storageGrid: {

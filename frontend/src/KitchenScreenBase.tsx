@@ -40,6 +40,7 @@ import ScrollActivationOverlay from "@/src/components/scroll-activation-overlay"
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { useHaptics } from "@/src/feedback/haptics-provider";
 import PlayerBag, { BagIconButton } from "@/src/components/PlayerBag";
+import InventorySortButton from "@/src/components/inventory-sort-button";
 import StatusModal from "@/src/components/StatusModal";
 import QuestBookButton from "@/src/components/quest-book";
 import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
@@ -77,6 +78,7 @@ import {
   RUPERT_MORTAR_RECIPE_DIALOG_SEEN_KEY,
 } from "@/src/game/cooking-system";
 import { planKitchenItemToBag } from "@/src/game/kitchen-bag-transfer";
+import { planKitchenCraftOutputs } from "@/src/game/kitchen-craft-output";
 import { readRecipeItem, rollRecipeDrops } from "@/src/game/recipe-item";
 import {
   PLAYER_STATS_KEY,
@@ -91,7 +93,6 @@ import {
 import { applyTemporaryEffect } from "@/src/game/status-effect-system";
 import { potionBuffPotency } from "@/src/game/potion-effectiveness";
 import { loadLogbook, limitLogbook, type LogEntry, LOGBOOK_KEY } from "@/src/game/logbook";
-import { COPPER_PER_SILVER, loadCurrencyCopper } from "@/src/game/currency-system";
 import { createSnapshot, discardRuntimeAndRestore } from "@/src/game/save-manager";
 import { completeRupertAlchemyIntro } from "@/src/game/rupert-alchemy-intro";
 import { unlockWorkshopOfferAfterRupertDialogue } from "@/src/game/workshop-system";
@@ -111,8 +112,6 @@ import {
   OUTSIDE_CLEAN_STAMINA_COST,
   OUTSIDE_CLEAN_STEPS_REQUIRED,
   HONEY_MEAD_QUEST_ITEMS,
-  KITCHEN_TABLE_COLUMNS,
-  KITCHEN_TABLE_UPGRADE_SILVER_COSTS,
   LATER_PLOT_NAILS_COST,
   LATER_PLOT_STONE_COST,
   LATER_PLOT_WOOD_COST,
@@ -134,7 +133,6 @@ import {
   markUpgradeIntroSeen,
   purchaseGardenPlotBuild,
   purchasePlotYieldUpgrade,
-  purchaseKitchenTableUpgrade,
   purchaseTavernDrinkUpgrade,
   type TavernDrinkUpgradeId,
   type PostGuestTutorialState,
@@ -169,6 +167,7 @@ import {
   saveSmallCrateState,
   type SmallCrateState,
 } from "@/src/game/kitchen-small-crate";
+import { nextInventorySortMode, sortInventorySlots, type InventorySortMode } from "@/src/game/inventory-sort";
 import {
   acceptCoachmanEscort,
   declineCoachmanEscort,
@@ -350,6 +349,7 @@ const IMG = {
   loc_mail:      require("../assets/images/gotomail.png"),
   loc_explore:   require("../assets/images/goexplore.png"),
   loc_storage:   require("../assets/images/gotostorage.png"),
+  staff:         require("../assets/images/staff.png"),
   oldpot:        require("../assets/images/oldpot.png"),
   garbage_bin:   require("../assets/images/garbage_bin.png"),
 };
@@ -357,6 +357,7 @@ const IMG = {
 // Item image map for kitchen table items (non-soup items unpacked from bag)
 const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   recipe: require("../assets/images/recipe.png"),
+  alchemy_recipe: require("../assets/images/alchemy_recipe.png"),
   bag_herb:    require("../assets/images/bag_herb.png"),
   bag_carrot:  require("../assets/images/bag_carrot.png"),
   bag_onion:   require("../assets/images/bag_onion.png"),
@@ -719,7 +720,7 @@ export default function KitchenScreen({
   const newRecipeScale = useSharedValue(1.18);
   const newRecipeOpacity = useSharedValue(0);
   const [showUpgrades, setShowUpgrades] = useState(false);
-  const [upgradeCategory, setUpgradeCategory] = useState<"overview" | "garden" | "tavern" | "kitchen">("overview");
+  const [upgradeCategory, setUpgradeCategory] = useState<"overview" | "garden" | "tavern">("overview");
   const rupertUpgradeScrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -797,7 +798,6 @@ export default function KitchenScreen({
   const [rupertInDining, setRupertInDining] = useState(true);
   const [postGuestState, setPostGuestState] = useState<PostGuestTutorialState>(DEFAULT_POST_GUEST_TUTORIAL_STATE);
   const [sharedResources, setSharedResources] = useState<SharedResources>({ ...SHARED_RESOURCE_DEFAULTS });
-  const [upgradeCurrencyCopper, setUpgradeCurrencyCopper] = useState(0);
   const [gardenFertilizerQuantities, setGardenFertilizerQuantities] = useState({ standard: 0, premium: 0 });
   const postGuestIntroStartedRef = useRef(false);
   const focusCountRef = useRef(0);
@@ -841,6 +841,7 @@ export default function KitchenScreen({
   const [smallCrate, setSmallCrate] = useState<SmallCrateState>(DEFAULT_SMALL_CRATE_STATE);
   const smallCrateRef = useRef<SmallCrateState>(DEFAULT_SMALL_CRATE_STATE);
   const [smallCrateOpen, setSmallCrateOpen] = useState(false);
+  const [smallCrateNextSortMode, setSmallCrateNextSortMode] = useState<InventorySortMode>("type");
   const [crateDropHovered, setCrateDropHovered] = useState(false);
   const crateDropHoveredRef = useRef(false);
   const [garbageDropHovered, setGarbageDropHovered] = useState(false);
@@ -877,6 +878,7 @@ export default function KitchenScreen({
   const craftFlightOutputs = useRef<BagItem[]>([]);
   const craftFlightTargetSlots = useRef<number[]>([]);
   const craftFlightTable = useRef<(BagItem | null)[]>([]);
+  const craftOutputFlightActiveRef = useRef(false);
   // Cooking drag-and-drop: each occupied input slot owns its GestureDetector,
   // mirroring the reliable Day-1 soup pattern. The source slot is therefore known
   // before the gesture starts; no global hit-test/source discovery is needed.
@@ -1102,7 +1104,16 @@ export default function KitchenScreen({
     if (!sourceItem || sourceItem.id !== item.id || sourceItem.quantity <= 0) return;
     const TABLE_STACK_LIMIT = sourceItem.id === "scroll" || sourceItem.id.endsWith("_scroll") ? 1 : 20;
 
-    const currentTable = tableItemsRef.current.slice();
+    const unlockedTableSlotCount = getKitchenTableSlotCount(postGuestState);
+    const currentTable = Array.from(
+      { length: Math.max(unlockedTableSlotCount, tableItemsRef.current.length) },
+      (_, index) => tableItemsRef.current[index] ?? null,
+    );
+    if (currentTable.length !== tableItemsRef.current.length) {
+      tableItemsRef.current = currentTable;
+      setTableItems(currentTable);
+      await AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(currentTable)).catch(() => {});
+    }
     let transfer = sourceItem.quantity;
 
     // Fill compatible existing stacks first
@@ -1386,7 +1397,41 @@ export default function KitchenScreen({
   useEffect(() => { staminaMaxSV.value = playerStats.maximumStamina; }, [playerStats.maximumStamina]); // eslint-disable-line react-hooks/exhaustive-deps
   // Sync bag/table refs so drag callbacks always read current contents
   useEffect(() => { playerBagRef.current = playerBag; }, [playerBag]);
-  useEffect(() => { tableItemsRef.current = tableItems; }, [tableItems]);
+  useEffect(() => {
+    // Output flights deliberately render partial presentation frames. Those
+    // frames must never replace the complete, already-persisted craft result.
+    if (!craftOutputFlightActiveRef.current) tableItemsRef.current = tableItems;
+  }, [tableItems]);
+  useEffect(() => {
+    const unlockedSlotCount = getKitchenTableSlotCount(postGuestState);
+    if (tableItemsRef.current.length >= unlockedSlotCount) return;
+    const expandedTable = Array.from(
+      { length: unlockedSlotCount },
+      (_, index) => tableItemsRef.current[index] ?? null,
+    );
+    tableItemsRef.current = expandedTable;
+    setTableItems(expandedTable);
+    AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(expandedTable)).catch(() => {});
+  }, [postGuestState]);
+  useFocusEffect(
+    React.useCallback(() => {
+      let active = true;
+      Promise.all([
+        loadPostGuestTutorialState(),
+        AsyncStorage.getItem(KITCHEN_TABLE_KEY),
+      ]).then(([state, rawTable]) => {
+        if (!active) return;
+        let storedTable: (BagItem | null)[] = [];
+        try { storedTable = rawTable ? JSON.parse(rawTable) : []; } catch { /* keep empty */ }
+        const slotCount = getKitchenTableSlotCount(state);
+        const refreshedTable = Array.from({ length: Math.max(slotCount, storedTable.length) }, (_, index) => storedTable[index] ?? null);
+        setPostGuestState(state);
+        tableItemsRef.current = refreshedTable;
+        setTableItems(refreshedTable);
+      }).catch(() => {});
+      return () => { active = false; };
+    }, []),
+  );
   useEffect(() => { smallCrateRef.current = smallCrate; }, [smallCrate]);
   // Sync craft refs so the stable gesture always reads current craft state
   useEffect(() => { craftIngSlotsRef.current = craftIngSlots; }, [craftIngSlots]);
@@ -1636,12 +1681,11 @@ export default function KitchenScreen({
   }, []);
 
   async function refreshPostGuestResources() {
-    const [state, guestState, rawResources, rawGardenInventory, currencyCopper] = await Promise.all([
+    const [state, guestState, rawResources, rawGardenInventory] = await Promise.all([
       loadPostGuestTutorialState(),
       loadGuestState(),
       AsyncStorage.getItem(SHARED_RESOURCES_KEY),
       AsyncStorage.getItem("@garden:inventory"),
-      loadCurrencyCopper(),
     ]);
     setPostGuestState(state);
     setGuestCalendarDaySerial(guestState.calendarDaySerial);
@@ -1663,7 +1707,6 @@ export default function KitchenScreen({
     } catch {
       setGardenFertilizerQuantities({ standard: 0, premium: 0 });
     }
-    setUpgradeCurrencyCopper(currencyCopper);
     return state;
   }
 
@@ -1742,7 +1785,7 @@ export default function KitchenScreen({
     setUpgradeCategory("overview");
   }
 
-  function selectUpgradeCategory(category: "overview" | "garden" | "tavern" | "kitchen") {
+  function selectUpgradeCategory(category: "overview" | "garden" | "tavern") {
     setUpgradeMessage(null);
     setUpgradeCategory(category);
   }
@@ -1849,31 +1892,6 @@ export default function KitchenScreen({
         setUpgradeMessage(upgradeId === "serve_ale"
           ? "Standard Ale will be served in the Dining Hall from tomorrow."
           : `${drinkName} is now served in the Dining Hall.`);
-        audioManager.playSoundEffect("upgrade-building", { maxDurationMs: 6000 });
-      }
-    } finally {
-      setUpgradeBusy(false);
-    }
-  }
-
-  async function handleKitchenTableUpgrade(targetLevel: 1 | 2 | 3) {
-    if (upgradeBusy || postGuestState.kitchenTableUpgradeLevel >= targetLevel) return;
-    setUpgradeBusy(true);
-    setUpgradeMessage(null);
-    try {
-      const result = await purchaseKitchenTableUpgrade(targetLevel);
-      setPostGuestState(result.state);
-      if (!result.ok) {
-        setUpgradeMessage(result.reason === "prerequisite_locked"
-          ? targetLevel === 1 ? "Get the guest area ready first." : "Complete the previous table upgrade first."
-          : `Need ${KITCHEN_TABLE_UPGRADE_SILVER_COSTS[targetLevel - 1]} Silver Coins.`);
-      } else if (result.alreadyUnlocked) {
-        setUpgradeMessage("Already unlocked.");
-      } else {
-        tableItemsRef.current = result.tableItems;
-        setTableItems(result.tableItems);
-        setUpgradeCurrencyCopper(result.remainingCopper);
-        setUpgradeMessage(`Kitchen Table expanded to ${getKitchenTableRowCount(result.state)} rows.`);
         audioManager.playSoundEffect("upgrade-building", { maxDurationMs: 6000 });
       }
     } finally {
@@ -4198,6 +4216,13 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   }
 
   function finishCraft(tutorialCraft: boolean, completedTable: (BagItem | null)[]) {
+    craftOutputFlightActiveRef.current = false;
+    const committedTable = completedTable.map((item) => item ? { ...item } : null);
+    craftFlightTable.current = committedTable;
+    tableItemsRef.current = committedTable;
+    setTableItems(committedTable);
+    AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(committedTable)).catch(() => {});
+
     const newlyDiscoveredRecipe = pendingNewRecipeRef.current;
     pendingNewRecipeRef.current = null;
     if (newlyDiscoveredRecipe) showNewRecipePresentation(newlyDiscoveredRecipe);
@@ -4303,6 +4328,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     craftFlightOutputs.current = outputs;
     craftFlightTargetSlots.current = targetSlots;
     craftFlightTable.current = initialTable;
+    craftOutputFlightActiveRef.current = true;
     // Commit the complete craft transaction before starting its presentation.
     // Room navigation can unmount the animation at any frame; persisting every
     // output now prevents later byproducts (notably Empty Bucket) from vanishing.
@@ -4337,6 +4363,14 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       showNewRecipePresentation(result.recipe);
     } catch { setKitchenDetailItem(null); showPlayerBubble("I can't read this right now."); }
     finally { setCraftingInteractionLocked(false); }
+  }
+
+  async function handleSortSmallCrate() {
+    const nextState = { ...smallCrateRef.current, slots: sortInventorySlots(smallCrateRef.current.slots, smallCrateNextSortMode) };
+    smallCrateRef.current = nextState;
+    setSmallCrate(nextState);
+    setSmallCrateNextSortMode((current) => nextInventorySortMode(current));
+    await saveSmallCrateState(nextState);
   }
 
   async function handleCraft() {
@@ -4377,11 +4411,13 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       recipeDrops -= quantity;
     }
     const newTable = tableItemsRef.current.slice();
-    const targetSlots: number[] = [];
-    for (let i = 0; i < newTable.length && targetSlots.length < outputs.length; i++) {
-      if (!newTable[i] && soupSlotRef.current !== i) targetSlots.push(i);
-    }
-    if (targetSlots.length < outputs.length) {
+    const outputPlan = planKitchenCraftOutputs(
+      newTable,
+      outputs,
+      getContainerStackLimit("kitchenTable"),
+      soupSlotRef.current,
+    );
+    if (!outputPlan) {
       setCraftingInteractionLocked(false);
       showPlayerBubble('"No free space available."');
       return;
@@ -4431,7 +4467,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       }).catch(() => {});
     }
     if (recipe.enhancementKind) setScrollActivationKey((current) => current + 1);
-    startCraftOutputFlight(outputs, targetSlots, newTable, tutorialCraft);
+    startCraftOutputFlight(outputPlan.flightOutputs, outputPlan.targetSlots, newTable, tutorialCraft);
   }
 
   function onCookingShareWithRupert() {
@@ -4921,7 +4957,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
             </View>
           </View>
           <View ref={questBookTargetRef} collapsable={false}>
-            <QuestBookButton onBagUpdated={updatePlayerBagState} />
+            <QuestBookButton bagTargetRef={bagIconRef} onBagUpdated={updatePlayerBagState} />
           </View>
           <View style={styles.rightHeaderColumn}>
             <View style={styles.rightHeader}>
@@ -5163,9 +5199,12 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
               <Image source={ITEM_IMAGES.crate1} style={styles.smallCrateTitleImage} resizeMode="contain" />
               <Text style={styles.smallCrateTitle}>{smallCrate.count > 1 ? `${smallCrate.count} Small Crates` : "Small Crate"}</Text>
             </View>
-            <TouchableOpacity onPress={() => setSmallCrateOpen(false)} style={styles.smallCrateClose} hitSlop={10}>
-              <Ionicons name="close" size={20} color="#F5E6C8" />
-            </TouchableOpacity>
+            <View style={styles.smallCrateHeaderActions}>
+              <InventorySortButton mode={smallCrateNextSortMode} onPress={() => { void handleSortSmallCrate(); }} disabled={!smallCrate.slots.some(Boolean)} />
+              <TouchableOpacity onPress={() => setSmallCrateOpen(false)} style={styles.smallCrateClose} hitSlop={10}>
+                <Ionicons name="close" size={20} color="#F5E6C8" />
+              </TouchableOpacity>
+            </View>
           </View>
           <View style={styles.smallCrateGrid}>
             {smallCrate.slots.map((item, index) => (
@@ -5505,6 +5544,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
               } },
               { icon: "save-outline" as const,   label: "Save",      action: handleManualSave },
               { icon: "home-outline" as const,   label: "Main Menu", action: handleMainMenu },
+              { icon: "mail-outline" as const, label: "Support", action: () => { setShowMenu(false); router.push("/support"); } },
               { icon: "settings-outline" as const, label: "Settings", action: () => { setShowMenu(false); router.push("/settings"); } },
             ].map((item) => (
               <TouchableOpacity key={item.label} style={styles.menuRow} onPress={item.action} activeOpacity={0.7}>
@@ -5583,14 +5623,18 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
               {upgradeCategory === "overview" && (
                 <View style={styles.upgradeCategoryList}>
                   {([
-                    { id: "garden", title: "Garden", description: "Plots and crop yield", image: IMG.loc_garden },
-                    { id: "tavern", title: "Tavern", description: "Guest area, furniture and drinks", image: IMG.loc_dining },
-                    { id: "kitchen", title: "Kitchen", description: "Expand the kitchen table", image: IMG.loc_kitchen },
+                    { id: "garden", title: "Garden", description: "Plots and crop yield", image: IMG.loc_garden, disabled: false },
+                    { id: "tavern", title: "Tavern", description: "Guest area, furniture and drinks", image: IMG.loc_dining, disabled: false },
+                    { id: "guest_rooms", title: "Guest Rooms", description: "Manage rooms for overnight guests", image: IMG.loc_dormitory, disabled: true },
+                    { id: "manage_staff", title: "Manage Staff", description: "Hire and organize tavern staff", image: IMG.staff, disabled: true },
                   ] as const).map((category) => (
                     <TouchableOpacity
                       key={category.id}
-                      style={styles.upgradeCategoryCard}
-                      onPress={() => selectUpgradeCategory(category.id)}
+                      style={[styles.upgradeCategoryCard, category.disabled && styles.upgradeCategoryCardDisabled]}
+                      disabled={category.disabled}
+                      onPress={() => {
+                        if (!category.disabled) selectUpgradeCategory(category.id);
+                      }}
                       activeOpacity={0.78}
                     >
                       <View style={styles.upgradeCategoryIcon}>
@@ -5600,7 +5644,14 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
                         <Text style={styles.upgradeCategoryTitle}>{category.title}</Text>
                         <Text style={styles.upgradeCategoryDescription}>{category.description}</Text>
                       </View>
-                      <Ionicons name="chevron-forward" size={20} color="rgba(232,184,75,0.72)" />
+                      {category.disabled ? (
+                        <View style={styles.upgradeCategoryLockedStatus}>
+                          <Ionicons name="lock-closed-outline" size={15} color="rgba(240,232,213,0.58)" />
+                          <Text style={styles.upgradeCategoryLockedText}>Coming soon</Text>
+                        </View>
+                      ) : (
+                        <Ionicons name="chevron-forward" size={20} color="rgba(232,184,75,0.72)" />
+                      )}
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -5729,42 +5780,6 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
                     <Text style={styles.upgradeBuildText}>{outsideCleanComplete ? "Complete" : upgradeBusy ? "..." : "Clean"}</Text>
                     {!outsideCleanComplete && <View style={styles.upgradeStaminaCostRow}><Text style={styles.upgradeStaminaCost}>-{outsideCleanCost}</Text><Ionicons name="flash" size={12} color="#E8B84B" /></View>}
                   </TouchableOpacity>
-                </View>
-              )}
-
-              {upgradeCategory === "kitchen" && <Text style={styles.upgradeSectionTitle}>Kitchen</Text>}
-
-              {upgradeCategory === "kitchen" && guestAreaComplete && ([1, 2, 3] as const)
-                .filter((level) => level <= postGuestState.kitchenTableUpgradeLevel + 1)
-                .map((level) => {
-                  const names = ["Large Table", "Bigger Table", "Biggest Table"] as const;
-                  const unlocked = postGuestState.kitchenTableUpgradeLevel >= level;
-                  const affordable = upgradeCurrencyCopper >= KITCHEN_TABLE_UPGRADE_SILVER_COSTS[level - 1] * COPPER_PER_SILVER;
-                  return (
-                    <View key={`kitchen-table-${level}`} style={[styles.upgradeCard, !unlocked && !affordable && styles.upgradeCardUnavailable, unlocked && styles.upgradeCardCompleted]}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.upgradeName}>{names[level - 1]}</Text>
-                        <CurrencyPrice totalCopper={KITCHEN_TABLE_UPGRADE_SILVER_COSTS[level - 1] * COPPER_PER_SILVER} style={styles.upgradePrice} textStyle={!affordable && !unlocked ? styles.upgradeRequirementMissing : styles.upgradeCost} />
-                        <Text style={styles.upgradeOwned}>Kitchen Table · +1 row · {2 + level}×{KITCHEN_TABLE_COLUMNS} slots</Text>
-                      </View>
-                      <TouchableOpacity
-                        style={[styles.upgradeBuildBtn, unlocked && styles.upgradeBuildBtnDone, !unlocked && !affordable && styles.upgradeBuildBtnDisabled]}
-                        disabled={upgradeBusy || unlocked || !affordable}
-                        onPress={() => { void handleKitchenTableUpgrade(level); }}
-                        activeOpacity={0.8}
-                      >
-                        <Text style={styles.upgradeBuildText}>{unlocked ? "Unlocked" : upgradeBusy ? "..." : "Upgrade"}</Text>
-                      </TouchableOpacity>
-                    </View>
-                  );
-                })}
-
-              {upgradeCategory === "kitchen" && !guestAreaComplete && (
-                <View style={[styles.upgradeCard, styles.upgradeCardUnavailable]}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.upgradeName}>Kitchen Table</Text>
-                    <Text style={styles.upgradeLockedText}>Prepare the tavern guest area first.</Text>
-                  </View>
                 </View>
               )}
 
@@ -6268,6 +6283,7 @@ const styles = StyleSheet.create({
     shadowColor: "#000", shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.65, shadowRadius: 10, elevation: 18,
   },
   smallCrateHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 7 },
+  smallCrateHeaderActions: { flexDirection: "row", alignItems: "center", gap: 5 },
   smallCrateTitleRow: { flexDirection: "row", alignItems: "center", gap: 7 },
   smallCrateTitleImage: { width: 30, height: 24 },
   smallCrateTitle: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 14 },
@@ -6453,6 +6469,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(196,148,58,0.30)",
   },
+  upgradeCategoryCardDisabled: {
+    opacity: 0.46,
+    backgroundColor: "rgba(105,105,105,0.08)",
+    borderColor: "rgba(180,180,180,0.22)",
+  },
   upgradeCategoryIcon: {
     width: 44,
     height: 44,
@@ -6466,6 +6487,8 @@ const styles = StyleSheet.create({
   upgradeCategoryText: { flex: 1, gap: 3 },
   upgradeCategoryTitle: { color: "#F5E6C8", fontSize: 15, fontFamily: "Oldenburg" },
   upgradeCategoryDescription: { color: "rgba(240,232,213,0.55)", fontSize: 11, lineHeight: 16 },
+  upgradeCategoryLockedStatus: { alignItems: "center", justifyContent: "center", gap: 3 },
+  upgradeCategoryLockedText: { color: "rgba(240,232,213,0.58)", fontSize: 8, fontFamily: "Oldenburg" },
   upgradeCategoryBack: {
     minHeight: 40,
     alignSelf: "flex-start",

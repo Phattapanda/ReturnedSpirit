@@ -108,7 +108,7 @@ export default function StatusModal({
               <Text style={styles.effectText}>Temporary effects and run traits</Text>
             </View>
             <Text style={styles.effectsCount}>
-              {stats.statusEffects.temporary.length + stats.statusEffects.traits.length} ›
+              {stats.statusEffects.temporary.length + stats.statusEffects.traits.length + (stats.incomeBonusPercent > 0 ? 1 : 0)} ›
             </Text>
           </TouchableOpacity>
 
@@ -162,6 +162,7 @@ export default function StatusModal({
         <StatusEffectsModal
           visible={showEffects}
           effects={stats.statusEffects}
+          incomeBonusPercent={stats.incomeBonusPercent}
           onClose={() => setShowEffects(false)}
         />
       </View>

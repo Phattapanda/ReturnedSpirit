@@ -503,15 +503,11 @@ export default function GardenPlot(props: GardenPlotProps) {
     : effectiveData.status === "empty"
     ? ""
     : "Growing...";
-  const statusLabel = effectiveData.withered
-    ? "Dead"
-    : effectiveData.readyToHarvest
-    ? "Ready"
-    : effectiveData.status === "empty"
-    ? "Empty"
-    : "Growing";
   const yieldName = getCropYieldLabel(effectiveData.seedItemId);
   const isEmpty = effectiveData.status === "empty";
+  const plotTitle = isEmpty
+    ? "Empty"
+    : yieldName.charAt(0).toUpperCase() + yieldName.slice(1);
 
   const harvestLocked = effectiveData.readyToHarvest;
   const waterDisabled = !effectiveInteractive || effectiveData.withered || isEmpty;
@@ -581,7 +577,7 @@ export default function GardenPlot(props: GardenPlotProps) {
           </Animated.View>
 
           <View style={styles.infoCol}>
-            <Text style={styles.statusLabel}>{statusLabel}</Text>
+            <Text style={styles.statusLabel}>{plotTitle}</Text>
             {progressLabel ? <Text style={styles.progressLabel}>{progressLabel}</Text> : null}
             {!isEmpty && (
               <>

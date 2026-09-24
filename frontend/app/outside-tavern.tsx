@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from "react";
-import { Animated, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Animated, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -25,6 +25,7 @@ import { useManagedTimers } from "@/src/hooks/use-managed-timers";
 import { QUESTS, getQuestDefinition, isQuestReadyToTurnIn, loadCityState, turnInQuest, type CityState, type QuestId } from "@/src/game/city-system";
 import { loadWorkshopState } from "@/src/game/workshop-system";
 import { UI_NOTIFICATION_DURATION_MS } from "@/src/ui/timings";
+import { FOREST_ASSET_COUNT, preloadForestAssets } from "@/src/game/forest-assets";
 
 const BACKGROUND = require("../assets/images/outsidetavern1.png");
 const COACHMAN = require("../assets/images/coachman.png");
@@ -114,6 +115,7 @@ export default function OutsideTavernScreen() {
   const [forestEntranceUnlocked, setForestEntranceUnlocked] = useState(false);
   const [forestTravelConfirmationMode, setForestTravelConfirmationMode] = useState<"coachman" | "walk" | null>(null);
   const [forestTravelBusy, setForestTravelBusy] = useState(false);
+  const [forestLoadProgress, setForestLoadProgress] = useState<{ loaded: number; total: number } | null>(null);
   const [coachmanReoffer, setCoachmanReoffer] = useState<"question" | "accepted" | "declined" | null>(null);
   const [workshopComplete, setWorkshopComplete] = useState(false);
 
@@ -121,6 +123,7 @@ export default function OutsideTavernScreen() {
     let active = true;
     setForestTravelConfirmationMode(null);
     setForestTravelBusy(false);
+    setForestLoadProgress(null);
     (async () => {
       const [rawDay, guestState, postGuestState, escortState, travelState, workshopState] = await Promise.all([
         AsyncStorage.getItem("@game:day_index"),
@@ -287,10 +290,21 @@ export default function OutsideTavernScreen() {
   async function travelToForestEntrance(mode: "coachman" | "walk") {
     if (!forestEntranceUnlocked || forestTravelBusy) { if (!forestEntranceUnlocked) showTravelLocked(); return; }
     setForestTravelBusy(true);
+    setForestLoadProgress({ loaded: 0, total: FOREST_ASSET_COUNT });
+    try {
+      await preloadForestAssets((loaded, total) => setForestLoadProgress({ loaded, total }));
+    } catch {
+      setForestTravelConfirmationMode(null);
+      setForestTravelBusy(false);
+      setForestLoadProgress(null);
+      setMessage("The Forest files could not be loaded. Please try again.");
+      return;
+    }
     const paid = mode === "coachman" ? await payForCarriage(25) : (await spendWalkingStamina(50)).ok;
     if (!paid) {
       setForestTravelConfirmationMode(null);
       setForestTravelBusy(false);
+      setForestLoadProgress(null);
       setMessage(mode === "coachman"
         ? "I need 25 Copper for the trip."
         : "I need 50 Stamina to walk to the Forest Entrance.");
@@ -375,16 +389,22 @@ export default function OutsideTavernScreen() {
     <Modal visible={forestTravelConfirmationMode !== null} transparent animationType="fade" onRequestClose={() => { if (!forestTravelBusy) setForestTravelConfirmationMode(null); }}>
       <View style={styles.warningBackdrop}>
         <View style={styles.warningPanel}>
-          <Text selectable style={styles.warningTitle}>Travel to Forest Entrance?</Text>
-          <Text selectable style={styles.warningText}>When you return from the Forest Entrance, the day will end.</Text>
-          <View style={styles.warningButtons}>
-            <TouchableOpacity style={styles.warningCancel} disabled={forestTravelBusy} onPress={() => setForestTravelConfirmationMode(null)} activeOpacity={0.8}>
-              <Text style={styles.warningButtonText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.warningConfirm, forestTravelBusy && styles.disabled]} disabled={forestTravelBusy} onPress={() => { if (forestTravelConfirmationMode) void travelToForestEntrance(forestTravelConfirmationMode); }} activeOpacity={0.8}>
-              <Text style={styles.warningButtonText}>Travel</Text>
-            </TouchableOpacity>
-          </View>
+          {forestTravelBusy ? <>
+            <ActivityIndicator size="large" color="#C4943A" />
+            <Text selectable style={styles.warningTitle}>Preparing the Forest…</Text>
+            <Text selectable style={styles.warningText}>Loading Forest files {forestLoadProgress?.loaded ?? 0}/{forestLoadProgress?.total ?? FOREST_ASSET_COUNT}</Text>
+          </> : <>
+            <Text selectable style={styles.warningTitle}>Travel to Forest Entrance?</Text>
+            <Text selectable style={styles.warningText}>When you return from the Forest Entrance, the day will end.</Text>
+            <View style={styles.warningButtons}>
+              <TouchableOpacity style={styles.warningCancel} onPress={() => setForestTravelConfirmationMode(null)} activeOpacity={0.8}>
+                <Text style={styles.warningButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.warningConfirm} onPress={() => { if (forestTravelConfirmationMode) void travelToForestEntrance(forestTravelConfirmationMode); }} activeOpacity={0.8}>
+                <Text style={styles.warningButtonText}>Travel</Text>
+              </TouchableOpacity>
+            </View>
+          </>}
         </View>
       </View>
     </Modal>

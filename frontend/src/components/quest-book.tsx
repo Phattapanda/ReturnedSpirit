@@ -96,8 +96,8 @@ function rewardDialog(id: TavernQuestId): StoryDialogLine[] {
   ];
 }
 
-type Props = { size?: number; disabled?: boolean; onBagUpdated?: (bag: PlayerBagData) => void };
-export default function QuestBookButton({ size = 38, disabled = false, onBagUpdated }: Props) {
+type Props = { size?: number; disabled?: boolean; onBagUpdated?: (bag: PlayerBagData) => void; bagTargetRef?: React.RefObject<View | null> };
+export default function QuestBookButton({ size = 38, disabled = false, onBagUpdated, bagTargetRef }: Props) {
   const { width, height } = useWindowDimensions();
   const [unlocked, setUnlocked] = useState(false), [visible, setVisible] = useState(false), [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<QuestTab>("open"), [entries, setEntries] = useState<QuestBookEntry[]>([]), [floatingMessage, setFloatingMessage] = useState<string | null>(null);
@@ -140,12 +140,13 @@ export default function QuestBookButton({ size = 38, disabled = false, onBagUpda
         rewardX.setValue(width * .72); rewardY.setValue(height * .48); rewardScale.setValue(1); rewardOpacity.setValue(1);
         Animated.parallel([Animated.timing(rewardX, { toValue: target.x, duration: 720, useNativeDriver: true }), Animated.timing(rewardY, { toValue: target.y, duration: 720, useNativeDriver: true }), Animated.timing(rewardScale, { toValue: .42, duration: 720, useNativeDriver: true })]).start(() => Animated.timing(rewardOpacity, { toValue: 0, duration: 120, useNativeDriver: true }).start(() => setFlightVisible(false)));
       };
-      const fallback = reward === "copper" ? { x: width - 62, y: 62 } : reward === "carrot_seed" || reward === "fertilizer" ? { x: width * .26, y: height - 74 } : { x: width - 58, y: 145 };
-      if (reward !== "fertilizer" || !gardenStorageTargetRef.current) {
+      const fallback = reward === "copper" ? { x: width - 62, y: 62 } : reward === "carrot_seed" || reward === "fertilizer" ? { x: width * .26, y: height - 74 } : { x: width - 58, y: 165 };
+      const targetRef = reward === "potion" ? bagTargetRef?.current : reward === "carrot_seed" || reward === "fertilizer" ? gardenStorageTargetRef.current : null;
+      if (!targetRef) {
         begin(fallback);
         return;
       }
-      gardenStorageTargetRef.current.measureInWindow((x, y, w, h) => {
+      targetRef.measureInWindow((x, y, w, h) => {
         begin(w > 0 && h > 0 ? { x: x + w / 2, y: y + h / 2 } : fallback);
       });
     });
@@ -162,7 +163,7 @@ export default function QuestBookButton({ size = 38, disabled = false, onBagUpda
     <Modal visible={!!dialog || flightVisible} transparent animationType="none" statusBarTranslucent onRequestClose={() => {}}>
       <View style={styles.dialogLayer} pointerEvents="box-none">
         <StoryDialogOverlay visible={!!dialog} line={dialog?.lines[dialog.index] ?? null} onContinue={() => advanceDialog(false)} onSkip={() => advanceDialog(true)} />
-        {flightVisible && flightReward === "fertilizer" && <View pointerEvents="none" style={{ position: "absolute", bottom: 45, left: width * .26 - 55, alignItems: "center" }}><View ref={gardenStorageTargetRef} collapsable={false}><Image source={REWARD_IMAGES.fertilizer} style={{ width: 44, height: 44 }} /></View><Text style={styles.rewardText}>Garden Storage</Text></View>}
+        {flightVisible && (flightReward === "carrot_seed" || flightReward === "fertilizer") && <View pointerEvents="none" style={{ position: "absolute", bottom: 45, left: width * .26 - 55, alignItems: "center" }}><View ref={gardenStorageTargetRef} collapsable={false}><Image source={REWARD_IMAGES[flightReward]} style={{ width: 44, height: 44 }} /></View><Text style={styles.rewardText}>Garden Storage</Text></View>}
         <Animated.View pointerEvents="none" style={[styles.flyingReward, { opacity: rewardOpacity, transform: [{ translateX: rewardX }, { translateY: rewardY }, { scale: rewardScale }] }]}><Image source={REWARD_IMAGES[flightReward]} style={styles.flyingRewardImage} resizeMode="contain" />{flightReward === "fertilizer" && <Text style={{ color: "white", fontWeight: "700", position: "absolute", right: 0, bottom: 0 }}>×5</Text>}</Animated.View>
       </View>
     </Modal>

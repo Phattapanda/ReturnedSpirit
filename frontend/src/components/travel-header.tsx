@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { Image, Modal, StyleSheet, Text, TouchableOpacity, View, type ImageSourcePropType } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -16,11 +16,17 @@ import { activeTempleBlessing } from "@/src/game/city-system";
 
 const DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
 
+export type TravelLootTargets = {
+  player: { x: number; y: number };
+  supporter?: { x: number; y: number };
+};
+
 type Props = {
   locationName: string;
   showPortraitRow?: boolean;
   onHeaderHeightChange?: (height: number) => void;
   onPortraitBottomChange?: (bottom: number) => void;
+  onLootTargetsChange?: (targets: TravelLootTargets) => void;
   refreshKey?: number;
   bagAttention?: boolean;
   supporterImage?: ImageSourcePropType;
@@ -31,9 +37,10 @@ type Props = {
   onUseItem?: (slotIdx: number, item: BagItem) => void | Promise<void>;
   bagContext?: BagContext;
   onBagTransferItem?: (slotIdx: number, item: BagItem) => void | Promise<void>;
+  onRecipeRead?: (ids: string[]) => void;
 };
 
-export default function TravelHeader({ locationName, showPortraitRow = false, onHeaderHeightChange, onPortraitBottomChange, refreshKey = 0, bagAttention = false, supporterImage, onSupporterPress, onBagUpdated, onStatsUpdated, externalUseItemIds, onUseItem, bagContext = "none", onBagTransferItem }: Props) {
+export default function TravelHeader({ locationName, showPortraitRow = false, onHeaderHeightChange, onPortraitBottomChange, onLootTargetsChange, refreshKey = 0, bagAttention = false, supporterImage, onSupporterPress, onBagUpdated, onStatsUpdated, externalUseItemIds, onUseItem, bagContext = "none", onBagTransferItem, onRecipeRead }: Props) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [stamina, setStamina] = useState(0);
@@ -46,6 +53,30 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
   const [statusOpen, setStatusOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [templeBlessing, setTempleBlessing] = useState<Awaited<ReturnType<typeof activeTempleBlessing>>>(null);
+  const supporterTargetRef = useRef<View>(null);
+  const bagTargetRef = useRef<View>(null);
+
+  const reportLootTargets = useCallback(() => {
+    if (!onLootTargetsChange) return;
+    requestAnimationFrame(() => {
+      bagTargetRef.current?.measureInWindow((bagX, bagY, bagWidth, bagHeight) => {
+        if (bagWidth <= 0 || bagHeight <= 0) return;
+        const player = { x: bagX + bagWidth / 2, y: bagY + bagHeight / 2 };
+        if (!supporterImage || !supporterTargetRef.current) {
+          onLootTargetsChange({ player });
+          return;
+        }
+        supporterTargetRef.current.measureInWindow((supporterX, supporterY, supporterWidth, supporterHeight) => {
+          onLootTargetsChange({
+            player,
+            supporter: supporterWidth > 0 && supporterHeight > 0
+              ? { x: supporterX + supporterWidth / 2, y: supporterY + supporterHeight / 2 }
+              : undefined,
+          });
+        });
+      });
+    });
+  }, [onLootTargetsChange, supporterImage]);
 
   useFocusEffect(useCallback(() => {
     void refreshKey;
@@ -96,7 +127,7 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
               <Text style={styles.statBarText}>{life}/{stats.maximumLife}</Text>
             </View>
           </View>
-          <QuestBookButton size={42} onBagUpdated={(nextBag) => { setBag(nextBag); onBagUpdated?.(nextBag); }} />
+          <QuestBookButton size={42} bagTargetRef={bagTargetRef} onBagUpdated={(nextBag) => { setBag(nextBag); onBagUpdated?.(nextBag); }} />
           <View style={styles.rightHeaderColumn}>
             <View style={styles.rightHeader}>
               <View style={styles.dayBadge}><Text style={styles.dayText}>{DAYS[dayIdx]}</Text></View>
@@ -116,13 +147,16 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
           onLayout={(event) => {
             const { y, height } = event.nativeEvent.layout;
             onPortraitBottomChange?.(y + height - 12);
+            reportLootTargets();
           }}
         >
           <TouchableOpacity style={styles.circleWrap} onPress={() => setStatusOpen(true)} activeOpacity={0.8}>
             <Image source={getPlayerAvatarForStamina(avatarId, stamina)} style={styles.circleImg} resizeMode="cover" />
           </TouchableOpacity>
-          {supporterImage ? <TouchableOpacity style={styles.supporterWrap} onPress={onSupporterPress} activeOpacity={0.82}><Image source={supporterImage} style={styles.supporterImg} /></TouchableOpacity> : null}
-          <BagIconButton unlocked={bag.unlocked} bagId={bag.bagId} pulsing={bagAttention} onPress={() => setBagOpen(true)} />
+          {supporterImage ? <View ref={supporterTargetRef} collapsable={false}><TouchableOpacity style={styles.supporterWrap} onPress={onSupporterPress} activeOpacity={0.82}><Image source={supporterImage} style={styles.supporterImg} /></TouchableOpacity></View> : null}
+          <View ref={bagTargetRef} collapsable={false} onLayout={reportLootTargets}>
+            <BagIconButton unlocked={bag.unlocked} bagId={bag.bagId} pulsing={bagAttention} onPress={() => setBagOpen(true)} />
+          </View>
         </View>
       )}
 
@@ -138,6 +172,7 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
         onStaminaUpdated={setStamina}
         onLifeUpdated={setLife}
         externalUseItemIds={externalUseItemIds}
+        onRecipeRead={onRecipeRead}
         onUseItem={async (slotIdx, item) => {
           setBagOpen(false);
           await onUseItem?.(slotIdx, item);
@@ -166,6 +201,7 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
             {[
               { icon: "play" as const, label: "Resume", action: () => setMenuOpen(false) },
               { icon: "book-outline" as const, label: "Logbook", action: () => { setMenuOpen(false); router.push("/logbook"); } },
+              { icon: "mail-outline" as const, label: "Support", action: () => { setMenuOpen(false); router.push("/support"); } },
               { icon: "settings-outline" as const, label: "Settings", action: () => { setMenuOpen(false); router.push("/settings"); } },
             ].map((item) => (
               <TouchableOpacity key={item.label} style={styles.menuRow} onPress={item.action} activeOpacity={0.8}>

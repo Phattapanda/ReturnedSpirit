@@ -58,11 +58,14 @@ import { potionBuffPotency, potionRecoveryBonus } from "@/src/game/potion-effect
 import { useKitchenRuntime } from "@/src/game/kitchen-runtime-context";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { getEquipmentKind, saveEquippedBag, toggleEquippedItem } from "@/src/game/equipment-system";
-import { readRecipeItem } from "@/src/game/recipe-item";
+import { readAlchemyRecipeItem, readRecipeItem } from "@/src/game/recipe-item";
 import RecipeDiscoveryAnimation from "@/src/components/recipe-discovery-animation";
+import InventorySortButton from "@/src/components/inventory-sort-button";
+import { nextInventorySortMode, sortInventorySlots, type InventorySortMode } from "@/src/game/inventory-sort";
 
 const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   recipe: require("../../assets/images/recipe.png"),
+  alchemy_recipe: require("../../assets/images/alchemy_recipe.png"),
   bag_herb:    require("../../assets/images/bag_herb.png"),
   bag_carrot:  require("../../assets/images/bag_carrot.png"),
   bag_onion:   require("../../assets/images/bag_onion.png"),
@@ -224,7 +227,7 @@ export function getItemImageSource(itemId: string): ImageSourcePropType | undefi
   return ITEM_IMAGES[normalizeItemId(itemId)];
 }
 
-export type BagContext = "kitchen" | "dining" | "garden" | "room" | "roomStorage" | "none";
+export type BagContext = "kitchen" | "workshop" | "dining" | "garden" | "room" | "roomStorage" | "none";
 
 type Props = {
   bag: PlayerBagData;
@@ -266,6 +269,7 @@ export default function PlayerBag({
   const [bottleDiscardTarget, setBottleDiscardTarget] = useState<{ slotIdx: number; item: BagItem } | null>(null);
   const [effectiveness, setEffectiveness] = useState(1);
   const [recovery, setRecovery] = useState<{ id: number; stamina: number; life: number } | null>(null);
+  const [nextSortMode, setNextSortMode] = useState<InventorySortMode>("type");
   const recoverySequence = useRef(0);
   const carrotEditsPending = useRef(false);
   const longPressDidFire = useRef(false);
@@ -280,6 +284,7 @@ export default function PlayerBag({
       setCarrotBagOverride(null);
       setSelectedCarrotBagSlot(null);
       setActionTarget(null);
+      setNextSortMode("type");
       carrotEditsPending.current = false;
     }
   }, [visible]);
@@ -308,13 +313,20 @@ export default function PlayerBag({
     setRecipeNotice(null);
   }
 
-  async function handleReadRecipe() {
-    if (infoSlotIndex === null || recipeReadBusy.current || readDiscovery) return;
+  async function handleReadRecipe(slotIndex = infoSlotIndex, item = infoItem) {
+    if (slotIndex === null || !item || recipeReadBusy.current || readDiscovery) return;
     recipeReadBusy.current = true;
     try {
-      const result = await readRecipeItem(PLAYER_BAG_KEY, infoSlotIndex);
+      const result = item.id === "alchemy_recipe"
+        ? await readAlchemyRecipeItem(PLAYER_BAG_KEY, slotIndex)
+        : await readRecipeItem(PLAYER_BAG_KEY, slotIndex);
       if (!result) return;
-      if (result.allKnown) { setRecipeNotice("You know all possible recipes"); return; }
+      if (result.allKnown) {
+        setInfoItem(item);
+        setInfoSlotIndex(slotIndex);
+        setRecipeNotice("You know all possible recipes");
+        return;
+      }
       if (result.bag) { setCarrotBagOverride(result.bag); onBagUpdated?.(result.bag); }
       onRecipeRead?.(result.ids);
       setInfoItem(null);
@@ -352,7 +364,7 @@ export default function PlayerBag({
     // Slot locations always get first refusal. Kitchen and Room Storage accept
     // Quest Items as ordinary stored items; their discard protection remains
     // enforced by the dedicated discard paths below.
-    if (context === "kitchen" || context === "dining" || context === "roomStorage") {
+    if (context === "kitchen" || context === "workshop" || context === "dining" || context === "roomStorage") {
       if (context === "dining" && hasItemAttribute(item, ITEM_ATTRIBUTE.QUEST_ITEM)) {
         setInfoItem(item);
         setInfoSlotIndex(slotIdx);
@@ -495,6 +507,15 @@ export default function PlayerBag({
     closeBag();
   }
 
+  async function handleSortBag() {
+    const nextBag = { ...displayBag, slots: sortInventorySlots(displayBag.slots, nextSortMode) };
+    setSelectedCarrotBagSlot(null);
+    setCarrotBagOverride(nextBag);
+    onBagUpdated?.(nextBag);
+    setNextSortMode((current) => nextInventorySortMode(current));
+    await AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(nextBag));
+  }
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={closeBag}>
       <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={handleOverlayPress}>
@@ -503,13 +524,16 @@ export default function PlayerBag({
             {recovery && <BagRecoveryNumbers key={recovery.id} stamina={recovery.stamina} life={recovery.life} />}
             <View style={styles.header}>
               <Text style={styles.title}>{bagTitle}</Text>
-              <TouchableOpacity
-                onPress={closeBag}
-                style={styles.closeBtn}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Text style={styles.closeText}>✕</Text>
-              </TouchableOpacity>
+              <View style={styles.headerActions}>
+                <InventorySortButton mode={nextSortMode} onPress={() => { void handleSortBag(); }} disabled={!displayBag.slots.some(Boolean)} />
+                <TouchableOpacity
+                  onPress={closeBag}
+                  style={styles.closeBtn}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <Text style={styles.closeText}>✕</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             <View style={styles.grid}>
@@ -539,6 +563,8 @@ export default function PlayerBag({
               <Text style={styles.hint}>
                 {context === "kitchen"
                   ? "Tap item to unpack to table.\nLong press for details."
+                  : context === "workshop"
+                  ? "Tap item to move it to Workshop Storage.\nLong press for details."
                   : context === "dining"
                   ? "Tap food to place it in a Meal Slot.\nLong press for details."
                   : context === "roomStorage"
@@ -570,10 +596,10 @@ export default function PlayerBag({
                   </Text>
                 )}
                 <Text style={styles.infoDesc}>{ITEM_CATALOG[infoItem.id]?.description ?? ""}</Text>
-                {infoItem.id === "recipe" && <>
+                {(infoItem.id === "recipe" || infoItem.id === "alchemy_recipe") && <>
                   {recipeNotice && <Text style={styles.infoDesc}>{recipeNotice}</Text>}
                   <TouchableOpacity style={styles.equipButton} onPress={() => { void handleReadRecipe(); }}>
-                    <Text style={styles.equipButtonText}>Read recipe</Text>
+                    <Text style={styles.equipButtonText}>{infoItem.id === "alchemy_recipe" ? "Read alchemy recipe" : "Read recipe"}</Text>
                   </TouchableOpacity>
                 </>}
                 {(() => {
@@ -616,6 +642,7 @@ export default function PlayerBag({
         const { slotIdx, item } = actionTarget;
         const catalog = ITEM_CATALOG[item.id];
         const equipmentKind = getEquipmentKind(item);
+        const readableRecipe = item.id === "recipe" || item.id === "alchemy_recipe";
         const externallyUsable = !!onUseItem && externalUseItemIds?.includes(item.id) === true;
         const usable = isConsumable(item) || isEdible(item) || externallyUsable;
         const useVerb = getConsumableCategory(item) === CONSUMABLE_CATEGORY.POTION ? "Drink" : "Eat";
@@ -642,8 +669,9 @@ export default function PlayerBag({
                 <Text selectable style={styles.actionName}>{item.id === "monster_carcass" || item.weaponEnhanced || item.armorEnhanced ? item.name : (catalog?.name ?? item.name)}</Text>
                 {(effects.length > 0 ? effects : equipmentValues).map((value) => <Text selectable key={value} style={styles.actionValue}>{value}</Text>)}
                 {effects.length === 0 && equipmentValues.length === 0 ? <Text selectable style={styles.actionDescription}>{catalog?.description ?? "No usable effect."}</Text> : null}
-                <Text style={styles.actionQuestion}>{discardable ? (usable ? `${useVerb} or Discard?` : equipmentKind ? `${item.equipped ? "Unequip" : "Equip"} or Discard?` : "Discard this item?") : hasItemAttribute(item, ITEM_ATTRIBUTE.QUEST_ITEM) ? "Quest Items cannot be discarded." : "This tool cannot be discarded."}</Text>
+                <Text style={styles.actionQuestion}>{readableRecipe ? "Read or Discard?" : discardable ? (usable ? `${useVerb} or Discard?` : equipmentKind ? `${item.equipped ? "Unequip" : "Equip"} or Discard?` : "Discard this item?") : hasItemAttribute(item, ITEM_ATTRIBUTE.QUEST_ITEM) ? "Quest Items cannot be discarded." : "This tool cannot be discarded."}</Text>
                 <View style={styles.actionButtons}>
+                  {readableRecipe ? <TouchableOpacity style={[styles.actionChoice, styles.useChoice]} onPress={() => { setActionTarget(null); void handleReadRecipe(slotIdx, item); }}><Text style={styles.useChoiceText}>Read</Text></TouchableOpacity> : null}
                   {usable ? <TouchableOpacity style={[styles.actionChoice, styles.useChoice]} onPress={() => { setActionTarget(null); if (externallyUsable) void onUseItem?.(slotIdx, item); else void handleConsumablePress(slotIdx, item); }}><Text style={styles.useChoiceText}>{externallyUsable ? "Use" : useVerb}</Text></TouchableOpacity> : null}
                   {equipmentKind ? <TouchableOpacity style={styles.actionChoice} onPress={() => { setActionTarget(null); void toggleEquipmentAt(slotIdx); }}><Text style={styles.actionValue}>{item.equipped ? "Unequip" : "Equip"}</Text></TouchableOpacity> : null}
                   {discardable ? <TouchableOpacity style={[styles.actionChoice, styles.discardChoice]} onPress={() => { setActionTarget(null); setDiscardTarget({ slotIdx, item }); }}><Text style={styles.discardChoiceText}>Discard</Text></TouchableOpacity> : null}
@@ -842,6 +870,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.7, shadowRadius: 18, elevation: 22,
   },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 7 },
   title: { color: "#C4943A", fontSize: 17, fontFamily: "Oldenburg" },
   closeBtn: { padding: 4 },
   closeText: { color: "#C4943A", fontSize: 18 },

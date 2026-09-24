@@ -208,6 +208,9 @@ export const ASSET_REGISTRY: AssetEntry[] = [
   { key: 'premium_fertilizer', module: require('../../assets/premiumfertilizer.png'), group: 'items' },
   { key: 'healthymuffin', module: require('../../assets/images/healthy muffin.png'), group: 'items' },
   { key: 'recipe', module: require('../../assets/images/recipe.png'), group: 'items' },
+  { key: 'alchemy_recipe', module: require('../../assets/images/alchemy_recipe.png'), group: 'items' },
+  { key: 'letter_unread', module: require('../../assets/images/letter.png'), group: 'ui' },
+  { key: 'letter_read', module: require('../../assets/images/letter_open.png'), group: 'ui' },
   { key: 'energydrink',   module: require('../../assets/images/energy Drink.png'),  group: 'items' },
   { key: 'energypill',    module: require('../../assets/images/energy Pill.png'),   group: 'items' },
   { key: 'goldenapple',   module: require('../../assets/images/golden apple.png'),  group: 'items' },
@@ -406,6 +409,7 @@ export const ASSET_REGISTRY: AssetEntry[] = [
   { key: 'goto_mail',      module: require('../../assets/images/gotomail.png'),      group: 'navigation' },
   { key: 'go_explore',     module: require('../../assets/images/goexplore.png'),     group: 'navigation' },
   { key: 'goto_storage',   module: require('../../assets/images/gotostorage.png'),   group: 'navigation' },
+  { key: 'staff',          module: require('../../assets/images/staff.png'),          group: 'ui' },
 
   // ── UI / HUD / action-button images ────────────────────────────────────────
   { key: 'watering',  module: require('../../assets/images/watering.png'),    group: 'ui' },

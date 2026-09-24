@@ -11,9 +11,10 @@ import ItemDurabilityBadge from "@/src/components/item-durability-badge";
 import ScrollActivationOverlay from "@/src/components/scroll-activation-overlay";
 import TravelHeader from "@/src/components/travel-header";
 import { getItemImageSource } from "@/src/components/PlayerBag";
-import { COOKING_RECIPES, consumeRecipeIngredients, createRecipeOutputs, discoverRecipe, findCookingRecipe, loadDiscoveredRecipes } from "@/src/game/cooking-system";
+import { COOKING_RECIPES, consumeRecipeIngredients, createRecipeOutputs, findCookingRecipe } from "@/src/game/cooking-system";
 import { DEFAULT_BAG, ITEM_ATTRIBUTE, PLAYER_BAG_KEY, canStack, hasItemAttribute, normalizeBagItem, normalizePlayerBagData, planAddToBag, type BagItem, type PlayerBagData } from "@/src/game/item-system";
 import { WORKSHOP_CRAFT_INGREDIENTS_KEY, WORKSHOP_CRAFT_RESULT_KEY, WORKSHOP_CRAFT_TOOL_KEY, WORKSHOP_STORAGE_KEY, loadWorkshopState } from "@/src/game/workshop-system";
+import { discoverAlchemyRecipe, loadDiscoveredAlchemyRecipes, rollAlchemyRecipeDrops } from "@/src/game/recipe-item";
 import { createCraftedScroll, SCROLL_BASE_USES } from "@/src/game/scroll-system";
 import { PLAYER_STATS_KEY, normalizePlayerStats } from "@/src/game/player-stats";
 import { UI_NOTIFICATION_DURATION_MS } from "@/src/ui/timings";
@@ -76,7 +77,7 @@ export default function WorkshopScreen() {
   useFocusEffect(useCallback(() => { let active = true; (async () => {
     const state = await loadWorkshopState(); if (state.phase !== "complete") { router.replace("/outside-tavern"); return; }
     const [rawStorage, rawIngredients, rawTool, rawResult, rawBag, known, rawStats] = await Promise.all([
-      AsyncStorage.getItem(WORKSHOP_STORAGE_KEY), AsyncStorage.getItem(WORKSHOP_CRAFT_INGREDIENTS_KEY), AsyncStorage.getItem(WORKSHOP_CRAFT_TOOL_KEY), AsyncStorage.getItem(WORKSHOP_CRAFT_RESULT_KEY), AsyncStorage.getItem(PLAYER_BAG_KEY), loadDiscoveredRecipes(), AsyncStorage.getItem(PLAYER_STATS_KEY),
+      AsyncStorage.getItem(WORKSHOP_STORAGE_KEY), AsyncStorage.getItem(WORKSHOP_CRAFT_INGREDIENTS_KEY), AsyncStorage.getItem(WORKSHOP_CRAFT_TOOL_KEY), AsyncStorage.getItem(WORKSHOP_CRAFT_RESULT_KEY), AsyncStorage.getItem(PLAYER_BAG_KEY), loadDiscoveredAlchemyRecipes(), AsyncStorage.getItem(PLAYER_STATS_KEY),
     ]); if (!active) return;
     setStorage(cloneSlots(rawStorage, 12)); setIngredients(cloneSlots(rawIngredients, 3)); setTool(normalizeBagItem(rawTool ? JSON.parse(rawTool) : null)); setResult(normalizeBagItem(rawResult ? JSON.parse(rawResult) : null)); setBag(rawBag ? normalizePlayerBagData(JSON.parse(rawBag)) : DEFAULT_BAG); setDiscovered(known); setEffectiveness(normalizePlayerStats(rawStats ? JSON.parse(rawStats) : null).effectiveness);
   })().catch(() => setMessage("The workshop could not be loaded.")); return () => { active = false; }; }, [router]));
@@ -123,17 +124,23 @@ export default function WorkshopScreen() {
     const output = Object.hasOwn(SCROLL_BASE_USES, recipe.outputId)
       ? createCraftedScroll(recipe.outputId, currentEffectiveness)
       : createRecipeOutputs(recipe, 1, 20, 0, tool)[0] ?? null;
-    setIngredients(nextIngredients); setResult(output); await persist(storage, nextIngredients, tool, output);
+    const alchemyRecipeDrops = rollAlchemyRecipeDrops(recipe, 1);
+    const recipeDrop = alchemyRecipeDrops > 0
+      ? addToSlots(storage, { id: "alchemy_recipe", itemType: "alchemy_recipe", name: "Alchemy Recipe", quantity: alchemyRecipeDrops })
+      : null;
+    if (recipeDrop && !recipeDrop.moved) { setMessage("The Workshop Storage needs room for the Alchemy Recipe."); return; }
+    const nextStorage = recipeDrop?.moved ? recipeDrop.slots : storage;
+    setStorage(nextStorage); setIngredients(nextIngredients); setResult(output); await persist(nextStorage, nextIngredients, tool, output);
     if (recipe.enhancementKind) setScrollActivationKey((current) => current + 1);
-    if (!recipe.hiddenFromRecipeBook && !discovered.includes(recipe.id)) { const next = await discoverRecipe(recipe.id); setDiscovered(next); }
-    setMessage(`${recipe.name} crafted.`);
+    if (!recipe.hiddenFromRecipeBook && !discovered.includes(recipe.id)) { const next = await discoverAlchemyRecipe(recipe.id); setDiscovered(next); }
+    setMessage(`${recipe.name} crafted.${recipeDrop?.moved ? " An Alchemy Recipe was found." : ""}`);
   }
   const visibleRecipes = COOKING_RECIPES.filter((entry) => !entry.hiddenFromRecipeBook && discovered.includes(entry.id) && (category === "hand" ? entry.toolId === null : entry.toolId === category));
 
   return <View style={styles.root}>
     <SceneBackground source={BACKGROUND} topOffset={headerHeight} />
     <View style={[StyleSheet.absoluteFill, { top: headerHeight }, styles.overlay]} pointerEvents="none" />
-    <TravelHeader locationName="Workshop" showPortraitRow onHeaderHeightChange={setHeaderHeight} refreshKey={refreshKey} bagContext="kitchen" onBagUpdated={setBag} onBagTransferItem={moveBagItem} />
+    <TravelHeader locationName="Workshop" showPortraitRow onHeaderHeightChange={setHeaderHeight} refreshKey={refreshKey} bagContext="workshop" onBagUpdated={setBag} onBagTransferItem={moveBagItem} onRecipeRead={setDiscovered} />
     <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}>
       <View style={styles.panel}>
         <View style={styles.titleRow}><Text style={styles.title}>Crafting Workbench</Text><TouchableOpacity style={styles.bookButton} onPress={() => setBookOpen(true)}><Ionicons name="book-outline" size={22} color="#FFF1CB" /><Text style={styles.bookText}>Recipes</Text></TouchableOpacity></View>

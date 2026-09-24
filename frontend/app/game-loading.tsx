@@ -47,6 +47,7 @@ import {
 import { restoreFromSnapshot } from "@/src/game/save-manager";
 import { audioEngine } from "@/src/audio/audioEngine";
 import { NEXT_RUN_INTRO_PENDING_KEY } from "@/src/game/tithe-system";
+import { ensureStartingPackageForCurrentRun } from "@/src/game/starting-package-purchase";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const BG = require("../assets/images/mainpage.png");
@@ -138,6 +139,10 @@ export default function GameLoading() {
         }
       }
       if (cancelled) return;
+
+      // Permanent store entitlements live outside save snapshots. Re-apply the
+      // seven-day package after a slot restore or clean new-game reset.
+      await ensureStartingPackageForCurrentRun();
 
       // 2. Preload all gameplay images
       await preloadGameplayAssets(

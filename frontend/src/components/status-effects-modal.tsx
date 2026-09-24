@@ -18,10 +18,11 @@ import {
 type Props = {
   visible: boolean;
   effects: StatusEffectState;
+  incomeBonusPercent?: number;
   onClose: () => void;
 };
 
-export default function StatusEffectsModal({ visible, effects, onClose }: Props) {
+export default function StatusEffectsModal({ visible, effects, incomeBonusPercent = 0, onClose }: Props) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -61,9 +62,19 @@ export default function StatusEffectsModal({ visible, effects, onClose }: Props)
             })}
 
             <Text style={[styles.sectionTitle, styles.traitSection]}>Permanent Traits</Text>
-            {effects.traits.length === 0 ? (
+            {effects.traits.length === 0 && incomeBonusPercent <= 0 ? (
               <Text style={styles.emptyText}>No traits in this run.</Text>
-            ) : effects.traits.map((active) => {
+            ) : null}
+            {incomeBonusPercent > 0 ? (
+              <View style={[styles.effectCard, styles.traitCard]}>
+                <View style={styles.effectHeader}>
+                  <Text style={styles.traitName}>Income Bonus +{incomeBonusPercent}%</Text>
+                  <Text style={styles.durationText}>This run</Text>
+                </View>
+                <Text style={styles.description}>All earned income is increased by {incomeBonusPercent}%.</Text>
+              </View>
+            ) : null}
+            {effects.traits.map((active) => {
               const definition = getTraitDefinition(active.id);
               if (!definition) return null;
               const cure = definition.cureCondition;

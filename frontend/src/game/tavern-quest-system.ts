@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import { addCurrencyCopper } from "@/src/game/currency-system";
+import { addIncomeCopper } from "@/src/game/currency-system";
 import {
   DEFAULT_BAG,
   PLAYER_BAG_KEY,
@@ -184,7 +184,7 @@ async function claimTavernQuestNow(id: TavernQuestId): Promise<ClaimTavernQuestR
   if (id === "serve_food" && state.foodServed >= 5 && state.claimed.clean_guest_area) {
     const next = { ...state, claimed: { ...state.claimed, serve_food: true } };
     await saveState(next);
-    await addCurrencyCopper(25);
+    await addIncomeCopper(25);
     return { ok: true, state: next, reward: "copper" };
   }
 

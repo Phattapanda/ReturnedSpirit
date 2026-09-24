@@ -43,6 +43,7 @@ import { DEFAULT_PROGRESSION_STATE, PROGRESSION_STATE_KEY } from "@/src/game/pro
 import { flushPlaytime } from "@/src/game/playtime-tracker";
 import { DEFAULT_TRAVEL_STATE, TRAVEL_STATE_KEY } from "@/src/game/travel-system";
 import { DISCOVERED_RECIPES_KEY, RUPERT_MORTAR_RECIPE_DIALOG_SEEN_KEY } from "@/src/game/cooking-system";
+import { DISCOVERED_ALCHEMY_RECIPES_KEY } from "@/src/game/recipe-item";
 import { MERCHANT_SHOP_KEY } from "@/src/game/merchant-shop";
 import { DEFAULT_MAILBOX_STATE, MAILBOX_STATE_KEY, deliverDailyBonusLetters } from "@/src/game/mailbox-system";
 import { KITCHEN_SMALL_CRATE_KEY } from "@/src/game/kitchen-small-crate";
@@ -119,6 +120,7 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   RUPERT_ALCHEMY_INTRO_SEEN_KEY,
   RUPERT_MORTAR_RECIPE_DIALOG_SEEN_KEY,
   DISCOVERED_RECIPES_KEY,
+  DISCOVERED_ALCHEMY_RECIPES_KEY,
   // Garden state
   "@garden:has_entered",
   "@garden:has_seen_introduction",
@@ -186,6 +188,7 @@ export async function createSnapshot(
         [NEXT_RUN_INTRO_PENDING_KEY, "false"],
         [TRAVEL_STATE_KEY, JSON.stringify(DEFAULT_TRAVEL_STATE)],
         [DISCOVERED_RECIPES_KEY, JSON.stringify([])],
+        [DISCOVERED_ALCHEMY_RECIPES_KEY, JSON.stringify([])],
         [MAILBOX_STATE_KEY, JSON.stringify(DEFAULT_MAILBOX_STATE)],
         [MINSTREL_STATE_KEY, JSON.stringify(DEFAULT_MINSTREL_STATE)],
         [WORKSHOP_STATE_KEY, JSON.stringify(DEFAULT_WORKSHOP_STATE)],

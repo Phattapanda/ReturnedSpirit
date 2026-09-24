@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { audioEngine } from "@/src/audio/audioEngine";
+import { PLAYER_STATS_KEY, normalizePlayerStats } from "@/src/game/player-stats";
 
 /**
  * Currency is stored canonically as one non-negative Copper value.
@@ -98,6 +99,14 @@ export async function saveCurrencyCopper(totalCopper: number): Promise<number> {
 export async function addCurrencyCopper(amount: number): Promise<number> {
   const current = await loadCurrencyCopper();
   return saveCurrencyCopper(current + normalizeCopper(amount));
+}
+
+/** Add earned income and apply the active next-run income trait. */
+export async function addIncomeCopper(amount: number): Promise<number> {
+  const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
+  const bonusPercent = normalizePlayerStats(rawStats ? JSON.parse(rawStats) : null).incomeBonusPercent;
+  const earned = Math.ceil(normalizeCopper(amount) * (1 + bonusPercent / 100));
+  return addCurrencyCopper(earned);
 }
 
 export async function canAffordCopper(cost: number): Promise<boolean> {
