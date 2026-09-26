@@ -1,3 +1,4 @@
+import { useWaterStorage } from "@/src/hooks/use-water-storage";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -69,7 +70,7 @@ const TRADE_SEED_CARROT = require("../../assets/images/seed_carrot.png");
 const TRADE_SEED_ONION = require("../../assets/images/seed_onion.png");
 const TRADE_HEALTHY_MUFFIN = require("../../assets/images/healthy muffin.png");
 const TRADE_GOLDEN_APPLE = require("../../assets/images/golden apple.png");
-const TRADE_BUCKET = require("../../assets/images/bucket.png");
+const TRADE_BUCKET = require("../../assets/images/water_jar.png");
 const TRADE_SEED_HERB = require("../../assets/images/seed_herb.png");
 const TRADE_NAILS = require("../../assets/images/nails.png");
 const TRADE_CLOTH = require("../../assets/images/cloth.png");
@@ -93,6 +94,7 @@ const TRADE_IMAGES: Record<string, ReturnType<typeof require>> = {
   seed_onion: TRADE_SEED_ONION,
   healthymuffin: TRADE_HEALTHY_MUFFIN,
   goldenapple: TRADE_GOLDEN_APPLE,
+  water_jar: TRADE_BUCKET,
   bucket: TRADE_BUCKET,
   seed_herb: TRADE_SEED_HERB,
   nails: TRADE_NAILS,
@@ -142,6 +144,8 @@ export function GuestCard({
   beverageIsAlcoholic = false,
   departing = false,
 }: GuestCardProps) {
+  const water = useWaterStorage();
+  const waterEmpty = beverageId === "water" && water.amount === 0;
   const [detailsVisible, setDetailsVisible] = useState(false);
   const { profile, selected } = guest;
   const displayedSellPrice = profile.id === "local_boozer" && selectedMealIsAlcoholic && sellPriceCopper !== null
@@ -277,7 +281,7 @@ export function GuestCard({
           )}
 
           <TouchableOpacity
-            style={[styles.serviceButton, !serviceEnabled("water") && styles.serviceButtonDisabled]}
+            style={[styles.serviceButton, (!serviceEnabled("water") || waterEmpty) && styles.serviceButtonDisabled]}
             disabled={!serviceEnabled("water")}
             onPress={() => onService?.(guest, "water")}
             activeOpacity={0.8}

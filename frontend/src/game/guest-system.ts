@@ -1,3 +1,4 @@
+import { PLAYER_STATS_KEY, getEffectiveLuck, normalizePlayerStats } from "@/src/game/player-stats";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import {
@@ -184,7 +185,7 @@ const LEGACY_EXCHANGE_ITEM_IDS: Record<string, string> = {
 };
 
 export function normalizeGuestExchangeItemId(itemId: string): string {
-  return LEGACY_EXCHANGE_ITEM_IDS[itemId] ?? itemId;
+  return itemId === "bucket" ? "water_jar" : LEGACY_EXCHANGE_ITEM_IDS[itemId] ?? itemId;
 }
 
 const OLD_FARMER_VISIT_DAYS = [1, 2, 4, 5, 6] as const;
@@ -317,8 +318,8 @@ export const TRAVELER_PROFILE: GuestProfile = {
   preferredMealTags: [],
   dislikedMealTags: [],
   exchangePool: [
-    exchangeOffer("seed_herb", "Herb Seed", 1, 80),
-    exchangeOffer("bucket", "Empty Bucket", 1, 20),
+    exchangeOffer("seed_herb", "Herb Seed", 1, 95),
+    exchangeOffer("water_jar", "Water Jar", 1, 5),
   ],
   exchangeMode: "daily_roll",
   usesFavor: false,
@@ -732,6 +733,8 @@ export async function prepareGuestsForDay(dayIndex: number): Promise<GuestVisitV
   );
   const nextGiftDialogDays = { ...state.giftDialogDaySerial };
   const rewardDialogs: Record<string, FavorRewardDialog | null> = {};
+  const rawLuckStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
+  const luck = getEffectiveLuck(normalizePlayerStats(rawLuckStats ? JSON.parse(rawLuckStats) : null));
   let playerBag = normalizePlayerBag(await AsyncStorage.getItem(PLAYER_BAG_KEY));
   let bagChanged = false;
 
@@ -751,7 +754,11 @@ export async function prepareGuestsForDay(dayIndex: number): Promise<GuestVisitV
     } else {
       const existingTrade = nextTrades[profile.id];
       if (!existingTrade || existingTrade.daySerial !== state.calendarDaySerial) {
-        const offer = rollExchangeOffer(exchangePool);
+        const jarChance = Math.min(50, 5 + Math.max(0, luck) * 2);
+        const weightedPool = profile.id === "traveler" ? exchangePool.map((offer) => ({
+          ...offer, weight: offer.itemId === "water_jar" ? jarChance : 100 - jarChance,
+        })) : exchangePool;
+        const offer = rollExchangeOffer(weightedPool);
         if (offer !== null) {
           nextTrades[profile.id] = {
             daySerial: state.calendarDaySerial,

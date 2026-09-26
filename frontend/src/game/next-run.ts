@@ -82,11 +82,11 @@ function rupertTutorialSkipEntries(): [string, string][] {
     unlocked: true,
     slots: [
       {
-        id: "bucket",
-        itemType: "bucket",
-        name: ITEM_CATALOG.bucket.name,
+        id: "water_jar",
+        itemType: "water_jar",
+        name: ITEM_CATALOG.water_jar.name,
         quantity: 1,
-        attributes: [...ITEM_CATALOG.bucket.attributes],
+        attributes: [...ITEM_CATALOG.water_jar.attributes],
       },
       ...DEFAULT_BAG.slots.slice(1),
     ],

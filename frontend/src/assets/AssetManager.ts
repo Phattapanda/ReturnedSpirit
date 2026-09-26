@@ -133,14 +133,14 @@ export const ASSET_REGISTRY: AssetEntry[] = [
     critical: true,
   },
   {
-    key: 'bucket',
-    module: require('../../assets/images/bucket.png'),
+    key: 'water_jar',
+    module: require('../../assets/images/water_jar.png'),
     group: 'items',
     critical: true,
   },
   {
-    key: 'bucketwater',
-    module: require('../../assets/images/bucketwater.png'),
+    key: 'water',
+    module: require('../../assets/images/water.png'),
     group: 'items',
     critical: true,
   },

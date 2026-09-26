@@ -1,3 +1,4 @@
+import { migrateLegacyWaterBuckets } from "@/src/game/water-storage";
 /**
  * game-loading.tsx – Fullscreen loading screen shown once per session entry.
  *
@@ -55,7 +56,7 @@ const MIN_DISPLAY_MS = 650; // prevent sub-second flash when cache is warm
 const TIP_DISPLAY_MS = 2900;
 
 const LOADING_TIPS = [
-  "Tip: Get more buckets from customers or from the visiting merchant.",
+  "Tip: Use Water Jars to expand Garden Water Storage. Refill it at the Well.",
   "Tip: Most guests have different visiting days and prefer different dishes.",
   "Tip: Well-served guests bring more benefits over time.",
   "Tip: A good garden yields more than just a bountiful harvest.",
@@ -142,6 +143,7 @@ export default function GameLoading() {
 
       // Permanent store entitlements live outside save snapshots. Re-apply the
       // seven-day package after a slot restore or clean new-game reset.
+      await migrateLegacyWaterBuckets();
       await ensureStartingPackageForCurrentRun();
 
       // 2. Preload all gameplay images

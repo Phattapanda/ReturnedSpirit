@@ -1,3 +1,4 @@
+import { loadWaterStorage, consumeStoredWater } from "@/src/game/water-storage";
 import React, { useState, useRef, useEffect } from "react";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
 import { UI_NOTIFICATION_DURATION_MS } from "@/src/ui/timings";
@@ -158,6 +159,7 @@ import {
 import { loadExploreNavigationUnlocked } from "@/src/game/travel-system";
 import { unlockQuestBook } from "@/src/game/questbook-system";
 import { loadTavernQuestState, notifyTavernQuestPrerequisitesChanged, subscribeTavernQuests } from "@/src/game/tavern-quest-system";
+import { DEFAULT_GUEST_ROOM_STATE, GUEST_ROOM_MAX_STORED_DAYS, advanceGuestRoomState, collectGuestRoomIncome, getGuestRoomDailyIncome, getGuestRoomStoredIncome, isGuestRoomIncomeFull, loadGuestRoomState, subscribeGuestRoomState, type GuestRoomState } from "@/src/game/guest-room-system";
 import {
   DEFAULT_SMALL_CRATE_STATE,
   KITCHEN_SMALL_CRATE_KEY,
@@ -459,6 +461,7 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   stew_chicken: require("../assets/images/stew_chicken.png"),
   stew_ember_chicken: require("../assets/images/stew_ember_chicken.png"),
   stew_fisherman: require("../assets/images/stew_fisherman.png"),
+  water_jar: require("../assets/images/water_jar.png"),
   bucket:      require("../assets/images/bucket.png"),
   bucketwater: require("../assets/images/bucketwater.png"),
   empty_bottle: require("../assets/images/empty_bottle.png"),
@@ -720,7 +723,7 @@ export default function KitchenScreen({
   const newRecipeScale = useSharedValue(1.18);
   const newRecipeOpacity = useSharedValue(0);
   const [showUpgrades, setShowUpgrades] = useState(false);
-  const [upgradeCategory, setUpgradeCategory] = useState<"overview" | "garden" | "tavern">("overview");
+  const [upgradeCategory, setUpgradeCategory] = useState<"overview" | "garden" | "tavern" | "guest_rooms">("overview");
   const rupertUpgradeScrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -797,6 +800,7 @@ export default function KitchenScreen({
   // Rupert flash when Kitchen regains focus during the guest-service sequence.
   const [rupertInDining, setRupertInDining] = useState(true);
   const [postGuestState, setPostGuestState] = useState<PostGuestTutorialState>(DEFAULT_POST_GUEST_TUTORIAL_STATE);
+  const [guestRoomState, setGuestRoomState] = useState<GuestRoomState>(DEFAULT_GUEST_ROOM_STATE);
   const [sharedResources, setSharedResources] = useState<SharedResources>({ ...SHARED_RESOURCE_DEFAULTS });
   const [gardenFertilizerQuantities, setGardenFertilizerQuantities] = useState({ standard: 0, premium: 0 });
   const postGuestIntroStartedRef = useRef(false);
@@ -1343,6 +1347,17 @@ export default function KitchenScreen({
       };
     }, [normalizedEntryStamina, staminaSV]),
   );
+  useFocusEffect(
+    React.useCallback(() => {
+      let active = true;
+      void Promise.all([loadGuestState(), loadGuestRoomState()]).then(async ([guestState, loaded]) => {
+        const state = await advanceGuestRoomState(guestState.calendarDaySerial).catch(() => loaded);
+        if (active) setGuestRoomState(state);
+      });
+      const unsubscribe = subscribeGuestRoomState((state) => { if (active) setGuestRoomState(state); });
+      return () => { active = false; unsubscribe(); };
+    }, []),
+  );
 
   // ── Layout measurement refs (declared early: used in cookingTablePanGesture worklet below) ──
   const rootRef            = useRef<View>(null);
@@ -1598,7 +1613,7 @@ export default function KitchenScreen({
                   try {
                     const freshBag2 = normalizePlayerBagData(JSON.parse(rawBag));
                     const hHB = freshBag2.slots.some(s => s?.id === "bag_herb");
-                    const hBW = freshBag2.slots.some(s => s?.id === "bucketwater");
+                    const hBW = (await loadWaterStorage()).amount > 0;
                     if (hHB && hBW) {
                       await AsyncStorage.setItem(SK.CRAFTING_READY, "true");
                       initReadyToCook = true;
@@ -1630,9 +1645,9 @@ export default function KitchenScreen({
                         } else if (step2 >= 2) {
                           setTutState("COOKING_CRAFT_READY");
                           setTimeout(() => showBubble(
-                            '"The recipe is very simple: you just have to boil two herbs with a bucket of water in a cooking pot."',
+                            '"The recipe is very simple: you just have to boil two herbs in a cooking pot. You can use the water directly from the water storage."',
                             "Rupert", "ALLOW_ITEM", null, () => {}, "bubble.cooking.craft_remind",
-                            ["two herbs with a bucket of water in a cooking pot"],
+                            ["two herbs in a cooking pot"],
                           ), 400);
                         } else {
                           startCookingTutorial();
@@ -1775,6 +1790,8 @@ export default function KitchenScreen({
   async function handleRupertUpgradeTap() {
     if (rupertInDining || !postGuestState.upgradeIntroSeen || dlgActive) return;
     await refreshPostGuestResources();
+    const latestGuestRooms = await loadGuestRoomState();
+    setGuestRoomState(latestGuestRooms);
     setUpgradeMessage(null);
     setUpgradeCategory("overview");
     setShowUpgrades(true);
@@ -1785,9 +1802,21 @@ export default function KitchenScreen({
     setUpgradeCategory("overview");
   }
 
-  function selectUpgradeCategory(category: "overview" | "garden" | "tavern") {
+  function selectUpgradeCategory(category: "overview" | "garden" | "tavern" | "guest_rooms") {
     setUpgradeMessage(null);
     setUpgradeCategory(category);
+  }
+
+  async function handleCollectGuestRoomIncome() {
+    if (upgradeBusy) return;
+    setUpgradeBusy(true);
+    try {
+      const result = await collectGuestRoomIncome();
+      setGuestRoomState(result.state);
+      setUpgradeMessage(result.ok ? `Collected ${result.collectedCopper} Copper Coins.` : "There is no Guest Room income to collect yet.");
+    } finally {
+      setUpgradeBusy(false);
+    }
   }
 
   async function handleGardenPlotBuild(plotNumber: 2 | 3 | 4) {
@@ -2041,7 +2070,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                   try {
                     const freshBag = normalizePlayerBagData(JSON.parse(freshRawBag));
                     const hasHB = freshBag.slots.some(s => s?.id === "bag_herb");
-                    const hasBW = freshBag.slots.some(s => s?.id === "bucketwater");
+                    const hasBW = (await loadWaterStorage()).amount > 0;
                     if (hasHB && hasBW) {
                       await AsyncStorage.setItem(SK.CRAFTING_READY, "true");
                       craftingReady = "true";
@@ -2078,9 +2107,9 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                       } else if (step >= 2) {
                         setTutState("COOKING_CRAFT_READY");
                         setTimeout(() => showBubble(
-                          '"The recipe is very simple: you just have to boil two herbs with a bucket of water in a cooking pot."',
+                          '"The recipe is very simple: you just have to boil two herbs in a cooking pot. You can use the water directly from the water storage."',
                           "Rupert", "ALLOW_ITEM", null, () => {}, "bubble.cooking.craft_remind",
-                          ["two herbs with a bucket of water in a cooking pot"],
+                          ["two herbs in a cooking pot"],
                         ), 400);
                       } else {
                         startCookingTutorial();
@@ -3162,7 +3191,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     cookingEatDoneRef.current = false;
     AsyncStorage.setItem(SK.COOKING_STEP, "1").catch(() => {});
     setTimeout(() => showBubble(
-      '"Please take the Herb Bag and the Bucket of Water out of your bag and put them on the table."',
+      '"Please take the Herb Bag out of your bag and put it on the table."',
       "Rupert", "ALLOW_ITEM", null,
       () => showBubble(
         '"You can unpack the Herb Bag on the table."',
@@ -3170,7 +3199,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         ["unpack the Herb Bag on the table"],
       ),
       "bubble.cooking.unpack_request",
-      ["take the Herb Bag and the Bucket of Water out of your bag"],
+      ["take the Herb Bag out of your bag"],
     ), 400);
   }
 
@@ -3178,13 +3207,11 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   function checkCookingProgress(currentTable: (BagItem | null)[]) {
     if (tsRef.current !== "COOKING_UNPACK_WAIT") return;
     let herbQty = 0;
-    let hasBucketwater = false;
     for (const item of currentTable) {
       if (!item) continue;
       if (item.id === "herbs") herbQty += item.quantity;
-      if (item.id === "bucketwater") hasBucketwater = true;
     }
-    if (herbQty >= 2 && hasBucketwater) {
+    if (herbQty >= 2) {
       setTutState("OLDPOT_FLYING");
       tsRef.current = "OLDPOT_FLYING";
       if (bubbleTimer.current) { clearTimeout(bubbleTimer.current); bubbleTimer.current = null; }
@@ -3997,9 +4024,9 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     setTutState("COOKING_CRAFT_READY");
     tsRef.current = "COOKING_CRAFT_READY";
     setTimeout(() => showBubble(
-      '"The recipe is very simple: you just have to boil two herbs with a bucket of water in a cooking pot."',
+      '"The recipe is very simple: you just have to boil two herbs in a cooking pot. You can use the water directly from the water storage."',
       "Rupert", "ALLOW_ITEM", null, () => {}, "bubble.cooking.craft_instruction",
-      ["two herbs with a bucket of water in a cooking pot"],
+      ["two herbs in a cooking pot"],
     ), 300);
   }
 
@@ -4395,7 +4422,14 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     }
 
     const availableCraftCount = getCraftableRecipeCount(craftIngSlotsRef.current, recipe, craftToolRef.current);
-    const craftCount = tutorialCraft ? 1 : availableCraftCount;
+    const waterRequired = recipe.waterRequired ?? 0;
+    const water = await loadWaterStorage();
+    if (waterRequired > 0 && water.amount < waterRequired) {
+      setCraftingInteractionLocked(false);
+      showPlayerBubble("I need water to cook");
+      return;
+    }
+    const craftCount = Math.min(tutorialCraft ? 1 : availableCraftCount, waterRequired > 0 ? Math.floor(water.amount / waterRequired) : availableCraftCount);
     if (craftCount < 1) {
       setCraftingInteractionLocked(false);
       setCraftResult(null);
@@ -4430,6 +4464,11 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       return;
     }
 
+    if (waterRequired > 0 && !(await consumeStoredWater(waterRequired * craftCount))) {
+      setCraftingInteractionLocked(false);
+      showPlayerBubble("I need water to cook");
+      return;
+    }
     triggerHaptic("craft");
     audioManager.playSoundEffect('cookingpot', { maxDurationMs: 6000 });
 
@@ -4851,7 +4890,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   );
   const canCleanGuestArea = !guestAreaComplete && staminaCurrent >= guestAreaCleanCost;
   const outsideCleanComplete = isOutsideTavernCleanComplete(postGuestState);
-  const outsideCleanCost = OUTSIDE_CLEAN_STAMINA_COST;
+  const outsideCleanCost = calcEffectiveStaminaCost(OUTSIDE_CLEAN_STAMINA_COST, getEffectiveEndurance(playerStats), getActiveStaminaBuffReduction(playerStats));
   const canCleanOutside = !outsideCleanComplete && staminaCurrent >= outsideCleanCost;
   const tableAndChairsAvailable = postGuestState.tableAndChairsCompletedDaySerial !== null || (
     guestAreaComplete &&
@@ -5006,6 +5045,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
             {!rupertInDining && (
               <Image source={rupertSrc(rupertPortrait)} style={[styles.circleImg, styles.npcPortraitImage]} resizeMode="cover" resizeMethod="resize" />
             )}
+            {!rupertInDining && isGuestRoomIncomeFull(guestRoomState) && <View style={styles.rupertAlertBadge}><Text style={styles.rupertAlertText}>!</Text></View>}
           </TouchableOpacity>
           <View ref={bagIconRef} collapsable={false} style={styles.bagDropTarget}>
             <BagIconButton
@@ -5607,7 +5647,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
               <View style={{ flex: 1 }}>
                 <Text style={styles.panelTitle}>Rupert · Upgrades</Text>
                 <Text style={styles.upgradeSubtitle}>
-                  {upgradeCategory === "overview" ? "Choose an area" : upgradeCategory.charAt(0).toUpperCase() + upgradeCategory.slice(1)}
+                  {upgradeCategory === "overview" ? "Choose an area" : upgradeCategory === "guest_rooms" ? "Guest Rooms" : upgradeCategory.charAt(0).toUpperCase() + upgradeCategory.slice(1)}
                 </Text>
               </View>
             </View>
@@ -5625,7 +5665,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
                   {([
                     { id: "garden", title: "Garden", description: "Plots and crop yield", image: IMG.loc_garden, disabled: false },
                     { id: "tavern", title: "Tavern", description: "Guest area, furniture and drinks", image: IMG.loc_dining, disabled: false },
-                    { id: "guest_rooms", title: "Guest Rooms", description: "Manage rooms for overnight guests", image: IMG.loc_dormitory, disabled: true },
+                    { id: "guest_rooms", title: "Guest Rooms", description: "Manage rooms for overnight guests", image: IMG.loc_dormitory, disabled: guestRoomState.phase !== "complete" },
                     { id: "manage_staff", title: "Manage Staff", description: "Hire and organize tavern staff", image: IMG.staff, disabled: true },
                   ] as const).map((category) => (
                     <TouchableOpacity
@@ -5644,6 +5684,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
                         <Text style={styles.upgradeCategoryTitle}>{category.title}</Text>
                         <Text style={styles.upgradeCategoryDescription}>{category.description}</Text>
                       </View>
+                      {category.id === "guest_rooms" && isGuestRoomIncomeFull(guestRoomState) && <View style={styles.guestRoomAlertBadge}><Text style={styles.guestRoomAlertText}>!</Text></View>}
                       {category.disabled ? (
                         <View style={styles.upgradeCategoryLockedStatus}>
                           <Ionicons name="lock-closed-outline" size={15} color="rgba(240,232,213,0.58)" />
@@ -5665,6 +5706,29 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
               )}
 
               {upgradeCategory === "garden" && <Text style={styles.upgradeSectionTitle}>Garden</Text>}
+
+              {upgradeCategory === "guest_rooms" && <Text style={styles.upgradeSectionTitle}>Guest Rooms</Text>}
+
+              {upgradeCategory === "guest_rooms" && guestRoomState.phase === "complete" && (
+                <View style={[styles.upgradeCard, isGuestRoomIncomeFull(guestRoomState) && styles.guestRoomIncomeFull]}>
+                  <View style={{ flex: 1, gap: 5 }}>
+                    <Text style={styles.upgradeName}>{guestRoomState.roomLevel === 2 ? "Good Basic Room" : "Small Basic Room"}</Text>
+                    {guestRoomState.upgradePhase === "building"
+                      ? <Text style={styles.upgradeCost}>Under construction · Guests cannot stay in this room.</Text>
+                      : <Text style={styles.upgradeOwned}>Daily Income: {getGuestRoomDailyIncome(guestRoomState)} Copper Coins</Text>}
+                    <Text style={styles.upgradeOwned}>Stored Income: {getGuestRoomStoredIncome(guestRoomState)} Copper Coins</Text>
+                    <Text style={styles.upgradeCost}>{guestRoomState.storedIncomeDays}/{GUEST_ROOM_MAX_STORED_DAYS} days stored</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.upgradeBuildBtn, guestRoomState.storedIncomeDays <= 0 && styles.upgradeBuildBtnDisabled]}
+                    disabled={upgradeBusy || guestRoomState.storedIncomeDays <= 0}
+                    onPress={() => { void handleCollectGuestRoomIncome(); }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={styles.upgradeBuildText}>{upgradeBusy ? "..." : "Collect"}</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
 
               {upgradeCategory === "garden" && ([2, 3, 4] as const).map((plotNumber) => {
                 const unlocked = isPlotUnlocked(postGuestState, plotNumber);
@@ -5885,6 +5949,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
                           {recipe.toolId ? ` · Tool: ${recipe.toolId === "oldpot" ? "Old Pot or better" : (ITEM_CATALOG[recipe.toolId]?.name ?? recipe.toolId)}` : ""}
                           {` → ${recipe.outputQuantity}× ${ITEM_CATALOG[recipe.outputId]?.name ?? recipe.outputId}`}
                         </Text>
+                        {!!recipe.waterRequired && <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}><Text style={styles.recipeIngredients}>{recipe.waterRequired}</Text><Image source={require("../assets/images/water.png")} style={{ width: 22, height: 22 }} resizeMode="contain" /></View>}
                         <View style={styles.recipeEffectsRow}>
                           <CurrencyPrice totalCopper={recipe.sellPriceCopper} textStyle={styles.recipeEffects} />
                           <Text style={styles.recipeEffects}>· +{recipe.staminaRecovery} Stamina{recipe.lifeRecovery > 0 ? ` · +${recipe.lifeRecovery} Life` : ""}</Text>
@@ -6187,6 +6252,8 @@ const styles = StyleSheet.create({
   circleImg: { width: "100%", height: "100%" },
   playerPortraitImage: { transform: [{ scale: 1.06 }] },
   npcPortraitImage: { transform: [{ scale: 1.06 }] },
+  rupertAlertBadge: { position: "absolute", right: -3, top: -4, width: 21, height: 21, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: "#B52222", borderWidth: 2, borderColor: "#FFF4DC", zIndex: 5 },
+  rupertAlertText: { color: "#FFF", fontFamily: "Oldenburg", fontSize: 14, lineHeight: 16 },
   rupertAway: { opacity: 0, borderColor: "transparent", backgroundColor: "transparent" },
   bagDropTarget: { width: 96, height: 96, borderRadius: 48, position: "relative" },
   bagDropHighlight: {
@@ -6489,6 +6556,9 @@ const styles = StyleSheet.create({
   upgradeCategoryDescription: { color: "rgba(240,232,213,0.55)", fontSize: 11, lineHeight: 16 },
   upgradeCategoryLockedStatus: { alignItems: "center", justifyContent: "center", gap: 3 },
   upgradeCategoryLockedText: { color: "rgba(240,232,213,0.58)", fontSize: 8, fontFamily: "Oldenburg" },
+  guestRoomAlertBadge: { width: 23, height: 23, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "#B52222", borderWidth: 1.5, borderColor: "#FFB3A7" },
+  guestRoomAlertText: { color: "#FFF", fontFamily: "Oldenburg", fontSize: 15, lineHeight: 17 },
+  guestRoomIncomeFull: { borderColor: "#D94343", backgroundColor: "rgba(92,24,18,0.82)" },
   upgradeCategoryBack: {
     minHeight: 40,
     alignSelf: "flex-start",

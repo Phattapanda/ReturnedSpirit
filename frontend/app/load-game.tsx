@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
+  Modal,
 } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Image } from "expo-image";
@@ -12,6 +13,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { clearSlotSnapshot } from "@/src/game/save-manager";
+import { copySave } from "@/src/game/copy-save";
 
 const BG = require("../assets/images/mainpage.png");
 
@@ -53,6 +55,22 @@ export default function LoadGame() {
   const insets = useSafeAreaInsets();
   const [slots, setSlots] = useState<SaveSlot[]>(DEFAULT_SLOTS);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const [copySource, setCopySource] = useState<number | null>(null);
+  const [copyBusy, setCopyBusy] = useState(false);
+  const [copyNotice, setCopyNotice] = useState("");
+
+  const handleCopy = async (target: number) => {
+    if (copySource === null || copyBusy) return;
+    setCopyBusy(true);
+    try {
+      await copySave(copySource, target);
+      await loadSlots();
+      setCopySource(null);
+      setCopyNotice(`Save copied to Slot ${target}.`);
+    } catch (error) {
+      setCopyNotice(error instanceof Error ? error.message : "The save could not be copied.");
+    } finally { setCopyBusy(false); }
+  };
 
   const loadSlots = async () => {
     try {
@@ -105,6 +123,7 @@ export default function LoadGame() {
       </View>
 
       <ScrollView contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }]}>
+        {!!copyNotice && <Text selectable style={styles.slotSub}>{copyNotice}</Text>}
         {slots.map((slot) => (
           <View key={slot.slot} style={styles.card}>
             <View style={[styles.iconCircle, slot.occupied ? styles.iconOccupied : styles.iconEmpty]}>
@@ -128,6 +147,9 @@ export default function LoadGame() {
                 <>
                   <Text style={styles.slotSub}>Saved · {formatDate(slot.savedAt)}</Text>
                   <Text style={styles.slotSub}>Run {slot.runNumber ?? 1} · Playtime {formatPlaytime(slot)}</Text>
+                  <TouchableOpacity accessibilityRole="button" testID={`copy-save-${slot.slot}`} style={[styles.confirmNo, { alignSelf: "flex-start", marginTop: 8 }]} onPress={(event) => { event.stopPropagation(); setConfirmDelete(null); setCopyNotice(""); setCopySource(slot.slot); }}>
+                    <Text style={styles.confirmNoText}>Copy Save</Text>
+                  </TouchableOpacity>
                 </>
               ) : (
                 <Text style={styles.slotSub}>Start a new game to fill this slot.</Text>
@@ -158,6 +180,23 @@ export default function LoadGame() {
           </View>
         ))}
       </ScrollView>
+      <Modal visible={copySource !== null} transparent animationType="fade" onRequestClose={() => { if (!copyBusy) setCopySource(null); }}>
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.65)", padding: 24 }}>
+          <View style={{ width: "100%", maxWidth: 360, maxHeight: "90%", backgroundColor: "#F0EDE4", borderRadius: 16, padding: 20 }}>
+            <ScrollView contentContainerStyle={{ gap: 14 }}>
+              <Text selectable style={styles.slotName}>Copy Save · Slot {copySource}</Text>
+              <Text selectable style={styles.slotSub}>Choose an empty destination. The original save stays unchanged.</Text>
+              {slots.filter(slot => slot.slot !== copySource).map(slot => (
+                <TouchableOpacity key={slot.slot} accessibilityRole="button" disabled={copyBusy || slot.occupied} style={[styles.confirmNo, { padding: 14, opacity: slot.occupied || copyBusy ? 0.45 : 1 }]} onPress={() => { void handleCopy(slot.slot); }}>
+                  <Text style={styles.confirmNoText}>Slot {slot.slot} · {slot.occupied ? `${slot.name} (occupied)` : "empty"}</Text>
+                </TouchableOpacity>
+              ))}
+              {!!copyNotice && <Text selectable style={styles.slotSub}>{copyNotice}</Text>}
+              <TouchableOpacity disabled={copyBusy} style={styles.confirmNo} onPress={() => setCopySource(null)}><Text style={styles.confirmNoText}>{copyBusy ? "Copying…" : "Cancel"}</Text></TouchableOpacity>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }

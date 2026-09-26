@@ -44,6 +44,7 @@ import {
 } from "@/src/game/post-guest-tutorial";
 import { COPPER_PER_SILVER } from "@/src/game/currency-system";
 import { UI_NOTIFICATION_DURATION_MS } from "@/src/ui/timings";
+import { DEFAULT_GUEST_ROOM_STATE, GUEST_ROOM_REQUIREMENTS, acceptGuestRoomUpgradeQuest, advanceGuestRoomState, hasGuestRoomUpgradeItem, loadGuestRoomOrderAvailability, loadGuestRoomState, placeGuestRoomOrder, turnInGuestRoomUpgradeItem, type GuestRoomOrderAvailability, type GuestRoomState } from "@/src/game/guest-room-system";
 
 const MARKET_BACKGROUND = require("../assets/images/market.png");
 const ARTISAN_BACKGROUND = require("../assets/images/artisans_district.png");
@@ -109,8 +110,8 @@ const IMPORTS = [
 ] as const;
 const HOLY_GOODS = [{ id: "holy_herb", price: 25 }, { id: "medicinal_herb", price: 22 }, { id: "blessed_water", price: 30 }, { id: "incense", price: 20 }, { id: "purified_salt", price: 18 }];
 const CARPENTER_SERVICES = [
-  { title: "Build Guest Room", description: "Adds a rentable guest room to the tavern." },
-  { title: "Upgrade Guest Room", description: "Improves comfort, rent and possible guest quality. Requires an existing guest room." },
+  { title: "Build Guest Rooms", description: "Renovates the second floor so Rupert can host overnight guests." },
+  { title: "Upgrade Guest Room 1", description: "Improves the Small Basic Room." },
   { title: "Build Stable", description: "Unlocks animals." },
   { title: "Expand Stable", description: "Increases stable spaces and capacity." },
   { title: "Build Workshop", description: "Unlocks personal crafting and alchemy outside the tavern." },
@@ -270,6 +271,11 @@ export default function NextCityScreen() {
   const [postGuestState, setPostGuestState] = useState<PostGuestTutorialState>(DEFAULT_POST_GUEST_TUTORIAL_STATE);
   const [workshopOrder, setWorkshopOrder] = useState<WorkshopOrderAvailability | null>(null);
   const [workshopOrderOpen, setWorkshopOrderOpen] = useState(false);
+  const [guestRoomState, setGuestRoomState] = useState<GuestRoomState>(DEFAULT_GUEST_ROOM_STATE);
+  const [guestRoomOrder, setGuestRoomOrder] = useState<GuestRoomOrderAvailability | null>(null);
+  const [guestRoomOrderOpen, setGuestRoomOrderOpen] = useState(false);
+  const [guestRoomThanksVisible, setGuestRoomThanksVisible] = useState(false);
+  const [guestRoomUpgradeDialog, setGuestRoomUpgradeDialog] = useState<{ kind: "offer" | "handover"; index: number } | null>(null);
   const [carpenterDialogIndex, setCarpenterDialogIndex] = useState<number | null>(null);
   const previousCityTheme = useRef<ThemeKey>(null);
   const minstrelPurchasePending = useRef(false);
@@ -282,7 +288,7 @@ export default function NextCityScreen() {
     floatingMessageTimer.current = setTimeout(() => setFloatingMessage(null), UI_NOTIFICATION_DURATION_MS);
   }
   const refresh = useCallback(async () => {
-    const [state, rawBag, progression, escort, playerData, loadedTavernQuests, loadedMinstrels, guestState, discoveredRecipes, loadedWorkshop, loadedPostGuestState] = await Promise.all([
+    const [state, rawBag, progression, escort, playerData, loadedTavernQuests, loadedMinstrels, guestState, discoveredRecipes, loadedWorkshop, loadedPostGuestState, loadedGuestRooms] = await Promise.all([
       loadCityState(),
       AsyncStorage.getItem(PLAYER_BAG_KEY),
       loadProgressionState(),
@@ -294,6 +300,7 @@ export default function NextCityScreen() {
       loadDiscoveredRecipes(),
       loadWorkshopState(),
       loadPostGuestTutorialState(),
+      loadGuestRoomState(),
     ]);
     const avatarId = normalizePlayerAvatarId(playerData[1][1]);
     const stamina = Math.max(0, Number.parseInt(playerData[2][1] ?? "60", 10) || 0);
@@ -312,6 +319,7 @@ export default function NextCityScreen() {
     setSpicesCrafted(discoveredRecipes.includes("spices"));
     setWorkshopState(loadedWorkshop);
     setPostGuestState(loadedPostGuestState);
+    setGuestRoomState(await advanceGuestRoomState(guestState.calendarDaySerial).catch(() => loadedGuestRooms));
     if (state.merchantRegistered && state.merchantContractTierUnlocked && !state.merchantContractTierDialogSeen) setMerchantTierDialogVisible(true);
     if (escort.phase === "city_arrival") setArrivalDialogIndex((current) => current ?? 0);
     if (params.arrival === "walk" && !escort.walkingArrivalGuardSeen) setCityGuardDialogIndex((current) => current ?? 0);
@@ -680,6 +688,68 @@ export default function NextCityScreen() {
     } finally { setBusy(false); }
   }
 
+  async function openGuestRoomService() {
+    if (guestRoomState.phase !== "available") return;
+    setGuestRoomOrder(await loadGuestRoomOrderAvailability());
+    setGuestRoomOrderOpen(true);
+  }
+
+  async function confirmGuestRoomOrder() {
+    setBusy(true);
+    try {
+      const result = await placeGuestRoomOrder();
+      setGuestRoomState(result.state);
+      setGuestRoomOrder(result.availability);
+      if (result.ok) {
+        setGuestRoomOrderOpen(false);
+        setGuestRoomThanksVisible(true);
+      }
+    } finally { setBusy(false); }
+  }
+
+  const guestRoomUpgradeDialogLines: Record<"offer" | "handover", StoryDialogLine[]> = {
+    offer: [{
+      speaker: "Carpenter",
+      text: "Hey, I heard you are skilled in combat. I can upgrade your room for free, if you can bring me an Elder Ember Rooster Comb. I always wished to experiment with some materials.",
+      highlightedPhrases: ["Elder Ember Rooster Comb"],
+    }],
+    handover: [
+      { speaker: "Carpenter", text: "Ooh, finally! Let me see. It's even harder than I imagined... the colour... the structure... maybe..." },
+      { speaker: "Carpenter", text: "Oh, sorry. Thank you, I will get to work. The upgraded room will be finished in 2 days. You won't be able to host guests during this time." },
+    ],
+  };
+
+  async function openGuestRoomUpgradeService() {
+    if (guestRoomState.phase !== "complete") return;
+    if (guestRoomState.upgradePhase === "available") {
+      setGuestRoomUpgradeDialog({ kind: "offer", index: 0 });
+      return;
+    }
+    if (guestRoomState.upgradePhase !== "quest_active") return;
+    if (!hasGuestRoomUpgradeItem(bag)) {
+      setMessage("Bring an Elder Ember Rooster Comb to the Carpenter.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await turnInGuestRoomUpgradeItem();
+      setGuestRoomState(result.state);
+      setBag(result.bag);
+      if (result.ok) setGuestRoomUpgradeDialog({ kind: "handover", index: 0 });
+    } finally { setBusy(false); }
+  }
+
+  async function advanceGuestRoomUpgradeDialog() {
+    if (!guestRoomUpgradeDialog) return;
+    const lines = guestRoomUpgradeDialogLines[guestRoomUpgradeDialog.kind];
+    if (guestRoomUpgradeDialog.index < lines.length - 1) {
+      setGuestRoomUpgradeDialog({ ...guestRoomUpgradeDialog, index: guestRoomUpgradeDialog.index + 1 });
+      return;
+    }
+    if (guestRoomUpgradeDialog.kind === "offer") setGuestRoomState(await acceptGuestRoomUpgradeQuest());
+    setGuestRoomUpgradeDialog(null);
+  }
+
   async function buyKitchenTableUpgrade(targetLevel: 1 | 2 | 3): Promise<{ ok: boolean; message: string }> {
     const result = await purchaseKitchenTableUpgrade(targetLevel);
     setPostGuestState(result.state);
@@ -740,11 +810,29 @@ export default function NextCityScreen() {
     if (view === "carpenter") return <><Text style={styles.sectionTitle}>Carpenter</Text>{CARPENTER_SERVICES.map((service) => {
       const workshop = service.title === "Build Workshop";
       const furniture = service.title === "Build Furniture";
-      const enabled = furniture || (workshop && (workshopState.phase === "available" || workshopState.phase === "quoted"));
-      const status = workshop
+      const guestRooms = service.title === "Build Guest Rooms";
+      const guestRoomUpgrade = service.title === "Upgrade Guest Room 1";
+      const enabled = furniture
+        || (workshop && (workshopState.phase === "available" || workshopState.phase === "quoted"))
+        || (guestRooms && guestRoomState.phase === "available")
+        || (guestRoomUpgrade && guestRoomState.phase === "complete" && ["available", "quest_active"].includes(guestRoomState.upgradePhase));
+      const completed = (workshop && workshopState.phase === "complete")
+        || (guestRooms && guestRoomState.phase === "complete")
+        || (guestRoomUpgrade && guestRoomState.upgradePhase === "complete");
+      const status = guestRoomUpgrade
+        ? guestRoomState.upgradePhase === "building"
+          ? `Under construction · ${Math.max(0, (guestRoomState.upgradeCompletionDaySerial ?? currentDay) - currentDay)} day(s) remaining`
+          : guestRoomState.upgradePhase === "complete"
+            ? "Good Basic Room completed"
+            : guestRoomState.upgradePhase === "quest_active"
+              ? hasGuestRoomUpgradeItem(bag) ? "Elder Ember Rooster Comb ready to hand over" : "Bring an Elder Ember Rooster Comb"
+              : service.description
+        : guestRooms
+        ? guestRoomState.phase === "building" ? `Under construction · ${Math.max(0, (guestRoomState.completionDaySerial ?? currentDay) - currentDay)} day(s) remaining` : guestRoomState.phase === "complete" ? "Small Basic Room completed" : service.description
+        : workshop
         ? workshopState.phase === "building" ? `Under construction · ${Math.max(0, (workshopState.completionDaySerial ?? currentDay) - currentDay)} day(s) remaining` : workshopState.phase === "complete" ? "Completed" : service.description
         : service.description;
-      return <TouchableOpacity key={service.title} disabled={!enabled} style={[styles.carpenterService, enabled && styles.carpenterServiceReady]} onPress={() => { if (furniture) open("furniture"); else void openWorkshopService(); }}><View style={[styles.carpenterLock, enabled && styles.carpenterReadyIcon]}><Ionicons name={enabled ? "hammer" : workshopState.phase === "complete" && workshop ? "checkmark" : "lock-closed"} size={20} color={enabled ? "#FFF7E5" : "#8E7651"} /></View><View style={styles.stockText}><Text style={[styles.carpenterTitle, enabled && styles.carpenterReadyTitle]}>{service.title}</Text><Text style={styles.carpenterDescription}>{status}</Text></View></TouchableOpacity>;
+      return <TouchableOpacity key={service.title} disabled={!enabled} style={[styles.carpenterService, (enabled || completed) && styles.carpenterServiceReady]} onPress={() => { if (furniture) open("furniture"); else if (guestRooms) void openGuestRoomService(); else if (guestRoomUpgrade) void openGuestRoomUpgradeService(); else void openWorkshopService(); }}><View style={[styles.carpenterLock, (enabled || completed) && styles.carpenterReadyIcon]}><Ionicons name={completed ? "checkmark" : enabled ? "hammer" : "lock-closed"} size={20} color={enabled || completed ? "#FFF7E5" : "#8E7651"} /></View><View style={styles.stockText}><Text style={[styles.carpenterTitle, (enabled || completed) && styles.carpenterReadyTitle]}>{service.title}</Text><Text style={styles.carpenterDescription}>{status}</Text></View></TouchableOpacity>;
     })}</>;
     if (view === "furniture") return <>
       <Text style={styles.sectionTitle}>Build Furniture</Text>
@@ -886,7 +974,23 @@ export default function NextCityScreen() {
           <TouchableOpacity disabled={busy || !workshopOrder?.canPlace} style={[styles.wideButton, workshopOrder?.canPlace && styles.turnInReady, (!workshopOrder?.canPlace || busy) && styles.disabled]} onPress={() => { void confirmWorkshopOrder(); }}><Text style={styles.wideButtonText}>Place an order.</Text></TouchableOpacity>
         </View></View>
       </Modal>
+      <Modal visible={guestRoomOrderOpen} transparent animationType="fade" onRequestClose={() => setGuestRoomOrderOpen(false)}>
+        <View style={styles.orderOverlay}><View style={styles.orderPanel}>
+          <View style={styles.orderTitleRow}><Text style={styles.sectionTitle}>Build Guest Rooms</Text><TouchableOpacity onPress={() => setGuestRoomOrderOpen(false)}><Ionicons name="close" size={25} color="#F5E6C8" /></TouchableOpacity></View>
+          <Text style={styles.note}>Renovate the first room on the second floor. Construction takes 3 in-game days.</Text>
+          {([['nails', 'Nails', GUEST_ROOM_REQUIREMENTS.nails], ['wood', 'Wood', GUEST_ROOM_REQUIREMENTS.wood], ['stone', 'Stone', GUEST_ROOM_REQUIREMENTS.stone], ['paint', 'Paint', GUEST_ROOM_REQUIREMENTS.paint], ['cloth', 'Cloth', GUEST_ROOM_REQUIREMENTS.cloth]] as const).map(([id, name, needed]) => <View key={id} style={styles.requirementRow}><Text style={styles.stockName}>{name}</Text><Text style={(guestRoomOrder?.resources[id] ?? 0) >= needed ? styles.requirementReady : styles.requirementMissing}>{guestRoomOrder?.resources[id] ?? 0}/{needed}</Text></View>)}
+          <View style={styles.requirementRow}><Text style={styles.stockName}>Payment</Text><CurrencyPrice totalCopper={GUEST_ROOM_REQUIREMENTS.copper} /></View>
+          <TouchableOpacity disabled={busy || !guestRoomOrder?.canPlace} style={[styles.wideButton, guestRoomOrder?.canPlace && styles.turnInReady, (!guestRoomOrder?.canPlace || busy) && styles.disabled]} onPress={() => { void confirmGuestRoomOrder(); }}><Text style={styles.wideButtonText}>Place an order.</Text></TouchableOpacity>
+        </View></View>
+      </Modal>
       <StoryDialogOverlay visible={carpenterDialogIndex !== null} line={carpenterDialogIndex === null ? null : carpenterDialogLines[carpenterDialogIndex] ?? null} onContinue={() => { void advanceCarpenterDialog(); }} onSkip={() => { if (carpenterDialogIndex === carpenterDialogLines.length - 1) void advanceCarpenterDialog(); else setCarpenterDialogIndex(carpenterDialogLines.length - 1); }} />
+      <StoryDialogOverlay visible={guestRoomThanksVisible} line={guestRoomThanksVisible ? { speaker: "Carpenter", text: "Thank you for the commission. The Small Basic Room will be ready in 3 days." } : null} onContinue={() => setGuestRoomThanksVisible(false)} onSkip={() => setGuestRoomThanksVisible(false)} />
+      <StoryDialogOverlay
+        visible={guestRoomUpgradeDialog !== null}
+        line={guestRoomUpgradeDialog ? guestRoomUpgradeDialogLines[guestRoomUpgradeDialog.kind][guestRoomUpgradeDialog.index] ?? null : null}
+        onContinue={() => { void advanceGuestRoomUpgradeDialog(); }}
+        onSkip={() => { void advanceGuestRoomUpgradeDialog(); }}
+      />
       <StoryDialogOverlay
         visible={arrivalDialogIndex !== null}
         line={arrivalDialogIndex === null ? null : arrivalLines[arrivalDialogIndex] ?? null}

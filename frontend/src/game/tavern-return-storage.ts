@@ -44,6 +44,14 @@ function isCoreMaterialId(id: string): id is ResourceId {
   return CORE_MATERIAL_ID_SET.has(id as ResourceId);
 }
 
+export function belongsInGardenStorage(item: Pick<BagItem, "id" | "itemType">): boolean {
+  return isCoreMaterialId(item.id)
+    || item.itemType === "seed"
+    || GARDEN_RETURN_SEED_IDS.has(item.id)
+    || item.itemType === "fertilizer"
+    || getGardenFertilizerConfig(item.id) !== null;
+}
+
 export function normalizeSharedResources(value: unknown): SharedResources {
   let candidate = value;
   if (typeof value === "string") {
@@ -185,6 +193,36 @@ export function storePlayerBagMaterialsForTavernReturn(): Promise<TavernReturnSt
       [GARDEN_INVENTORY_KEY, JSON.stringify(plan.gardenInventory)],
     ]);
     return plan;
+  });
+  storageQueue = operation.then(() => undefined, () => undefined);
+  return operation;
+}
+
+/** Stores one directly awarded garden supply/construction material without using a bag slot. */
+export function storeItemDirectlyInGardenStorage(item: BagItem): Promise<boolean> {
+  const operation = storageQueue.then(async () => {
+    if (!belongsInGardenStorage(item)) return false;
+
+    if (isCoreMaterialId(item.id)) {
+      const sharedResources = normalizeSharedResources(await AsyncStorage.getItem(SHARED_RESOURCES_KEY));
+      sharedResources[item.id] = Math.min(
+        Number.MAX_SAFE_INTEGER,
+        sharedResources[item.id] + Math.max(0, Math.floor(item.quantity)),
+      );
+      await AsyncStorage.setItem(SHARED_RESOURCES_KEY, JSON.stringify(sharedResources));
+      return true;
+    }
+
+    const gardenInventory = normalizeGardenInventory(await AsyncStorage.getItem(GARDEN_INVENTORY_KEY));
+    const fertilizer = getGardenFertilizerConfig(item.id);
+    addGardenItem(gardenInventory, {
+      ...item,
+      id: fertilizer?.id ?? item.id,
+      itemType: fertilizer ? "fertilizer" : "seed",
+      name: fertilizer?.name ?? item.name,
+    });
+    await AsyncStorage.setItem(GARDEN_INVENTORY_KEY, JSON.stringify(gardenInventory));
+    return true;
   });
   storageQueue = operation.then(() => undefined, () => undefined);
   return operation;

@@ -25,7 +25,7 @@ import { SHARED_RESOURCES_KEY } from "@/src/game/shared-resources";
 export const MERCHANT_SHOP_KEY = "@game:merchant_shop";
 
 export type MerchantStockId =
-  | "bucket"
+  | "water_jar"
   | "egg"
   | "white_meat"
   | "fish"
@@ -56,7 +56,7 @@ export type MerchantStockDefinition = {
 };
 
 export const MERCHANT_STOCK: Record<MerchantStockId, MerchantStockDefinition> = {
-  bucket: { id: "bucket", priceCopper: 20, maxPurchases: 4 },
+  water_jar: { id: "water_jar", priceCopper: 40, maxPurchases: 2 },
   egg: { id: "egg", priceCopper: 15, maxPurchases: 4 },
   white_meat: { id: "white_meat", priceCopper: 25, maxPurchases: 4 },
   fish: { id: "fish", priceCopper: 27, maxPurchases: 4 },

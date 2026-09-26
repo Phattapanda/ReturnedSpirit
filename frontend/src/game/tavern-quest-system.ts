@@ -12,7 +12,7 @@ import { GARDEN_INVENTORY_KEY, normalizeGardenInventory } from "@/src/game/taver
 
 export const TAVERN_QUEST_STATE_KEY = "@game:tavern_quests";
 
-export type TavernQuestId = "clean_guest_area" | "build_second_plot" | "serve_food" | "serve_water" | "standard_ale_ingredients";
+export type TavernQuestId = "clean_guest_area" | "build_second_plot" | "serve_food" | "serve_water" | "serve_guests" | "standard_ale_ingredients";
 export type BrewQuestItemId = "dried_hop_cones" | "malted_barley" | "brewers_yeast";
 
 export type TavernQuestState = {
@@ -20,6 +20,7 @@ export type TavernQuestState = {
   claimed: Record<TavernQuestId, boolean>;
   foodServed: number;
   waterServed: number;
+  guestsServed: number;
   cleanRewardSynchronized: boolean;
   aleIngredientsDialogueSeen: boolean;
   purchasedBrewItems: Partial<Record<BrewQuestItemId, boolean>>;
@@ -32,10 +33,12 @@ export const DEFAULT_TAVERN_QUEST_STATE: TavernQuestState = {
     build_second_plot: false,
     serve_food: false,
     serve_water: false,
+    serve_guests: false,
     standard_ale_ingredients: false,
   },
   foodServed: 0,
   waterServed: 0,
+  guestsServed: 0,
   cleanRewardSynchronized: false,
   aleIngredientsDialogueSeen: false,
   purchasedBrewItems: {},
@@ -54,10 +57,12 @@ function normalizeState(raw: unknown): TavernQuestState {
       build_second_plot: claimed.build_second_plot === true,
       serve_food: claimed.serve_food === true,
       serve_water: claimed.serve_water === true,
+      serve_guests: claimed.serve_guests === true,
       standard_ale_ingredients: claimed.standard_ale_ingredients === true,
     },
     foodServed: Math.min(5, Math.max(0, Math.floor(Number(value.foodServed) || 0))),
     waterServed: Math.min(5, Math.max(0, Math.floor(Number(value.waterServed) || 0))),
+    guestsServed: Math.min(50, Math.max(0, Math.floor(Number(value.guestsServed) || 0))),
     cleanRewardSynchronized: value.cleanRewardSynchronized === true,
     aleIngredientsDialogueSeen: value.aleIngredientsDialogueSeen ?? claimed.serve_water === true,
     purchasedBrewItems: {
@@ -97,12 +102,16 @@ export async function notifyTavernQuestPrerequisitesChanged(): Promise<void> {
 export function recordTavernService(kind: "food" | "water"): Promise<TavernQuestState> {
   const task = writeQueue.then(async () => {
     const state = await loadTavernQuestState();
+    const guestsServed = state.claimed.serve_food && !state.claimed.serve_guests
+      ? Math.min(50, state.guestsServed + 1)
+      : state.guestsServed;
     if (kind === "food" && state.claimed.clean_guest_area && !state.claimed.serve_food) {
       return saveState({ ...state, foodServed: Math.min(5, state.foodServed + 1) });
     }
     if (kind === "water" && state.claimed.serve_food && !state.claimed.serve_water) {
-      return saveState({ ...state, waterServed: Math.min(5, state.waterServed + 1) });
+      return saveState({ ...state, waterServed: Math.min(5, state.waterServed + 1), guestsServed });
     }
+    if (guestsServed !== state.guestsServed) return saveState({ ...state, guestsServed });
     return state;
   });
   writeQueue = task.catch(() => undefined);
@@ -110,7 +119,7 @@ export function recordTavernService(kind: "food" | "water"): Promise<TavernQuest
 }
 
 export type ClaimTavernQuestResult =
-  | { ok: true; state: TavernQuestState; reward: "potion" | "carrot_seed" | "copper" | "ale_upgrade" | "fertilizer"; playerBag?: ReturnType<typeof normalizePlayerBagData> }
+  | { ok: true; state: TavernQuestState; reward: "potion" | "carrot_seed" | "copper" | "ale_upgrade" | "guest_rooms" | "fertilizer"; playerBag?: ReturnType<typeof normalizePlayerBagData> }
   | { ok: false; reason: "bag_full" | "not_ready"; state: TavernQuestState };
 
 export function claimTavernQuest(id: TavernQuestId): Promise<ClaimTavernQuestResult> {
@@ -192,6 +201,12 @@ async function claimTavernQuestNow(id: TavernQuestId): Promise<ClaimTavernQuestR
     const next = { ...state, claimed: { ...state.claimed, serve_water: true } };
     await saveState(next);
     return { ok: true, state: next, reward: "ale_upgrade" };
+  }
+
+  if (id === "serve_guests" && state.guestsServed >= 50 && state.claimed.serve_food) {
+    const next = { ...state, claimed: { ...state.claimed, serve_guests: true } };
+    await saveState(next);
+    return { ok: true, state: next, reward: "guest_rooms" };
   }
 
   return { ok: false, reason: "not_ready", state };

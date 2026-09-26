@@ -567,13 +567,15 @@ export function isOutsideTavernCleanComplete(state: PostGuestTutorialState): boo
 
 export async function cleanOutsideTavernOnce(): Promise<CleanOutsideTavernResult> {
   const state = await loadPostGuestTutorialState();
-  const [rawStamina, rawSpent, rawGuestState] = await Promise.all([
+  const [rawStamina, rawSpent, rawGuestState, rawStats] = await Promise.all([
     AsyncStorage.getItem(CURRENT_STAMINA_KEY),
     AsyncStorage.getItem(STAMINA_SPENT_TODAY_KEY),
     AsyncStorage.getItem(GUEST_STATE_KEY),
+    AsyncStorage.getItem(PLAYER_STATS_KEY),
   ]);
   const currentStamina = Math.max(0, Number.parseInt(rawStamina ?? "0", 10) || 0);
-  const staminaCost = OUTSIDE_CLEAN_STAMINA_COST;
+  const stats = normalizePlayerStats(rawStats ? JSON.parse(rawStats) : null);
+  const staminaCost = calcEffectiveStaminaCost(OUTSIDE_CLEAN_STAMINA_COST, getEffectiveEndurance(stats), getActiveStaminaBuffReduction(stats));
   if (isOutsideTavernCleanComplete(state)) {
     return { ok: true, alreadyComplete: true, completedNow: false, staminaCost, remainingStamina: currentStamina, state };
   }

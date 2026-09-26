@@ -579,3 +579,21 @@ export function mailboxRewardLabel(reward: MailReward): string {
   const resourceName = reward.resourceId.charAt(0).toUpperCase() + reward.resourceId.slice(1);
   return `${reward.quantity}× ${resourceName}`;
 }
+
+/** The purchase and the bonus code have independent, per-run delivery markers. */
+export async function activatePurchasedHarvestPackage(): Promise<MailboxState> {
+  const state = await loadMailboxState();
+  const id = "purchase:harvestsun";
+  if (state.redeemedCodes.includes("PURCHASE_HARVESTSUN")) return state;
+  const definition = BONUS_CODE_CATALOG.HARVESTSUN;
+  return saveMailboxState({
+    ...state,
+    redeemedCodes: [...state.redeemedCodes, "PURCHASE_HARVESTSUN"],
+    messages: [...state.messages, {
+      id, sender: definition.sender, senderKind: "system",
+      subject: "Harvest Sun Package", body: definition.body,
+      rewards: definition.rewards.map(reward => ({...reward})),
+      deliveredAt: Date.now(), read: false, claimed: false,
+    }],
+  });
+}

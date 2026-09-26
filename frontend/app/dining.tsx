@@ -1,3 +1,4 @@
+import { consumeStoredWater, loadWaterStorage } from "@/src/game/water-storage";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
 import {
@@ -299,8 +300,8 @@ function rupertServingExplanation(playerName: string): TutorialLine[] {
       id: "dining.tutorial.carry_bucket",
       speaker: "Rupert",
       portrait: "rupert",
-      text: '"You have to carry the bucket in the bag to fetch fresh water from the well."',
-      highlightedPhrases: ["carry the bucket in the bag to fetch fresh water"],
+      text: '"You can refill Water Storage at the Garden Well."',
+      highlightedPhrases: ["refill Water Storage"],
     },
     {
       id: "dining.tutorial.carry_meals",
@@ -967,6 +968,18 @@ export default function DiningScreen() {
     return `"A ${tavernBeverage.name} sounds good. Thank you."`;
   }
 
+  const waterServicePending = useRef(false);
+  async function payForWaterService() {
+    if (waterServicePending.current) return false;
+    waterServicePending.current = true;
+    try {
+      if (tavernBeverage.id !== "water") return true;
+      if (await consumeStoredWater(1)) return true;
+      showPlayerThought("I need to get more water");
+      return false;
+    } finally { waterServicePending.current = false; }
+  }
+
   async function handleGuestService(
     guest: GuestVisitView,
     action: GuestServiceAction,
@@ -974,6 +987,10 @@ export default function DiningScreen() {
     preferenceDiscovery?: GuestPreferenceDiscoveryResult,
   ): Promise<boolean | void> {
     if (serviceBusy) return;
+    if (action === "water" && tavernBeverage.id === "water" && (await loadWaterStorage()).amount < 1) {
+      showPlayerThought("I need to get more water");
+      return;
+    }
     const discoveredTalkLine = learnedPreferenceTalkLine(guest, preferenceDiscovery);
 
     if ((guest.profile.id === "merchant" || guest.profile.id === "traveler" || guest.profile.id === "city_guard") && guestTutorialHasReached(tutorialStep, "service_complete")) {
@@ -995,6 +1012,7 @@ export default function DiningScreen() {
       }
 
       if (action === "water") {
+        if (!(await payForWaterService())) return;
         setServiceBusy(true);
         await markGuestServed(guestId, "water");
         await addIncomeCopper(beveragePriceForGuest(guestId));
@@ -1099,6 +1117,7 @@ export default function DiningScreen() {
         return;
       }
       if (action === "water") {
+        if (!(await payForWaterService())) return;
         setServiceBusy(true);
         if (tavernBeverage.alcoholic) await addGuestFavor("local_boozer", 1);
         await markGuestServed("local_boozer", "water");
@@ -1168,6 +1187,7 @@ export default function DiningScreen() {
       }
 
       if (action === "water") {
+        if (!(await payForWaterService())) return;
         setServiceBusy(true);
         await markGuestServed("coachman", "water");
         await addIncomeCopper(beveragePriceForGuest("coachman"));
@@ -1363,6 +1383,7 @@ export default function DiningScreen() {
     }
 
     if (guestTutorialHasReached(tutorialStep, "service_complete") && action === "water") {
+      if (!(await payForWaterService())) return;
       setServiceBusy(true);
       await markGuestServed("old_farmer", "water");
       await addIncomeCopper(beveragePriceForGuest("old_farmer"));

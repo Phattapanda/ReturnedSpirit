@@ -20,6 +20,7 @@ function load(file) {
   }).outputText;
   const localRequire = (id) => {
     if (id === "@react-native-async-storage/async-storage") return storage;
+    if (id === "@/src/audio/audioEngine") return { audioEngine: { playSoundEffect: () => {} } };
     if (id.startsWith("@/") || id.startsWith(".")) {
       const resolved = id.startsWith("@/") ? path.join(root, id.slice(2)) : path.resolve(path.dirname(file), id);
       return load(`${resolved}.ts`);
@@ -31,10 +32,58 @@ function load(file) {
 }
 
 (async () => {
+  const mailbox = load(path.join(root, "src/game/mailbox-system.ts"));
+  const purchases = load(path.join(root, "src/game/starting-package-purchase.ts"));
+  assert.equal(await purchases.ensureStartingPackageForCurrentRun(), false);
+  await purchases.grantHarvestPackageEntitlement();
+  await Promise.all([purchases.ensureStartingPackageForCurrentRun(), purchases.ensureStartingPackageForCurrentRun()]);
+  let purchasedMail = await mailbox.loadMailboxState();
+  assert.equal(purchasedMail.messages.length, 1);
+  assert.deepEqual(purchasedMail.messages[0].rewards, mailbox.BONUS_CODE_CATALOG.HARVESTSUN.rewards);
+  assert.equal(purchasedMail.messages[0].claimed, false);
+  const mailboxKey = [...data.keys()].find(key => data.get(key).includes('"PURCHASE_HARVESTSUN"'));
+  data.set(mailboxKey, JSON.stringify({...purchasedMail, messages: []}));
+  await purchases.ensureStartingPackageForCurrentRun();
+  assert.equal((await mailbox.loadMailboxState()).messages.length, 0, "deleted mail is not delivered twice");
+  data.delete(mailboxKey);
+  await purchases.ensureStartingPackageForCurrentRun();
+  assert.equal((await mailbox.loadMailboxState()).messages.length, 1, "new run gets its own package");
+  data.clear();
+
   const { DISCOVERED_ALCHEMY_RECIPES_KEY, getMonsterRecipeDropChance, rollAlchemyRecipeDrops, rollMonsterRecipeDrops, rollRecipeDrops, readAlchemyRecipeItem, readRecipeItem } = load(path.join(root, "src/game/recipe-item.ts"));
   const { planKitchenCraftOutputs } = load(path.join(root, "src/game/kitchen-craft-output.ts"));
+  const { EXPLORE_AREA_BASE_STAMINA_COST, EXPLORE_AREA_POOL, createExploreAreaItem, formatExploreAreaFind, getExploreAreaLuckChance, rollExploreAreaFind, rollExploreAreaQuantity } = load(path.join(root, "src/game/outside-exploration.ts"));
   const { COOKING_RECIPES, DISCOVERED_RECIPES_KEY } = load(path.join(root, "src/game/cooking-system.ts"));
+  const { DEFAULT_TAVERN_QUEST_STATE, TAVERN_QUEST_STATE_KEY, claimTavernQuest, loadTavernQuestState, recordTavernService } = load(path.join(root, "src/game/tavern-quest-system.ts"));
+  const { CURRENCY_KEY } = load(path.join(root, "src/game/currency-system.ts"));
+  const { GOOD_GUEST_ROOM_DAILY_INCOME_COPPER, GUEST_ROOM_MAX_STORED_DAYS, GUEST_ROOM_STATE_KEY, acceptGuestRoomUpgradeQuest, advanceGuestRoomState, collectGuestRoomIncome, getGuestRoomDailyIncome, getGuestRoomStoredIncome, isGuestRoomIncomeFull, placeGuestRoomOrder, turnInGuestRoomUpgradeItem, unlockGuestRoomOffer } = load(path.join(root, "src/game/guest-room-system.ts"));
+  const { SHARED_RESOURCES_KEY } = load(path.join(root, "src/game/shared-resources.ts"));
   const { DEFAULT_BAG, ITEM_CATALOG, PLAYER_BAG_KEY, KITCHEN_TABLE_KEY, isItemDiscardable, canStack, getContainerStackLimit, normalizePlayerBagData } = load(path.join(root, "src/game/item-system.ts"));
+  const water = load(path.join(root, "src/game/water-storage.ts"));
+  assert.deepEqual(await water.loadWaterStorage(), {amount: 0, capacity: 5});
+  assert.equal((await water.refillWaterStorage()).state.amount, 5);
+  assert.equal((await water.refillWaterStorage()).ok, false);
+  assert.equal(await water.consumeStoredWater(6), false);
+  assert.equal(await water.consumeStoredWater(2), true);
+  assert.equal((await water.refillWaterStorage()).state.amount, 5);
+  data.set(PLAYER_BAG_KEY, JSON.stringify({...DEFAULT_BAG, slots: [{id:"water_jar", itemType:"water_jar", name:"Water Jar", quantity:1}, ...DEFAULT_BAG.slots.slice(1)]}));
+  assert.ok(await water.expandWaterStorageFromBag(0));
+  assert.equal(await water.expandWaterStorageFromBag(0), null);
+  assert.deepEqual(await water.loadWaterStorage(), {amount:5, capacity:10});
+  assert.deepEqual(await Promise.all([water.consumeStoredWater(4), water.consumeStoredWater(4)]), [true,false]);
+  data.set("@game:supporter_bag", JSON.stringify({slots:[{id:"bucketwater",quantity:6},{id:"bucket",quantity:2}]}));
+  await water.migrateLegacyWaterBuckets();
+  assert.deepEqual(await water.loadWaterStorage(), {amount:7,capacity:10});
+  assert.equal(JSON.parse(data.get("@game:supporter_bag")).slots[0].id, "water_jar");
+  await water.migrateLegacyWaterBuckets();
+  assert.equal((await water.loadWaterStorage()).amount,7);
+  for (const id of ["soup_herb","soup_carrot","soup_potato","soup_onion","soup_carrot_potato"]) {
+    const recipe = COOKING_RECIPES.find(r=>r.id===id);
+    assert.equal(recipe.waterRequired,1);
+    assert.ok(!recipe.ingredients.some(i=>i.id==="bucketwater"));
+    assert.ok(!recipe.byproducts?.some(i=>i.id==="bucket"));
+  }
+  data.clear();
   assert.deepEqual([DEFAULT_BAG.rows, DEFAULT_BAG.columns, DEFAULT_BAG.slotCount], [2, 4, 8]);
   const oldShoulderBag = normalizePlayerBagData({ bagId: "bag1", rows: 2, columns: 3, slotCount: 6, slots: [{ id: "herbs", itemType: "herbs", name: "Herbs", quantity: 1 }] });
   const oldBackpack = normalizePlayerBagData({ bagId: "bag2", rows: 3, columns: 3, slotCount: 9, slots: Array(9).fill(null) });
@@ -111,5 +160,103 @@ function load(file) {
   assert.equal(alchemy.bag.slots[0], null);
   assert.equal(ITEM_CATALOG.alchemy_recipe.baseSellPriceCopper, 50);
   assert.equal(isItemDiscardable(alchemyItem), true);
+  assert.equal(EXPLORE_AREA_BASE_STAMINA_COST, 10);
+  assert.ok(EXPLORE_AREA_POOL.length >= 25, "exploration offers a varied set of finds");
+  const forbiddenExploreIds = new Set([
+    "recipe", "alchemy_recipe", "scroll", "fur", "hide", "tusk", "wolf_pelt", "fang",
+    "slime_gel", "weak_monster_core", "ember_feather", "rooster_comb", "elder_ember_comb",
+    "beetle_shell", "ember_chicken_meat", "ember_chicken_egg",
+  ]);
+  for (const entry of EXPLORE_AREA_POOL) {
+    assert.ok(entry.text.length > 20, "every exploration find has contextual text");
+    if (entry.kind === "copper") continue;
+    const catalog = ITEM_CATALOG[entry.itemId];
+    assert.ok(catalog, `${entry.itemId}: exploration item exists in the catalog`);
+    assert.equal(forbiddenExploreIds.has(entry.itemId), false, `${entry.itemId}: is not a monster drop, recipe, or scroll`);
+    assert.equal(entry.itemId.includes("alchemy_powder"), false, `${entry.itemId}: is not an alchemy powder`);
+    assert.equal(catalog.consumableCategory, undefined, `${entry.itemId}: is not a potion or other consumable`);
+    assert.equal((catalog.mealTags ?? []).length, 0, `${entry.itemId}: is not a prepared dish`);
+  }
+  assert.equal(getExploreAreaLuckChance(0), 25);
+  assert.equal(getExploreAreaLuckChance(5), 35);
+  assert.equal(getExploreAreaLuckChance(-10), 25);
+  assert.equal(getExploreAreaLuckChance(100), 100);
+  assert.equal(rollExploreAreaQuantity("item", 0, () => 0.25), 1, "a failed Item Luck roll keeps the minimum quantity");
+  assert.equal(rollExploreAreaQuantity("item", 0, () => 0.249), 5, "successful Item Luck rolls stop at five");
+  assert.equal(rollExploreAreaQuantity("item", 5, () => 0.35), 1, "Luck chance uses an exclusive percentage threshold");
+  assert.equal(rollExploreAreaQuantity("item", 5, () => 0.349), 5, "each Luck point adds two percentage points");
+  assert.equal(rollExploreAreaQuantity("copper", 0, () => 0.25), 8, "Copper finds start at eight");
+  assert.equal(rollExploreAreaQuantity("copper", 100, () => 0.999), 15, "Copper Luck rolls stop at fifteen");
+  const explorationRolls = [0, 0.99];
+  const deterministicFind = rollExploreAreaFind(0, () => explorationRolls.shift());
+  assert.equal(deterministicFind.kind, "item");
+  assert.equal(deterministicFind.itemId, "seed_herb");
+  assert.equal(deterministicFind.quantity, 1);
+  assert.match(formatExploreAreaFind(deterministicFind), /Found: 1× Herb Seed\./);
+  const daggerEntry = EXPLORE_AREA_POOL.find((entry) => entry.kind === "item" && entry.itemId === "weapon_iron_dagger");
+  const dagger = createExploreAreaItem({ ...daggerEntry, quantity: 1 });
+  assert.equal(dagger.durability, 20, "found equipment receives full durability");
+  data.set(TAVERN_QUEST_STATE_KEY, JSON.stringify({
+    ...DEFAULT_TAVERN_QUEST_STATE,
+    claimed: { ...DEFAULT_TAVERN_QUEST_STATE.claimed, clean_guest_area: true, serve_food: true },
+  }));
+  for (let index = 0; index < 50; index += 1) await recordTavernService("water");
+  const guestQuestReady = await loadTavernQuestState();
+  assert.equal(guestQuestReady.waterServed, 5, "water quest progress remains capped at five");
+  assert.equal(guestQuestReady.guestsServed, 50, "all services count toward the fifty guest quest");
+  const guestQuestClaim = await claimTavernQuest("serve_guests");
+  assert.equal(guestQuestClaim.ok, true);
+  assert.equal(guestQuestClaim.reward, "guest_rooms");
+  const offeredRooms = await unlockGuestRoomOffer();
+  assert.equal(offeredRooms.phase, "available", "Rupert's completed dialogue unlocks the Carpenter service");
+  data.set("@game:guest_state", JSON.stringify({ calendarDaySerial: 7 }));
+  data.set(SHARED_RESOURCES_KEY, JSON.stringify({ nails: 10, wood: 15, stone: 15, paint: 2, cloth: 5 }));
+  data.set(CURRENCY_KEY, "300");
+  const roomOrder = await placeGuestRoomOrder();
+  assert.equal(roomOrder.ok, true);
+  assert.equal(roomOrder.state.phase, "building");
+  assert.equal(roomOrder.state.orderPlacedDaySerial, 7);
+  assert.equal(roomOrder.state.completionDaySerial, 10);
+  assert.deepEqual(JSON.parse(data.get(SHARED_RESOURCES_KEY)), { nails: 0, wood: 0, stone: 0, paint: 0, cloth: 0 });
+  assert.equal(data.get(CURRENCY_KEY), "0", "the Carpenter charges exactly three Silver Coins");
+  data.set(GUEST_ROOM_STATE_KEY, JSON.stringify({ ...roomOrder.state, orderPlacedDaySerial: 0, completionDaySerial: 3 }));
+  assert.equal((await advanceGuestRoomState(2)).phase, "building");
+  const completedRoom = await advanceGuestRoomState(3);
+  assert.equal(completedRoom.phase, "complete");
+  assert.equal(completedRoom.storedIncomeDays, 0, "construction day itself does not generate rent");
+  const fullRoom = await advanceGuestRoomState(13);
+  assert.equal(fullRoom.storedIncomeDays, GUEST_ROOM_MAX_STORED_DAYS);
+  assert.equal(getGuestRoomStoredIncome(fullRoom), 100);
+  assert.equal(isGuestRoomIncomeFull(fullRoom), true);
+  const stillCappedRoom = await advanceGuestRoomState(20);
+  assert.equal(stillCappedRoom.storedIncomeDays, GUEST_ROOM_MAX_STORED_DAYS, "stored rent never exceeds ten days");
+  data.set(CURRENCY_KEY, "0");
+  const collectedRoom = await collectGuestRoomIncome();
+  assert.equal(collectedRoom.ok, true);
+  assert.equal(collectedRoom.collectedCopper, 100);
+  assert.equal(collectedRoom.state.storedIncomeDays, 0);
+  assert.equal(data.get(CURRENCY_KEY), "100");
+  const upgradeQuest = await acceptGuestRoomUpgradeQuest();
+  assert.equal(upgradeQuest.upgradePhase, "quest_active", "the Carpenter conversation starts the room-upgrade quest");
+  data.set("@game:guest_state", JSON.stringify({ calendarDaySerial: 21 }));
+  data.set(GUEST_ROOM_STATE_KEY, JSON.stringify({ ...upgradeQuest, lastIncomeDaySerial: 20, storedIncomeDays: 1, storedIncomeCopper: 10 }));
+  data.set(PLAYER_BAG_KEY, JSON.stringify({ ...DEFAULT_BAG, slots: [{ id: "elder_ember_comb", itemType: "elder_ember_comb", name: "Elder Ember Rooster Comb", quantity: 1 }, ...DEFAULT_BAG.slots.slice(1)] }));
+  const upgradeOrder = await turnInGuestRoomUpgradeItem();
+  assert.equal(upgradeOrder.ok, true);
+  assert.equal(upgradeOrder.state.upgradePhase, "building");
+  assert.equal(upgradeOrder.state.upgradeCompletionDaySerial, 23);
+  assert.equal(upgradeOrder.bag.slots[0], null, "the Carpenter consumes one Elder Ember Rooster Comb");
+  assert.equal((await advanceGuestRoomState(22)).storedIncomeCopper, 10, "the old room earns no income during construction");
+  const upgradedRoom = await advanceGuestRoomState(23);
+  assert.equal(upgradedRoom.roomLevel, 2);
+  assert.equal(upgradedRoom.upgradePhase, "complete");
+  assert.equal(getGuestRoomDailyIncome(upgradedRoom), GOOD_GUEST_ROOM_DAILY_INCOME_COPPER);
+  assert.equal(getGuestRoomStoredIncome(upgradedRoom), 10, "uncollected Small Basic Room income survives the upgrade");
+  const upgradedIncome = await advanceGuestRoomState(24);
+  assert.equal(getGuestRoomStoredIncome(upgradedIncome), 30, "new income accrues at twenty Copper per day");
+  data.set("@game:player_stats", JSON.stringify({ incomeBonusPercent: 10 }));
+  data.set(CURRENCY_KEY, "0");
+  const collectedUpgradedRoom = await collectGuestRoomIncome();
+  assert.equal(collectedUpgradedRoom.collectedCopper, 33, "the permanent income trait applies to Guest Room income");
   console.log("Recipe item tests passed: kitchen/workshop separation, drops, value, discard, consumption, unknown selection, and all-known retention.");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

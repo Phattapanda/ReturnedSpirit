@@ -673,6 +673,7 @@ export const ITEM_CATALOG: Record<string, ItemCatalogEntry> = {
   snowberry:   { name: "Snowberry",        description: "A pale winter berry.", attributes: [ITEM_ATTRIBUTE.INGREDIENT] },
   ember_chicken_meat: { name: "Ember Chicken Meat", description: "Rare monster meat radiating heat.", attributes: [ITEM_ATTRIBUTE.INGREDIENT], baseSellPriceCopper: 48 },
   ember_chicken_egg:  { name: "Ember Chicken Egg",  description: "A rare monster egg radiating heat.", attributes: [ITEM_ATTRIBUTE.INGREDIENT], baseSellPriceCopper: 30 },
+  water_jar: { name: "Water Jar", description: "Stores water.", attributes: [ITEM_ATTRIBUTE.CONSUMABLE] },
   bucket:      { name: "Empty Bucket",     description: "A sturdy wooden bucket. It needs to be filled.", attributes: [ITEM_ATTRIBUTE.VESSEL] },
   bucketwater: { name: "Bucket of Water", description: "A bucket filled with fresh water from the well.", attributes: [ITEM_ATTRIBUTE.INGREDIENT], baseSellPriceCopper: 20 },
   seed_herb:   { name: "Herb Seed",        description: "Seeds for growing herbs.", attributes: [] },

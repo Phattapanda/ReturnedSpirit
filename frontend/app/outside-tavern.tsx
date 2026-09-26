@@ -15,8 +15,8 @@ import StoryDialogOverlay, { type StoryDialogChoice, type StoryDialogLine } from
 import { COACHMAN_DIALOG_SCALE, DIALOG_CHARACTER_ASSETS } from "@/src/assets/dialog-character-assets";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { useHaptics } from "@/src/feedback/haptics-provider";
-import { getCoachmanTravelStatus, loadTravelState, payForCarriage, spendWalkingStamina, unlockNextCityAfterEscort } from "@/src/game/travel-system";
-import { DEFAULT_BAG, ITEM_CATALOG, PLAYER_BAG_KEY, normalizePlayerBagData, type PlayerBagData } from "@/src/game/item-system";
+import { getCoachmanTravelStatus, getEffectiveWalkingCost, loadTravelState, payForCarriage, spendWalkingStamina, unlockNextCityAfterEscort } from "@/src/game/travel-system";
+import { DEFAULT_BAG, ITEM_CATALOG, PLAYER_BAG_KEY, normalizePlayerBagData, planAddToBag, type PlayerBagData } from "@/src/game/item-system";
 import { loadGuestState } from "@/src/game/guest-system";
 import { areRegularGuestsUnlockedForDay, loadPostGuestTutorialState } from "@/src/game/post-guest-tutorial";
 import { MERCHANT_STOCK, prepareMerchantShop, purchaseMerchantItem, type MerchantShopState, type MerchantStockId } from "@/src/game/merchant-shop";
@@ -26,17 +26,21 @@ import { QUESTS, getQuestDefinition, isQuestReadyToTurnIn, loadCityState, turnIn
 import { loadWorkshopState } from "@/src/game/workshop-system";
 import { UI_NOTIFICATION_DURATION_MS } from "@/src/ui/timings";
 import { FOREST_ASSET_COUNT, preloadForestAssets } from "@/src/game/forest-assets";
+import { addCurrencyCopper } from "@/src/game/currency-system";
+import { createExploreAreaItem, EXPLORE_AREA_BASE_STAMINA_COST, formatExploreAreaFind, rollExploreAreaFind } from "@/src/game/outside-exploration";
+import { DEFAULT_PLAYER_STATS, PLAYER_STATS_KEY, getEffectiveLuck, normalizePlayerStats } from "@/src/game/player-stats";
+import { belongsInGardenStorage, storeItemDirectlyInGardenStorage } from "@/src/game/tavern-return-storage";
 
 const BACKGROUND = require("../assets/images/outsidetavern1.png");
 const COACHMAN = require("../assets/images/coachman.png");
 const MERCHANT = require("../assets/images/merchant.png");
-const BUCKET = require("../assets/images/bucket.png");
+const BUCKET = require("../assets/images/water_jar.png");
 const BACKPACK = require("../assets/images/bag2.png");
 const SMALL_CRATE = require("../assets/images/crate1.png");
 const RECEPTIONIST = require("../assets/images/receptionist.png");
 const DIALOGUE_RECEPTIONIST = require("../assets/images/dialog/dialogue_receptionist.png");
 const STOCK_IMAGES: Partial<Record<MerchantStockId, ReturnType<typeof require>>> = {
-  bucket: BUCKET,
+  water_jar: BUCKET,
   egg: require("../assets/images/egg.png"),
   white_meat: require("../assets/images/meat_white.png"),
   fish: require("../assets/images/meat_fish.png"),
@@ -94,6 +98,7 @@ export default function OutsideTavernScreen() {
     return () => clearTimeout(timer);
   }, [message, setTimeout, clearTimeout]);
   const [floatingMessage, setFloatingMessage] = useState<string | null>(null);
+  const [floatingMessageHighlight, setFloatingMessageHighlight] = useState<string | null>(null);
   React.useEffect(() => {
     if (storageNoticeShown.current || !(Number(storedQuantity) > 0)) return;
     storageNoticeShown.current = true;
@@ -118,6 +123,15 @@ export default function OutsideTavernScreen() {
   const [forestLoadProgress, setForestLoadProgress] = useState<{ loaded: number; total: number } | null>(null);
   const [coachmanReoffer, setCoachmanReoffer] = useState<"question" | "accepted" | "declined" | null>(null);
   const [workshopComplete, setWorkshopComplete] = useState(false);
+  const [exploreAreaBusy, setExploreAreaBusy] = useState(false);
+  const [activityCosts, setActivityCosts] = useState({ explore: 10, city: 30, forest: 50 });
+
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    void Promise.all([getEffectiveWalkingCost(EXPLORE_AREA_BASE_STAMINA_COST), getEffectiveWalkingCost(30), getEffectiveWalkingCost(50)])
+      .then(([explore, city, forest]) => { if (active) setActivityCosts({ explore, city, forest }); });
+    return () => { active = false; };
+  }, []));
 
   useFocusEffect(useCallback(() => {
     let active = true;
@@ -165,10 +179,14 @@ export default function OutsideTavernScreen() {
     return () => { active = false; if (thoughtTimer.current) clearTimeout(thoughtTimer.current); if (floatingMessageTimer.current) clearTimeout(floatingMessageTimer.current); };
   }, [clearTimeout]));
 
-  function showFloatingMessage(text: string) {
+  function showFloatingMessage(text: string, highlightedFind: string | null = null) {
     setFloatingMessage(text);
+    setFloatingMessageHighlight(highlightedFind);
     if (floatingMessageTimer.current) clearTimeout(floatingMessageTimer.current);
-    floatingMessageTimer.current = setTimeout(() => setFloatingMessage(null), UI_NOTIFICATION_DURATION_MS);
+    floatingMessageTimer.current = setTimeout(() => {
+      setFloatingMessage(null);
+      setFloatingMessageHighlight(null);
+    }, UI_NOTIFICATION_DURATION_MS);
   }
 
   async function chooseCoachmanView() {
@@ -258,8 +276,9 @@ export default function OutsideTavernScreen() {
         return;
       }
     }
-    const paid = mode === "coachman" ? await payForCarriage(15) : (await spendWalkingStamina(30)).ok;
-    if (!paid) { setMessage(mode === "coachman" ? "I need 15 Copper for the trip." : "I need 30 Stamina to walk to the city."); return; }
+    const walkingCost = mode === "walk" ? await getEffectiveWalkingCost(30) : 30;
+    const paid = mode === "coachman" ? await payForCarriage(15) : (await spendWalkingStamina(walkingCost)).ok;
+    if (!paid) { setMessage(mode === "coachman" ? "I need 15 Copper for the trip." : `I need ${walkingCost} Stamina to walk to the city.`); return; }
     audioManager.playSoundEffect("footstep", { maxDurationMs: 2200 });
     if (requiresRoadBattle) router.push({ pathname: "/coachman-escort", params: { mode: "walk" } });
     else router.push({ pathname: "/next-city", params: { returnTo: "outside" } });
@@ -300,14 +319,15 @@ export default function OutsideTavernScreen() {
       setMessage("The Forest files could not be loaded. Please try again.");
       return;
     }
-    const paid = mode === "coachman" ? await payForCarriage(25) : (await spendWalkingStamina(50)).ok;
+    const walkingCost = mode === "walk" ? await getEffectiveWalkingCost(50) : 50;
+    const paid = mode === "coachman" ? await payForCarriage(25) : (await spendWalkingStamina(walkingCost)).ok;
     if (!paid) {
       setForestTravelConfirmationMode(null);
       setForestTravelBusy(false);
       setForestLoadProgress(null);
       setMessage(mode === "coachman"
         ? "I need 25 Copper for the trip."
-        : "I need 50 Stamina to walk to the Forest Entrance.");
+        : `I need ${walkingCost} Stamina to walk to the Forest Entrance.`);
       return;
     }
     setForestTravelConfirmationMode(null);
@@ -317,6 +337,65 @@ export default function OutsideTavernScreen() {
   function requestForestEntranceTravel(mode: "coachman" | "walk") {
     if (!forestEntranceUnlocked) { showTravelLocked(); return; }
     setForestTravelConfirmationMode(mode);
+  }
+  async function exploreArea() {
+    if (exploreAreaBusy) return;
+    setExploreAreaBusy(true);
+    setMessage(null);
+    try {
+      const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
+      const stats = rawStats ? normalizePlayerStats(JSON.parse(rawStats)) : DEFAULT_PLAYER_STATS;
+      const find = rollExploreAreaFind(getEffectiveLuck(stats));
+      const item = createExploreAreaItem(find);
+      const sendToGardenStorage = item ? belongsInGardenStorage(item) : false;
+      let currentBag: PlayerBagData | null = null;
+      let updatedBag: PlayerBagData | null = null;
+
+      if (item && !sendToGardenStorage) {
+        const rawBag = await AsyncStorage.getItem(PLAYER_BAG_KEY);
+        currentBag = normalizePlayerBagData(rawBag ? JSON.parse(rawBag) : {});
+        if (!currentBag.unlocked) {
+          showFloatingMessage("I need my bag before I can carry anything I find.");
+          return;
+        }
+        const plan = planAddToBag(item, currentBag);
+        if (plan.remainderQty > 0) {
+          showFloatingMessage(`You discover ${item.name}, but there is not enough room in your bag.`);
+          return;
+        }
+        updatedBag = { ...currentBag, slots: plan.updatedSlots };
+      }
+
+      const staminaCost = await getEffectiveWalkingCost(EXPLORE_AREA_BASE_STAMINA_COST);
+      const staminaResult = await spendWalkingStamina(staminaCost);
+      if (!staminaResult.ok) {
+        showFloatingMessage(`I need ${staminaCost} Stamina to explore the area.`);
+        return;
+      }
+
+      if (find.kind === "copper") {
+        await addCurrencyCopper(find.quantity);
+      } else if (item && sendToGardenStorage) {
+        const stored = await storeItemDirectlyInGardenStorage(item);
+        if (!stored) throw new Error("Unexpected Garden Storage destination");
+      } else if (updatedBag) {
+        await AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(updatedBag));
+        setPlayerBag(updatedBag);
+      }
+
+      audioManager.playSoundEffect("moveitem", { maxDurationMs: 2200 });
+      setHeaderRefreshKey((value) => value + 1);
+      const formattedFind = formatExploreAreaFind(find);
+      const [description, foundText = ""] = formattedFind.split("\nFound: ");
+      showFloatingMessage(
+        sendToGardenStorage ? `${description}\nSent to Garden Storage:` : description,
+        foundText,
+      );
+    } catch {
+      showFloatingMessage("You search the area, but something prevents you from collecting the find.");
+    } finally {
+      setExploreAreaBusy(false);
+    }
   }
   function optionButton(label: string, portrait: typeof COACHMAN | null, action: () => void) {
     return <TouchableOpacity key={label} style={styles.optionButton} onPress={action} activeOpacity={0.82}>
@@ -371,9 +450,16 @@ export default function OutsideTavernScreen() {
       </View>}
       {view === "walk" && <View style={styles.panel}>
         <Text style={styles.panelTitle}>Travel on foot</Text>
+        <TouchableOpacity style={[styles.destinationButton, exploreAreaBusy && styles.disabled]} disabled={exploreAreaBusy} onPress={() => { void exploreArea(); }} activeOpacity={0.8}>
+          <View style={styles.exploreAreaLabel}>
+            <Text style={styles.destinationName}>Explore the Area</Text>
+            <Text style={styles.destinationHint}>Find a random item nearby</Text>
+          </View>
+          <View style={styles.costRow}><Text style={styles.costText}>{activityCosts.explore} Stamina</Text><Ionicons name="search" size={20} color="#D6A33B" /></View>
+        </TouchableOpacity>
         {WALK_DESTINATIONS.map((name) => {
           const forestLocked = name === "Forest Entrance" && !forestEntranceUnlocked;
-          return <TouchableOpacity key={name} style={[styles.destinationButton, forestLocked && styles.disabled]} onPress={name === "Next City" ? () => { void travelToCity("walk"); } : () => requestForestEntranceTravel("walk")}><Text style={styles.destinationName}>{name}</Text><View style={styles.costRow}><Text style={styles.costText}>{name === "Next City" ? "30 Stamina" : "50 Stamina"}</Text><Ionicons name="footsteps" size={20} color="#D6A33B" /></View></TouchableOpacity>;
+          return <TouchableOpacity key={name} style={[styles.destinationButton, forestLocked && styles.disabled]} onPress={name === "Next City" ? () => { void travelToCity("walk"); } : () => requestForestEntranceTravel("walk")}><Text style={styles.destinationName}>{name}</Text><View style={styles.costRow}><Text style={styles.costText}>{name === "Next City" ? activityCosts.city : activityCosts.forest} Stamina</Text><Ionicons name="footsteps" size={20} color="#D6A33B" /></View></TouchableOpacity>;
         })}
         <TouchableOpacity style={styles.backButton} onPress={() => chooseView("menu")}><Text style={styles.backText}>Go Back</Text></TouchableOpacity>
       </View>}
@@ -409,7 +495,7 @@ export default function OutsideTavernScreen() {
       </View>
     </Modal>
     {thought && <PortraitBubble anchorX={70} screenWidth={screenWidth} text={thought} top={portraitBubbleTop(portraitBottom || headerHeight + 108)} variant="thought" />}
-    {(floatingMessage || message) && <View pointerEvents="none" style={styles.floatingMessageWrap}><Text style={styles.floatingMessage}>{floatingMessage || message}</Text></View>}
+    {(floatingMessage || message) && <View pointerEvents="none" style={styles.floatingMessageWrap}><Text style={styles.floatingMessage}>{floatingMessage || message}{floatingMessageHighlight ? <><Text>{"\n"}</Text><Text style={styles.floatingMessageHighlight}>{floatingMessageHighlight}</Text></> : null}</Text></View>}
     {crateDeliveryVisible && (
       <View pointerEvents="none" style={StyleSheet.absoluteFill}>
         <Animated.Image
@@ -436,6 +522,7 @@ const styles = StyleSheet.create({
   panel: { borderRadius: 18, borderCurve: "continuous", borderWidth: 1.5, borderColor: "rgba(196,148,58,0.58)", backgroundColor: "rgba(18,9,2,0.94)", padding: 14, gap: 10 }, panelTitle: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 17, lineHeight: 24 }, panelSubtitle: { color: "#C4943A", fontFamily: "Oldenburg", fontSize: 13 },
   optionButton: { minHeight: 72, flexDirection: "row", alignItems: "center", gap: 12, padding: 10, borderRadius: 13, borderWidth: 1, borderColor: "rgba(196,148,58,0.34)", backgroundColor: "rgba(48,27,7,0.78)" }, optionPortrait: { width: 52, height: 52, borderRadius: 10, borderWidth: 1.5, borderColor: "#C4943A" }, optionIcon: { width: 52, height: 52, alignItems: "center", justifyContent: "center" }, optionText: { flex: 1, color: "#F0E8D5", fontFamily: "Oldenburg", fontSize: 15 },
   personRow: { flexDirection: "row", alignItems: "center", gap: 13 }, personPortrait: { width: 76, height: 88, borderRadius: 11, borderWidth: 2, borderColor: "#C4943A" }, personText: { flex: 1, gap: 4 }, destinationButton: { minHeight: 58, borderRadius: 12, borderWidth: 1, borderColor: "rgba(196,148,58,0.30)", backgroundColor: "rgba(48,27,7,0.74)", paddingHorizontal: 14, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }, destinationName: { color: "#F0E8D5", fontFamily: "Oldenburg", fontSize: 14 }, costRow: { flexDirection: "row", alignItems: "center", gap: 5 }, costText: { color: "#E7C77A", fontFamily: "Oldenburg", fontSize: 14, fontVariant: ["tabular-nums"] }, coin: { width: 18, height: 18 },
+  exploreAreaLabel: { flex: 1, gap: 3, paddingVertical: 9 }, destinationHint: { color: "rgba(240,232,213,0.58)", fontSize: 10 },
   receptionistPortrait: { width: 115, height: 156, borderRadius: 12 }, receptionistText: { color: "rgba(240,232,213,0.72)", fontSize: 12, lineHeight: 18 }, receptionistQuest: { flexDirection: "row", alignItems: "center", gap: 9, padding: 10, borderRadius: 12, backgroundColor: "rgba(48,27,7,0.74)", borderWidth: 1, borderColor: "rgba(196,148,58,0.3)" },
   stockRow: { flexDirection: "row", alignItems: "center", gap: 9, padding: 9, borderRadius: 12, borderWidth: 1, borderColor: "rgba(196,148,58,0.28)", backgroundColor: "rgba(48,27,7,0.72)" }, stockIcon: { width: 48, height: 48, alignItems: "center", justifyContent: "center" }, stockImage: { width: 46, height: 46 }, stockText: { flex: 1, gap: 2 }, stockName: { color: "#F0E8D5", fontFamily: "Oldenburg", fontSize: 12 }, stockDetails: { color: "rgba(240,232,213,0.65)", fontSize: 10, lineHeight: 14 }, stockRemaining: { color: "#C4943A", fontSize: 10, fontVariant: ["tabular-nums"] }, buyButton: { minWidth: 58, minHeight: 44, paddingHorizontal: 8, borderRadius: 10, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, borderWidth: 1.5, borderColor: "#C4943A", backgroundColor: "rgba(112,73,18,0.86)" }, buyPrice: { color: "#FFF", fontFamily: "Oldenburg", fontSize: 12 }, disabled: { opacity: 0.35 },
   turnInReady: { backgroundColor: "#237A3B", borderColor: "#70D98A" },
@@ -444,6 +531,7 @@ const styles = StyleSheet.create({
   departureFade: { zIndex: 2000, backgroundColor: "#000" },
   floatingMessageWrap: { ...StyleSheet.absoluteFill, zIndex: 1800, alignItems: "center", justifyContent: "center", paddingHorizontal: 28 },
   floatingMessage: { color: "#FFF4DC", fontFamily: "Oldenburg", fontSize: 14, textAlign: "center", backgroundColor: "rgba(18,9,2,0.94)", borderWidth: 1, borderColor: "#C4943A", borderRadius: 12, paddingHorizontal: 18, paddingVertical: 12 },
+  floatingMessageHighlight: { color: "#FF4B4B", fontFamily: "Oldenburg", fontWeight: "900" },
   warningBackdrop: { flex: 1, alignItems: "center", justifyContent: "center", padding: 22, backgroundColor: "rgba(0,0,0,0.78)" },
   warningPanel: { width: "100%", maxWidth: 420, gap: 14, padding: 20, borderRadius: 17, borderCurve: "continuous", borderWidth: 1.5, borderColor: "rgba(196,148,58,0.72)", backgroundColor: "#170C03" },
   warningTitle: { color: "#F5E6C8", fontFamily: "Oldenburg", fontSize: 19, textAlign: "center" },

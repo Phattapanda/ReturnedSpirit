@@ -1,3 +1,4 @@
+import { expandWaterStorageFromBag } from "@/src/game/water-storage";
 import React, { useState, useRef, useEffect } from "react";
 import {
   View,
@@ -135,6 +136,7 @@ const ITEM_IMAGES: Record<string, ImageSourcePropType> = {
   tool_kitchen_knife: require("../../assets/images/cooking_knife.png"),
   fine_cooking_pot: require("../../assets/images/fine_cooking_pot.png"),
   snowberry: require("../../assets/images/snowberry.png"),
+  water_jar: require("../../assets/images/water_jar.png"),
   bucket:      require("../../assets/images/bucket.png"),
   bucketwater: require("../../assets/images/bucketwater.png"),
   empty_bottle: require("../../assets/images/empty_bottle.png"),
@@ -350,6 +352,17 @@ export default function PlayerBag({
     return nextBag;
   }
 
+  const [waterJarSlot, setWaterJarSlot] = useState<number | null>(null);
+  const waterJarBusy = useRef(false);
+  async function confirmWaterJar() {
+    if (waterJarSlot === null || waterJarBusy.current) return;
+    waterJarBusy.current = true;
+    try {
+      const updated = await expandWaterStorageFromBag(waterJarSlot);
+      if (updated) { setCarrotBagOverride(updated); onBagUpdated?.(updated); }
+      setWaterJarSlot(null);
+    } finally { waterJarBusy.current = false; }
+  }
   async function handleSlotPress(slotIdx: number, item: BagItem | null) {
     if (!item) return;
     if (longPressDidFire.current) {
@@ -360,6 +373,8 @@ export default function PlayerBag({
       setInfoItem(null);
       return;
     }
+
+    if (item.id === "water_jar") { setWaterJarSlot(slotIdx); return; }
 
     // Slot locations always get first refusal. Kitchen and Room Storage accept
     // Quest Items as ordinary stored items; their discard protection remains
@@ -751,6 +766,28 @@ export default function PlayerBag({
         </Modal>
       )}
       {readDiscovery && <RecipeDiscoveryAnimation name={readDiscovery.name} image={ITEM_IMAGES[readDiscovery.outputId]} />}
+      <Modal visible={waterJarSlot !== null} transparent animationType="fade" onRequestClose={() => setWaterJarSlot(null)}>
+        <View style={styles.overlay}>
+          <View accessibilityViewIsModal style={[styles.infoPanel, { width: "100%" }]}>
+            <View style={styles.infoImageWrap}>
+              <Image source={ITEM_IMAGES.water_jar} style={styles.infoImg} resizeMode="contain" resizeMethod="resize" />
+            </View>
+            <Text selectable style={styles.infoName}>{ITEM_CATALOG.water_jar.name}</Text>
+            <Text selectable style={styles.infoDesc}>{ITEM_CATALOG.water_jar.description}</Text>
+            <View style={styles.attribBox}>
+              <Text style={styles.attribLabel}>Attributes</Text>
+              <View style={styles.attribRow}>
+                <View style={styles.attribTag}><Text style={styles.attribTagText}>Consumable</Text></View>
+              </View>
+            </View>
+            <Text selectable style={styles.infoDesc}>Expand water storage?</Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 12 }}>
+              <TouchableOpacity accessibilityRole="button" onPress={() => setWaterJarSlot(null)} style={styles.infoDismiss}><Text style={styles.infoDismissText}>No</Text></TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" onPress={() => { void confirmWaterJar(); }} style={styles.infoDismiss}><Text style={styles.infoDismissText}>Yes (+5 liter)</Text></TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 }

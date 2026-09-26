@@ -11,7 +11,7 @@ export type ActivityConfig = {
 };
 
 export const ACTIVITIES: ActivityConfig[] = [
-  { id: "well",         label: "Well",          iconName: "water-outline",   baseStaminaCost: 3,  tutorialLocked: false },
+  { id: "well",         label: "Well",          iconName: "water-outline",   baseStaminaCost: 5,  tutorialLocked: false },
   { id: "collectWood",  label: "Collect\nWood", iconName: "leaf-outline",    baseStaminaCost: 5,  tutorialLocked: true  },
   { id: "collectStone", label: "Collect\nStone",iconName: "cube-outline",    baseStaminaCost: 5,  tutorialLocked: true  },
   { id: "workout",      label: "Workout",       iconName: "barbell-outline", baseStaminaCost: 15, tutorialLocked: true  },

@@ -1,3 +1,4 @@
+import { WATER_STORAGE_KEY, DEFAULT_WATER_STORAGE } from "@/src/game/water-storage";
 /**
  * save-manager.ts
  *
@@ -54,6 +55,8 @@ import { RUPERT_ALCHEMY_INTRO_PENDING_KEY, RUPERT_ALCHEMY_INTRO_SEEN_KEY } from 
 import { DEFAULT_MINSTREL_STATE, MINSTREL_STATE_KEY } from "@/src/game/minstrel-system";
 import { CITY_STATE_KEY, SUPPORTER_BAG_KEY } from "@/src/game/city-system";
 import { advanceWorkshopConstruction, DEFAULT_WORKSHOP_STATE, WORKSHOP_CRAFT_INGREDIENTS_KEY, WORKSHOP_CRAFT_RESULT_KEY, WORKSHOP_CRAFT_TOOL_KEY, WORKSHOP_STATE_KEY, WORKSHOP_STORAGE_KEY } from "@/src/game/workshop-system";
+import { advanceGuestRoomState, DEFAULT_GUEST_ROOM_STATE, GUEST_ROOM_STATE_KEY } from "@/src/game/guest-room-system";
+import { SHARED_RESOURCES_KEY, SHARED_RESOURCE_DEFAULTS } from "@/src/game/shared-resources";
 import {
   DEFAULT_TITHE_STATE,
   ELAPSED_DAYS_KEY,
@@ -95,7 +98,10 @@ export const ALL_SNAPSHOT_KEYS: string[] = [
   MINSTREL_STATE_KEY,
   CITY_STATE_KEY,
   SUPPORTER_BAG_KEY,
+  SHARED_RESOURCES_KEY,
   WORKSHOP_STATE_KEY,
+  GUEST_ROOM_STATE_KEY,
+  WATER_STORAGE_KEY,
   WORKSHOP_STORAGE_KEY,
   WORKSHOP_CRAFT_INGREDIENTS_KEY,
   WORKSHOP_CRAFT_TOOL_KEY,
@@ -192,6 +198,9 @@ export async function createSnapshot(
         [MAILBOX_STATE_KEY, JSON.stringify(DEFAULT_MAILBOX_STATE)],
         [MINSTREL_STATE_KEY, JSON.stringify(DEFAULT_MINSTREL_STATE)],
         [WORKSHOP_STATE_KEY, JSON.stringify(DEFAULT_WORKSHOP_STATE)],
+        [GUEST_ROOM_STATE_KEY, JSON.stringify(DEFAULT_GUEST_ROOM_STATE)],
+        [WATER_STORAGE_KEY, JSON.stringify(DEFAULT_WATER_STORAGE)],
+        [SHARED_RESOURCES_KEY, JSON.stringify(SHARED_RESOURCE_DEFAULTS)],
         [WORKSHOP_STORAGE_KEY, JSON.stringify(Array(12).fill(null))],
         [WORKSHOP_CRAFT_INGREDIENTS_KEY, JSON.stringify(Array(3).fill(null))],
         [WORKSHOP_CRAFT_TOOL_KEY, JSON.stringify(null)],
@@ -208,6 +217,7 @@ export async function createSnapshot(
       const guestState = await advanceGuestCalendar(newDay);
       await deliverDailyBonusLetters(guestState.calendarDaySerial);
       await advanceWorkshopConstruction(guestState.calendarDaySerial);
+      await advanceGuestRoomState(guestState.calendarDaySerial);
       await advanceSecondGardenPlotDay();
       const rawStats = await AsyncStorage.getItem(PLAYER_STATS_KEY);
       const stats = normalizePlayerStats(rawStats ? JSON.parse(rawStats) : null);

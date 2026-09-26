@@ -18,12 +18,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { audioEngine, getRandomMainMenuTheme } from "@/src/audio/audioEngine";
 import StartingPackageStoreBridge from "@/src/components/starting-package-store-bridge";
-import { ownsStartingPackage } from "@/src/game/starting-package-purchase";
+import PurchaseIconShine from "@/src/components/purchase-icon-shine";
+import { ownsStartingPackage, ownsHarvestPackage, HARVEST_PACKAGE_PRODUCT_ID } from "@/src/game/starting-package-purchase";
 
 const BG = require("../assets/images/mainpage.png");
 const LETTER_UNREAD = require("../assets/images/letter.png");
 const LETTER_READ = require("../assets/images/letter_open.png");
 const STARTING_PACKAGE = require("../assets/images/startingpackage7days.png");
+const HARVEST_PACKAGE = require("../assets/images/harvest_sung.png");
 const STARTUP_MAIN_MENU_THEME = getRandomMainMenuTheme();
 const EARLY_ACCESS_READ_KEY = "@main-menu:early-access-read";
 const EARLY_ACCESS_HIDDEN_KEY = "@main-menu:early-access-do-not-show";
@@ -68,6 +70,28 @@ export default function MainMenu() {
   const handlePurchaseError = useCallback((message: string) => {
     setPurchasePending(false);
     setPurchaseError(message);
+  }, []);
+
+  const [showHarvestPackage, setShowHarvestPackage] = useState(false);
+  const [harvestPackageOwned, setHarvestPackageOwned] = useState(false);
+  const [harvestStoreConnected, setHarvestStoreConnected] = useState(false);
+  const [harvestStorePrice, setHarvestStorePrice] = useState<string>();
+  const [harvestPurchaseRequest, setHarvestPurchaseRequest] = useState(0);
+  const [harvestPurchasePending, setHarvestPurchasePending] = useState(false);
+  const [harvestPurchaseError, setHarvestPurchaseError] = useState("");
+
+  const handleHarvestStoreStatus = useCallback((status: { connected: boolean; displayPrice?: string }) => {
+    setHarvestStoreConnected(status.connected);
+    setHarvestStorePrice(status.displayPrice);
+  }, []);
+  const handleHarvestPackageOwned = useCallback(() => {
+    setHarvestPackageOwned(true);
+    setHarvestPurchasePending(false);
+    setHarvestPurchaseError("");
+  }, []);
+  const handleHarvestPurchaseError = useCallback((message: string) => {
+    setHarvestPurchasePending(false);
+    setHarvestPurchaseError(message);
   }, []);
 
   function markEarlyAccessRead() {
@@ -128,6 +152,7 @@ export default function MainMenu() {
 
   useEffect(() => {
     void ownsStartingPackage().then(setStartingPackageOwned).catch(() => {});
+    void ownsHarvestPackage().then(setHarvestPackageOwned).catch(() => {});
   }, []);
 
   // Audio: play the startup's randomly selected main menu theme immediately (no crossfade)
@@ -165,6 +190,14 @@ export default function MainMenu() {
           onError={handlePurchaseError}
         />
       ) : null}
+      {NATIVE_IAP_AVAILABLE ? (
+        <StartingPackageStoreBridge productId={HARVEST_PACKAGE_PRODUCT_ID}
+          purchaseRequest={harvestPurchaseRequest}
+          onStatus={handleHarvestStoreStatus}
+          onOwned={handleHarvestPackageOwned}
+          onError={handleHarvestPurchaseError}
+        />
+      ) : null}
       <View style={[styles.buttons, { paddingBottom: insets.bottom + 12 }]}>
         <View style={styles.topActions}>
           <View style={styles.mailButtons}>
@@ -197,6 +230,7 @@ export default function MainMenu() {
             />
           </TouchableOpacity>
           </View>
+          <View style={styles.mailButtons}>
           <TouchableOpacity
             testID="starting-package-button"
             accessibilityRole="button"
@@ -206,7 +240,20 @@ export default function MainMenu() {
             activeOpacity={0.78}
           >
             <Image source={STARTING_PACKAGE} style={styles.startingPackageIcon} contentFit="contain" />
+            <PurchaseIconShine />
           </TouchableOpacity>
+          <TouchableOpacity
+            testID="harvest-package-button"
+            accessibilityRole="button"
+            accessibilityLabel="Open Harvest Sun Package offer"
+            style={styles.startingPackageButton}
+            onPress={() => { setHarvestPurchaseError(""); setShowHarvestPackage(true); }}
+            activeOpacity={0.78}
+          >
+            <Image source={HARVEST_PACKAGE} style={styles.startingPackageIcon} contentFit="contain" />
+            <PurchaseIconShine delay={3700} />
+          </TouchableOpacity>
+          </View>
         </View>
         {MENU_ITEMS.map((item) => (
           <TouchableOpacity
@@ -318,6 +365,33 @@ export default function MainMenu() {
           </View>
         </View>
       </Modal>
+      <Modal visible={showHarvestPackage} transparent animationType="fade" onRequestClose={() => setShowHarvestPackage(false)}>
+        <View style={[styles.noticeOverlay, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowHarvestPackage(false)} />
+          <View accessibilityViewIsModal style={styles.noticePanel}>
+            <View style={styles.noticeHeader}>
+              <Text selectable accessibilityRole="header" style={styles.noticeTitle}>Harvest Sun Package</Text>
+              <Pressable accessibilityRole="button" accessibilityLabel="Close offer" onPress={() => setShowHarvestPackage(false)} style={styles.noticeClose}>
+                <Text style={styles.noticeCloseText}>×</Text>
+              </Pressable>
+            </View>
+            <Image source={HARVEST_PACKAGE} style={styles.offerImage} contentFit="contain" />
+            <Text selectable style={styles.noticeText}>Receive 3 of every seed and 20 of every fertilizer. Claim your supplies in the Mailbox; they go directly to Garden Storage.</Text>
+            <Text selectable style={styles.noticeText}>One-time purchase: €1.99 (local store price applies). Claim once per save slot and per run.</Text>
+            {harvestPurchaseError ? <Text selectable style={styles.purchaseError}>{harvestPurchaseError}</Text> : null}
+            <TouchableOpacity
+              testID="buy-harvest-package"
+              disabled={harvestPackageOwned || harvestPurchasePending || !NATIVE_IAP_AVAILABLE || !harvestStoreConnected || !harvestStorePrice}
+              style={[styles.purchaseButton, (harvestPackageOwned || harvestPurchasePending || !NATIVE_IAP_AVAILABLE || !harvestStoreConnected || !harvestStorePrice) && styles.purchaseButtonDisabled]}
+              onPress={() => { setHarvestPurchasePending(true); setHarvestPurchaseError(""); setHarvestPurchaseRequest((value) => value + 1); }}
+            >
+              <Text style={styles.purchaseButtonText}>
+                {harvestPackageOwned ? "Purchased" : harvestPurchasePending ? "Processing…" : harvestStorePrice ? `Buy for ${harvestStorePrice}` : NATIVE_IAP_AVAILABLE ? "Store product unavailable" : "Available in a store build"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -356,8 +430,8 @@ const styles = StyleSheet.create({
   mailButtons: { alignItems: "flex-start", gap: 8 },
   mailIcon: { width: 48, height: 48 },
   topActions: { width: "100%", flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  startingPackageButton: { width: 64, height: 64, alignItems: "center", justifyContent: "center" },
-  startingPackageIcon: { width: 64, height: 64 },
+  startingPackageButton: { width: 64, height: 64, borderRadius: 32, borderWidth: 2, borderColor: "#E9D8B5", overflow: "hidden", backgroundColor: "#FFFFFF", alignItems: "center", justifyContent: "center" },
+  startingPackageIcon: { width: 56, height: 56 },
   offerImage: { width: 112, height: 112, alignSelf: "center" },
   purchaseError: { color: "#FFB5A8", fontSize: 14, lineHeight: 20 },
   purchaseButton: { minHeight: 50, borderRadius: 12, backgroundColor: "#A66B20", alignItems: "center", justifyContent: "center", paddingHorizontal: 18 },

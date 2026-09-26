@@ -18,6 +18,7 @@ export type CookingRecipe = {
   sellPriceCopper: number; staminaRecovery: number; lifeRecovery: number; tags: readonly MealTag[];
   buff?: { effectId: string; name: string; intensity: number; durationDays: number };
   /** Runtime recipes such as seasoning must work at the table without entering the recipe book. */
+  waterRequired?: number;
   hiddenFromRecipeBook?: boolean;
   seasonedStage?: 1 | 2 | 3;
   enhancedOriginal?: BagItem;
@@ -162,37 +163,37 @@ export const COOKING_RECIPES: readonly CookingRecipe[] = [
   },
   {
     id: "soup_herb", name: "Herb Soup", stage: 1, rarity: "common", unlock: "Start",
-    ingredients: [{ id: "herbs", quantity: 2 }, { id: "bucketwater", quantity: 1 }],
+    ingredients: [{ id: "herbs", quantity: 2 }],
     // The existing tutorial splits the cooked batch into one guest serving and one player serving.
-    toolId: "oldpot", outputId: "soup_herb", outputQuantity: 2, byproducts: [{ id: "bucket", quantity: 1 }],
+    toolId: "oldpot", outputId: "soup_herb", outputQuantity: 2, waterRequired: 1,
     sellPriceCopper: 9, staminaRecovery: 15, lifeRecovery: 0,
     tags: ["warm", "vegetarian", "soup", "healthy", "herbs"],
   },
   {
     id: "soup_carrot", name: "Carrot Soup", stage: 1, rarity: "common", unlock: "Early",
-    ingredients: [{ id: "carrot", quantity: 2 }, { id: "bucketwater", quantity: 1 }],
-    toolId: "oldpot", outputId: "soup_carrot", outputQuantity: 2, byproducts: [{ id: "bucket", quantity: 1 }],
+    ingredients: [{ id: "carrot", quantity: 2 }],
+    toolId: "oldpot", outputId: "soup_carrot", outputQuantity: 2, waterRequired: 1,
     sellPriceCopper: 13, staminaRecovery: 20, lifeRecovery: 0,
     tags: ["warm", "vegetarian", "soup", "healthy"],
   },
   {
     id: "soup_potato", name: "Potato Soup", stage: 1, rarity: "common", unlock: "Early",
-    ingredients: [{ id: "potato", quantity: 2 }, { id: "bucketwater", quantity: 1 }],
-    toolId: "oldpot", outputId: "soup_potato", outputQuantity: 2, byproducts: [{ id: "bucket", quantity: 1 }],
+    ingredients: [{ id: "potato", quantity: 2 }],
+    toolId: "oldpot", outputId: "soup_potato", outputQuantity: 2, waterRequired: 1,
     sellPriceCopper: 17, staminaRecovery: 30, lifeRecovery: 0,
     tags: ["warm", "vegetarian", "soup", "hearty"],
   },
   {
     id: "soup_onion", name: "Onion Soup", stage: 1, rarity: "common", unlock: "Early",
-    ingredients: [{ id: "onion", quantity: 2 }, { id: "bucketwater", quantity: 1 }],
-    toolId: "oldpot", outputId: "soup_onion", outputQuantity: 2, byproducts: [{ id: "bucket", quantity: 1 }],
+    ingredients: [{ id: "onion", quantity: 2 }],
+    toolId: "oldpot", outputId: "soup_onion", outputQuantity: 2, waterRequired: 1,
     sellPriceCopper: 21, staminaRecovery: 20, lifeRecovery: 10,
     tags: ["warm", "vegetarian", "soup", "healthy"],
   },
   {
     id: "soup_carrot_potato", name: "Carrot-Potato Soup", stage: 1, rarity: "common", unlock: "Early",
-    ingredients: [{ id: "carrot", quantity: 1 }, { id: "potato", quantity: 1 }, { id: "bucketwater", quantity: 1 }],
-    toolId: "oldpot", outputId: "soup_carrot_potato", outputQuantity: 2, byproducts: [{ id: "bucket", quantity: 1 }],
+    ingredients: [{ id: "carrot", quantity: 1 }, { id: "potato", quantity: 1 }],
+    toolId: "oldpot", outputId: "soup_carrot_potato", outputQuantity: 2, waterRequired: 1,
     sellPriceCopper: 15, staminaRecovery: 25, lifeRecovery: 10,
     tags: ["warm", "vegetarian", "soup", "healthy", "hearty"],
   },

@@ -5,22 +5,26 @@ import {
   ensureStartingPackageForCurrentRun,
   grantStartingPackageEntitlement,
   STARTING_PACKAGE_PRODUCT_ID,
+  HARVEST_PACKAGE_PRODUCT_ID,
+  grantHarvestPackageEntitlement,
 } from "@/src/game/starting-package-purchase";
 
 type Props = {
+  productId?: string;
   purchaseRequest: number;
   onStatus: (status: { connected: boolean; displayPrice?: string }) => void;
   onOwned: () => void;
   onError: (message: string) => void;
 };
 
-export default function StartingPackageStoreBridge({ purchaseRequest, onStatus, onOwned, onError }: Props) {
+export default function StartingPackageStoreBridge({ productId = STARTING_PACKAGE_PRODUCT_ID, purchaseRequest, onStatus, onOwned, onError }: Props) {
+  const grantEntitlement = productId === HARVEST_PACKAGE_PRODUCT_ID ? grantHarvestPackageEntitlement : grantStartingPackageEntitlement;
   const handledRequest = useRef(0);
   const { connected, products, availablePurchases, fetchProducts, getAvailablePurchases, requestPurchase, finishTransaction } = useIAP({
     onPurchaseSuccess: (purchase) => {
-      if (purchase.productId !== STARTING_PACKAGE_PRODUCT_ID) return;
+      if (purchase.productId !== productId) return;
       void (async () => {
-        await grantStartingPackageEntitlement();
+        await grantEntitlement();
         await ensureStartingPackageForCurrentRun();
         await finishTransaction({ purchase, isConsumable: false });
         onOwned();
@@ -35,23 +39,23 @@ export default function StartingPackageStoreBridge({ purchaseRequest, onStatus, 
   useEffect(() => {
     onStatus({
       connected,
-      displayPrice: products.find((product) => product.id === STARTING_PACKAGE_PRODUCT_ID)?.displayPrice,
+      displayPrice: products.find((product) => product.id === productId)?.displayPrice,
     });
-  }, [connected, onStatus, products]);
+  }, [connected, onStatus, products, productId]);
 
   useEffect(() => {
     if (!connected) return;
-    void fetchProducts({ skus: [STARTING_PACKAGE_PRODUCT_ID], type: "in-app" });
+    void fetchProducts({ skus: [productId], type: "in-app" });
     void getAvailablePurchases();
-  }, [connected, fetchProducts, getAvailablePurchases]);
+  }, [connected, fetchProducts, getAvailablePurchases, productId]);
 
   useEffect(() => {
-    if (!availablePurchases.some((purchase) => purchase.productId === STARTING_PACKAGE_PRODUCT_ID)) return;
-    void grantStartingPackageEntitlement()
+    if (!availablePurchases.some((purchase) => purchase.productId === productId)) return;
+    void grantEntitlement()
       .then(ensureStartingPackageForCurrentRun)
       .then(() => onOwned())
       .catch((error) => onError(error instanceof Error ? error.message : "The purchase could not be restored."));
-  }, [availablePurchases, onError, onOwned]);
+  }, [availablePurchases, onError, onOwned, productId, grantEntitlement]);
 
   useEffect(() => {
     if (!purchaseRequest || purchaseRequest === handledRequest.current) return;
@@ -62,14 +66,14 @@ export default function StartingPackageStoreBridge({ purchaseRequest, onStatus, 
     }
     void requestPurchase({
       request: {
-        apple: { sku: STARTING_PACKAGE_PRODUCT_ID },
-        google: { skus: [STARTING_PACKAGE_PRODUCT_ID] },
+        apple: { sku: productId },
+        google: { skus: [productId] },
       },
       type: "in-app",
     }).catch((error) => {
       onError(isUserCancelledError(error) ? "" : error instanceof Error ? error.message : "The purchase could not be started.");
     });
-  }, [connected, onError, purchaseRequest, requestPurchase]);
+  }, [connected, onError, purchaseRequest, requestPurchase, productId]);
 
   return null;
 }

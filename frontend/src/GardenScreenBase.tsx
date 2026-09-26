@@ -1,3 +1,5 @@
+import { useWaterStorage } from "@/src/hooks/use-water-storage";
+import { loadWaterStorage, refillWaterStorage } from "@/src/game/water-storage";
 import React, { useState, useRef, useEffect } from "react";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
 import { UI_NOTIFICATION_DURATION_MS } from "@/src/ui/timings";
@@ -488,6 +490,18 @@ setExploreUnlocked(exploreAvailable);
     return () => { void setPlaytimePaused(false); };
   }, [showMenu]);
   const [showStorage, setShowStorage] = useState(false);
+  const waterStorage = useWaterStorage();
+  const [waterStorageInspected, setWaterStorageInspected] = useState(false);
+  const storagePulse = useRef(new RNAnimated.Value(1)).current;
+  useEffect(() => {
+    if (gts !== "WAITING_FOR_WELL_ACTION" || waterStorageInspected) return;
+    const animation = RNAnimated.loop(RNAnimated.sequence([
+      RNAnimated.timing(storagePulse, { toValue: 1.15, duration: 600, useNativeDriver: true }),
+      RNAnimated.timing(storagePulse, { toValue: 1, duration: 600, useNativeDriver: true }),
+    ]));
+    animation.start();
+    return () => { animation.stop(); storagePulse.setValue(1); };
+  }, [gts, waterStorageInspected, storagePulse]);
   const [showTearOut, setShowTearOut] = useState(false);
 
   // ── Bubble (Rupert speech bubble)
@@ -1632,45 +1646,11 @@ setExploreUnlocked(exploreAvailable);
     setGardenState("BUCKET_GIFT");
     setRupertPortrait("laugh");
     showBubble(
-      '"Looks good. Now we need water. You can use this to fetch some from the well."',
+      '"We need to refill our water storage. You can check the current water level in Garden Storage."',
       "Rupert",
       "BLOCK_ALL",
       null,
       async () => {
-        // Use ref to get fresh bag state, avoiding stale closure
-        const currentBag = playerBagRef.current;
-        const alreadyHasBucket = currentBag.slots.some(s => s !== null && s.id === "bucket");
-        if (!alreadyHasBucket) {
-          const bucketItem: BagItem = {
-            id: "bucket",
-            itemType: "bucket",
-            name: "Empty Bucket",
-            quantity: 1,
-          };
-          // Ensure bag is unlocked when adding
-          const bagForTransfer: PlayerBagData = { ...currentBag, unlocked: true };
-          const result = planAddToBag(bucketItem, bagForTransfer);
-          if (result.canTransfer) {
-            const newBag: PlayerBagData = { ...bagForTransfer, slots: result.updatedSlots };
-            setPlayerBag(newBag);
-            audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
-            await AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(newBag));
-
-            // Fly animation: bucket from Rupert to bag icon
-            // Defensive: ensure bucket asset is decoded before fly; then animate
-            setTimeout(async () => {
-              await ensureAssetReady('bucket');
-              const [start, end] = await Promise.all([
-                measureCenterInRoot(rupertPortraitRef.current, { cx: W / 2, cy: H * 0.2 }),
-                measureCenterInRoot(bagIconViewRef.current, { cx: W * 0.75, cy: H * 0.18 }),
-              ]);
-              startFlyAnim(
-                IMG.bucket,
-                start.cx, start.cy, end.cx, end.cy,
-              );
-            }, 200);
-          }
-        }
         await AsyncStorage.setItem(GSK.HAS_BUCKET, "true");
         setActivityBarVisible(true);
         await AsyncStorage.setItem(GSK.ACTIVITY_BAR, "true");
@@ -1683,7 +1663,7 @@ setExploreUnlocked(exploreAvailable);
         }, 600);
       },
       "bubble.garden.need_water",
-      ["Now we need water", "from the well"],
+      ["water storage", "Garden Storage"],
     );
   }
 
@@ -1707,56 +1687,31 @@ setExploreUnlocked(exploreAvailable);
 
   async function handleWellAction() {
     if (wellLocked.current || actionLocked.current) return;
-
-    // Check empty bucket in bag
-    const bucketSlotIdx = playerBag.slots.findIndex(s => s !== null && s.id === "bucket");
-    if (bucketSlotIdx === -1) {
-      showPlayerBubble('"I need an empty bucket to get water."');
-      return;
-    }
-
-    const wellCost = calcEffectiveStaminaCost(3, getEffectiveEndurance(playerStats), getActiveStaminaBuffReduction(playerStats));
-    if (staminaCurrent < wellCost) {
-      showPlayerBubble('"Not enough stamina."');
-      return;
-    }
-
     wellLocked.current = true;
-
-    // Convert exactly one bucket from the selected stack. Add the filled bucket
-    // through the normal Bag planner so it merges into an existing water stack.
-    const slotsAfterTakingBucket = playerBag.slots.map((slot, index) => {
-      if (index !== bucketSlotIdx || !slot) return slot ? { ...slot } : null;
-      return slot.quantity > 1 ? { ...slot, quantity: slot.quantity - 1 } : null;
-    });
-    const waterBucket: BagItem = {
-      id: "bucketwater",
-      itemType: "bucketwater",
-      name: "Bucket of Water",
-      quantity: 1,
-    };
-    const bagAfterTakingBucket = { ...playerBag, slots: slotsAfterTakingBucket };
-    const addWaterPlan = planAddToBag(waterBucket, bagAfterTakingBucket);
-    if (!addWaterPlan.canTransfer || addWaterPlan.remainderQty > 0) {
-      showPlayerBubble('"My bag is full."');
+    try {
+    const water = await loadWaterStorage();
+    if (water.amount >= water.capacity) {
+      showPlayerBubble("I don't have enough space to store more water.");
       return;
     }
-    const newBag = { ...bagAfterTakingBucket, slots: addWaterPlan.updatedSlots };
-    setPlayerBag(newBag);
-    deductStamina(wellCost, `-${wellCost}`);
-
+    const wellCost = calcEffectiveStaminaCost(5, getEffectiveEndurance(playerStats), getActiveStaminaBuffReduction(playerStats));
+    if (staminaCurrent < wellCost) { showPlayerBubble('"Not enough stamina."'); return; }
+      const result = await refillWaterStorage();
+      if (!result.ok) return;
+      deductStamina(wellCost, `-${wellCost}`);
     // Flash animation + sound
     triggerActionFlash(IMG.getwater);
     audioManager.playSoundEffect('getwater', { maxDurationMs: 3000 });
     audioManager.playSoundEffect('moveitem', { maxDurationMs: 3000 });
 
     await Promise.all([
-      AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(newBag)),
       AsyncStorage.setItem(GSK.HAS_WATER, "true"),
     ]);
 
-    setGardenState("TUTORIAL_WATER_FETCHED");
-    wellLocked.current = false;
+    if (gtsRef.current === "WAITING_FOR_WELL_ACTION" || gtsRef.current === "ACTIVITY_BAR_UNLOCKED") {
+      setGardenState("TUTORIAL_WATER_FETCHED");
+    }
+    } finally { wellLocked.current = false; }
   }
 
   async function handleCollectWood() {
@@ -1957,7 +1912,7 @@ setExploreUnlocked(exploreAvailable);
     if (inTuesdayFlow) {
       // Check harvest done
       const herbsInBag = playerBag.slots.some(s => s !== null && s.id === "bag_herb");
-      const waterInBag = playerBag.slots.some(s => s !== null && s.id === "bucketwater");
+      const waterInBag = waterStorage.amount > 0;
       const needsHarvest = cur !== "TUTORIAL_HARVEST_COMPLETE" &&
         cur !== "BUCKET_GIFT" && cur !== "ACTIVITY_BAR_UNLOCKED" &&
         cur !== "WAITING_FOR_WELL_ACTION" && cur !== "TUTORIAL_WATER_FETCHED" &&
@@ -2001,7 +1956,7 @@ setExploreUnlocked(exploreAvailable);
     // If leaving Tuesday garden with all required items, persist crafting ready
     if (inTuesdayFlow) {
       const herbsInBag = playerBag.slots.some(s => s !== null && s.id === "bag_herb");
-      const waterInBag = playerBag.slots.some(s => s !== null && s.id === "bucketwater");
+      const waterInBag = waterStorage.amount > 0;
       if (herbsInBag && waterInBag) {
         AsyncStorage.setItem(GSK.CRAFTING_READY, "true").catch(() => {});
         setGardenState("RETURNING_TO_KITCHEN_FOR_CRAFTING");
@@ -2017,6 +1972,7 @@ setExploreUnlocked(exploreAvailable);
   }
 
   function handleStorageTap() {
+    setWaterStorageInspected(true);
     setShowStorage(true);
   }
 
@@ -2345,6 +2301,7 @@ setExploreUnlocked(exploreAvailable);
         </TouchableOpacity>
 
         {/* Garden Storage button */}
+        <RNAnimated.View style={{ flex: 1, transform: [{ scale: storagePulse }] }}>
         <TouchableOpacity
           style={[styles.locBtn, navEnabled ? styles.locBtnActive : styles.locBtnLocked]}
           disabled={!navEnabled}
@@ -2359,6 +2316,7 @@ setExploreUnlocked(exploreAvailable);
           />
         </TouchableOpacity>
 
+        </RNAnimated.View>
         {/* Guest progression unlocks Dining first, then all core travel. */}
         {([
 { id: "dining",    img: IMG.loc_dining    },
@@ -2465,6 +2423,11 @@ return (
               showsVerticalScrollIndicator
               nestedScrollEnabled
             >
+              <Text style={styles.storeCatLabel}>Water Storage</Text>
+              <View style={styles.storeRow}>
+                <Image source={require("../assets/images/water.png")} style={{ width: 32, height: 32 }} resizeMode="contain" />
+                <Text selectable style={[styles.storeItemQty, waterStorage.amount === waterStorage.capacity && { color: "#69D77C" }]}>{waterStorage.amount}/{waterStorage.capacity} liter</Text>
+              </View>
               {/* Seeds */}
               {seeds.length > 0 && (
                 <>
