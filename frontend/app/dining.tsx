@@ -1,4 +1,5 @@
 import { consumeStoredWater, loadWaterStorage } from "@/src/game/water-storage";
+import WaterLocationHeading from "@/src/components/water-location-heading";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
 import {
@@ -338,7 +339,7 @@ export default function DiningScreen() {
   const { width: W, height: H } = useWindowDimensions();
   const audioManager = useAudioManager();
   const { triggerHaptic } = useHaptics();
-  const { crossfadeTo } = audioManager;
+  const { crossfadeTo, playSoundEffect } = audioManager;
 
   const [staminaCurrent, setStaminaCurrent] = useState(40);
   const [lifeCurrent, setLifeCurrent] = useState(15);
@@ -539,9 +540,9 @@ export default function DiningScreen() {
       if (rawBag) setPlayerBag(normalizePlayerBagData(JSON.parse(rawBag)));
     }).catch(() => {});
     if (dialog.text.includes("Take this")) {
-      audioManager.playSoundEffect("moveitem", { maxDurationMs: 3000 });
+      playSoundEffect("moveitem", { maxDurationMs: 3000 });
     }
-  }, [audioManager]);
+  }, [playSoundEffect]);
 
   function runTransfer(
     image: ImageSourcePropType,
@@ -1625,7 +1626,7 @@ export default function DiningScreen() {
             </View>
           </View>
 
-          <QuestBookButton bagTargetRef={bagButtonRef} onBagUpdated={setPlayerBag} />
+          <QuestBookButton gardenTargetRef={gardenNavButtonRef} bagTargetRef={bagButtonRef} onBagUpdated={setPlayerBag} />
           <View style={styles.rightHeaderColumn}>
             <View style={styles.rightHeader}>
               <View style={styles.dayBadge}>
@@ -1640,7 +1641,7 @@ export default function DiningScreen() {
             </View>
           </View>
         </View>
-        <Text style={styles.locationName}>Dining Hall</Text>
+        <WaterLocationHeading name="Dining Hall" />
       </View>
 
       <ScrollView

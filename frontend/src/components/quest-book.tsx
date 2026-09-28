@@ -127,15 +127,15 @@ function rewardDialog(id: TavernQuestId): StoryDialogLine[] {
   ];
 }
 
-type Props = { size?: number; disabled?: boolean; onBagUpdated?: (bag: PlayerBagData) => void; bagTargetRef?: React.RefObject<View | null> };
-export default function QuestBookButton({ size = 38, disabled = false, onBagUpdated, bagTargetRef }: Props) {
+type Props = { size?: number; disabled?: boolean; onBagUpdated?: (bag: PlayerBagData) => void; gardenTargetRef?: React.RefObject<View | null>; bagTargetRef?: React.RefObject<View | null> };
+export default function QuestBookButton({ size = 38, disabled = false, onBagUpdated, bagTargetRef, gardenTargetRef }: Props) {
   const { width, height } = useWindowDimensions();
   const [unlocked, setUnlocked] = useState(false), [visible, setVisible] = useState(false), [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<QuestTab>("open"), [entries, setEntries] = useState<QuestBookEntry[]>([]), [floatingMessage, setFloatingMessage] = useState<string | null>(null);
   const [dialog, setDialog] = useState<{ lines: StoryDialogLine[]; index: number; reward: NonNullable<QuestBookEntry["reward"]> } | null>(null);
   const [flightVisible, setFlightVisible] = useState(false);
   const claimBusy = useRef(false);
-  const gardenStorageTargetRef = useRef<View>(null);
+  const flightLayerRef = useRef<View>(null);
   const [flightReward, setFlightReward] = useState<NonNullable<QuestBookEntry["reward"]>>("potion");
   const rewardX = useRef(new Animated.Value(0)).current, rewardY = useRef(new Animated.Value(0)).current, rewardScale = useRef(new Animated.Value(1)).current, rewardOpacity = useRef(new Animated.Value(0)).current;
   async function refresh() { setEntries(await loadQuestBookEntries()); }
@@ -172,13 +172,19 @@ export default function QuestBookButton({ size = 38, disabled = false, onBagUpda
         Animated.parallel([Animated.timing(rewardX, { toValue: target.x, duration: 720, useNativeDriver: true }), Animated.timing(rewardY, { toValue: target.y, duration: 720, useNativeDriver: true }), Animated.timing(rewardScale, { toValue: .42, duration: 720, useNativeDriver: true })]).start(() => Animated.timing(rewardOpacity, { toValue: 0, duration: 120, useNativeDriver: true }).start(() => setFlightVisible(false)));
       };
       const fallback = reward === "copper" ? { x: width - 62, y: 62 } : reward === "carrot_seed" || reward === "fertilizer" ? { x: width * .26, y: height - 74 } : { x: width - 58, y: 165 };
-      const targetRef = reward === "potion" ? bagTargetRef?.current : reward === "carrot_seed" || reward === "fertilizer" ? gardenStorageTargetRef.current : null;
+      const targetRef = reward === "potion" ? bagTargetRef?.current : reward === "carrot_seed" || reward === "fertilizer" ? gardenTargetRef?.current : null;
       if (!targetRef) {
         begin(fallback);
         return;
       }
       targetRef.measureInWindow((x, y, w, h) => {
-        begin(w > 0 && h > 0 ? { x: x + w / 2, y: y + h / 2 } : fallback);
+        if (w <= 0 || h <= 0) { begin(fallback); return; }
+        // Both windows use the same status-bar inset. Convert window coordinates
+        // to the overlay's local origin before positioning the icon's centre.
+        if (!flightLayerRef.current) { begin(fallback); return; }
+        flightLayerRef.current.measureInWindow((originX, originY) => {
+          begin({ x: x + w / 2 - originX, y: y + h / 2 - originY });
+        });
       });
     });
   }
@@ -191,10 +197,9 @@ export default function QuestBookButton({ size = 38, disabled = false, onBagUpda
       <ScrollView contentContainerStyle={styles.list}>{loading ? <Text style={styles.empty}>Loading quests…</Text> : null}{!loading && visibleEntries.length === 0 ? <Text style={styles.empty}>{tab === "open" ? "You have no open quests." : "No quests completed yet."}</Text> : null}
         {!loading && visibleEntries.map((entry) => <View key={entry.id} style={[styles.questCard, entry.ready && entry.tab === "open" && styles.questReady]}><View style={styles.questHeader}><Text style={styles.source}>{entry.source}</Text><Text style={[styles.status, entry.ready && styles.ready]}>{entry.tab === "complete" ? "Complete" : entry.ready ? "Ready" : "Open"}</Text></View><Text style={styles.questTitle}>{entry.title}</Text><QuestDetail entry={entry} />{entry.progress ? <Text style={styles.progress}>Progress: {entry.progress}</Text> : null}{entry.reward === "fertilizer" ? <Text style={styles.rewardText}>Reward: 5 Standard Fertilizer</Text> : entry.reward === "copper" ? <View style={styles.rewardRow}><Text style={styles.rewardText}>Reward: 25</Text><Image source={REWARD_IMAGES.copper} style={styles.coinIcon} /></View> : entry.reward === "ale_upgrade" ? <Text style={styles.rewardText}>Reward: New Upgrade</Text> : entry.reward === "guest_rooms" ? <Text style={styles.rewardText}>Reward: Build Guest Rooms</Text> : null}{entry.tab === "open" && entry.tavernQuestId ? <TouchableOpacity style={[styles.doneButton, !entry.ready && styles.doneDisabled]} disabled={!entry.ready} onPress={() => void claim(entry)}><Text style={styles.doneText}>Done</Text></TouchableOpacity> : null}</View>)}
       </ScrollView></View></View>{floatingMessage ? <View pointerEvents="none" style={styles.floating}><Text style={styles.floatingText}>{floatingMessage}</Text></View> : null}</Modal>
-    <Modal visible={!!dialog || flightVisible} transparent animationType="none" statusBarTranslucent onRequestClose={() => {}}>
-      <View style={styles.dialogLayer} pointerEvents="box-none">
+    <Modal visible={!!dialog || flightVisible} transparent animationType="none" onRequestClose={() => {}}>
+      <View ref={flightLayerRef} collapsable={false} style={styles.dialogLayer} pointerEvents="box-none">
         <StoryDialogOverlay visible={!!dialog} line={dialog?.lines[dialog.index] ?? null} onContinue={() => { void advanceDialog(false); }} onSkip={() => { void advanceDialog(true); }} />
-        {flightVisible && (flightReward === "carrot_seed" || flightReward === "fertilizer") && <View pointerEvents="none" style={{ position: "absolute", bottom: 45, left: width * .26 - 55, alignItems: "center" }}><View ref={gardenStorageTargetRef} collapsable={false}><Image source={REWARD_IMAGES[flightReward]} style={{ width: 44, height: 44 }} /></View><Text style={styles.rewardText}>Garden Storage</Text></View>}
         <Animated.View pointerEvents="none" style={[styles.flyingReward, { opacity: rewardOpacity, transform: [{ translateX: rewardX }, { translateY: rewardY }, { scale: rewardScale }] }]}><Image source={REWARD_IMAGES[flightReward]} style={styles.flyingRewardImage} resizeMode="contain" />{flightReward === "fertilizer" && <Text style={{ color: "white", fontWeight: "700", position: "absolute", right: 0, bottom: 0 }}>×5</Text>}</Animated.View>
       </View>
     </Modal>

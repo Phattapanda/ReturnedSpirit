@@ -329,6 +329,8 @@ export default function PlayerBag({
         setRecipeNotice("You know all possible recipes");
         return;
       }
+      // Play on successful discovery, independently of modal/animation mounting.
+      audioManager.playSoundEffect("new-recipe-found", { maxDurationMs: 6000 });
       if (result.bag) { setCarrotBagOverride(result.bag); onBagUpdated?.(result.bag); }
       onRecipeRead?.(result.ids);
       setInfoItem(null);

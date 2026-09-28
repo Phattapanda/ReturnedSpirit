@@ -174,6 +174,7 @@ function snapshotKey(slotNum: number): string {
 export async function createSnapshot(
   slotNum: number,
   trigger: "day_transition" | "manual" | "new_game",
+  throwOnError = false,
 ): Promise<void> {
   if (__DEV__) {
   }
@@ -234,6 +235,7 @@ export async function createSnapshot(
     await AsyncStorage.setItem(snapshotKey(slotNum), JSON.stringify(snapshot));
   } catch (e) {
     console.error("[SaveManager] createSnapshot failed:", e);
+    if (throwOnError) throw e;
   }
 }
 

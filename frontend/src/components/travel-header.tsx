@@ -1,7 +1,8 @@
 import React, { useCallback, useRef, useState } from "react";
 import { Image, Modal, StyleSheet, Text, TouchableOpacity, View, type ImageSourcePropType } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useRouter, usePathname } from "expo-router";
+import { createSnapshot } from "@/src/game/save-manager";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -42,6 +43,27 @@ type Props = {
 
 export default function TravelHeader({ locationName, showPortraitRow = false, onHeaderHeightChange, onPortraitBottomChange, onLootTargetsChange, refreshKey = 0, bagAttention = false, supporterImage, onSupporterPress, onBagUpdated, onStatsUpdated, externalUseItemIds, onUseItem, bagContext = "none", onBagTransferItem, onRecipeRead }: Props) {
   const router = useRouter();
+  const pathname = usePathname();
+  const canSave = ["/mail", "/outside-tavern", "/workshop"].includes(pathname);
+  const saveBusy = useRef(false);
+  const [saveMessage, setSaveMessage] = useState("");
+  async function saveGame() {
+    if (!canSave || saveBusy.current) return;
+    saveBusy.current = true;
+    try {
+      const slot = Number(await AsyncStorage.getItem("@game:active_slot"));
+      if (![1, 2, 3].includes(slot)) throw new Error("No active save slot.");
+      await AsyncStorage.setItem("@game:save_location", pathname.slice(1));
+      await createSnapshot(slot, "manual", true);
+      const raw = await AsyncStorage.getItem("game_slots");
+      if (raw) {
+        const slots = JSON.parse(raw) as { slot: number; [key: string]: unknown }[];
+        await AsyncStorage.setItem("game_slots", JSON.stringify(slots.map(entry => entry.slot === slot ? { ...entry, savedAt: new Date().toISOString() } : entry)));
+      }
+      setSaveMessage("Game saved.");
+    } catch { setSaveMessage("Could not save. Please try again."); }
+    finally { saveBusy.current = false; }
+  }
   const insets = useSafeAreaInsets();
   const [stamina, setStamina] = useState(0);
   const [life, setLife] = useState(0);
@@ -198,6 +220,11 @@ export default function TravelHeader({ locationName, showPortraitRow = false, on
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setMenuOpen(false)}>
           <View style={styles.menuPanel}>
             <Text style={styles.menuTitle}>Menu</Text>
+            {canSave && <TouchableOpacity style={styles.menuRow} onPress={(event) => { event.stopPropagation(); void saveGame(); }} activeOpacity={0.8}>
+              <Ionicons name="save-outline" size={20} color="#C4943A" />
+              <Text style={styles.menuRowText}>Save Game</Text>
+            </TouchableOpacity>}
+            {canSave && !!saveMessage && <Text style={styles.menuRowText}>{saveMessage}</Text>}
             {[
               { icon: "play" as const, label: "Resume", action: () => setMenuOpen(false) },
               { icon: "book-outline" as const, label: "Logbook", action: () => { setMenuOpen(false); router.push("/logbook"); } },

@@ -1,4 +1,5 @@
 import { loadWaterStorage, consumeStoredWater } from "@/src/game/water-storage";
+import WaterLocationHeading from "@/src/components/water-location-heading";
 import React, { useState, useRef, useEffect } from "react";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
 import { UI_NOTIFICATION_DURATION_MS } from "@/src/ui/timings";
@@ -1364,6 +1365,7 @@ export default function KitchenScreen({
   const playerPortraitRef  = useRef<View>(null);
   const rupertPortraitRef  = useRef<View>(null);
   const bagIconRef         = useRef<View>(null);
+  const questGardenTargetRef = useRef<View>(null);
   const questBookTargetRef = useRef<View>(null);
   const smallCratePanelRef = useRef<View>(null);
   const garbageBinRef      = useRef<View>(null);
@@ -4996,7 +4998,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
             </View>
           </View>
           <View ref={questBookTargetRef} collapsable={false}>
-            <QuestBookButton bagTargetRef={bagIconRef} onBagUpdated={updatePlayerBagState} />
+            <QuestBookButton gardenTargetRef={questGardenTargetRef} bagTargetRef={bagIconRef} onBagUpdated={updatePlayerBagState} />
           </View>
           <View style={styles.rightHeaderColumn}>
             <View style={styles.rightHeader}>
@@ -5013,7 +5015,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
             <CurrencyHud inline compact />
           </View>
         </View>
-        <Text style={styles.locationName}>Kitchen</Text>
+        <WaterLocationHeading name="Kitchen" />
       </View>
 
       {/* ── Scrollable content */}
@@ -5332,6 +5334,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   return (
     <TouchableOpacity
       key={loc.id}
+      ref={questGardenTargetRef}
       style={[styles.locBtn, styles.locBtnActive, styles.locBtnGardenHighlight]}
       onPress={handleGardenTap}
       activeOpacity={0.8}
@@ -5408,6 +5411,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
           return (
             <TouchableOpacity
               key={loc.id}
+              ref={isGardenBtn ? questGardenTargetRef : undefined}
               style={[
                 styles.locBtn,
                 isCurrent
@@ -5504,7 +5508,6 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
               />
               <TouchableOpacity style={[styles.continueBtn, styles.confirmBtn, !nameInputVal.trim() && styles.btnDisabled]} onPress={confirmName} disabled={!nameInputVal.trim()} activeOpacity={0.8}>
                 <Text style={styles.continueTxt}>Confirm</Text>
-                <Ionicons name="checkmark" size={16} color="#F5E6C8" style={styles.confirmIcon} />
               </TouchableOpacity>
             </View>
           ) : ts === "QUESTION_CHOICE" && !dlgActive && !nameInputOpen ? (
@@ -6484,7 +6487,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     marginTop: 0,
   },
-  confirmIcon: { position: "absolute", right: 18 },
   continueTxt: { color: "#F5E6C8", fontSize: 15, fontFamily: "Oldenburg", letterSpacing: 0.6 },
   btnDisabled: { opacity: 0.4 },
   choiceBtn: {

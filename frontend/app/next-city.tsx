@@ -332,11 +332,14 @@ export default function NextCityScreen() {
       : MERCHANT_GUILD_VIEWS.includes(view)
         ? "merchant-guild"
         : null;
-  useEffect(() => {
-    if (view === "minstrels") return;
+  const inMinstrels = view === "minstrels";
+  // Sub-locations share a music region. Do not restart a pending fade/load
+  // when navigating between locations that use the same theme.
+  useFocusEffect(useCallback(() => {
+    if (inMinstrels) return;
     if (cityTheme) crossfadeCityTheme(cityTheme, 650);
     else stopCityTheme(650);
-  }, [cityTheme, crossfadeCityTheme, stopCityTheme, view]);
+  }, [cityTheme, crossfadeCityTheme, stopCityTheme, inMinstrels]));
   useEffect(() => {
     const inAdventurersGuild = view === "guild" || view === "expedition_shop" || view === "support" || view === "processing" || view === "quests";
     if (inAdventurersGuild && city && adventurerPromotionAvailable(city) && promotionDialogIndex === null && guildDialogIndex === null) {

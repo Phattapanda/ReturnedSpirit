@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import { View, Text, TouchableOpacity, FlatList, StyleSheet } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { loadLogbook, type LogEntry } from "@/src/game/logbook";
 
@@ -10,11 +10,16 @@ export default function LogbookScreen() {
   const router = useRouter();
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const scrollRef = useRef<FlatList<LogEntry>>(null);
-  const didScrollToLatest = useRef(false);
-
-  useEffect(() => {
-    loadLogbook().then(setEntries).catch(() => {});
-  }, []);
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    loadLogbook().then((loaded) => {
+      if (!active) return;
+      // Storage remains chronological; only the display is newest-first.
+      setEntries([...loaded].reverse());
+      scrollRef.current?.scrollToOffset({ offset: 0, animated: false });
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []));
 
   return (
     <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
@@ -37,11 +42,6 @@ export default function LogbookScreen() {
         initialNumToRender={12}
         maxToRenderPerBatch={10}
         windowSize={7}
-        onContentSizeChange={() => {
-          if (entries.length === 0 || didScrollToLatest.current) return;
-          didScrollToLatest.current = true;
-          scrollRef.current?.scrollToEnd({ animated: false });
-        }}
         ListEmptyComponent={(
           <Text style={styles.empty}>No entries yet.</Text>
         )}

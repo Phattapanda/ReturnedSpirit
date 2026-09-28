@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState, useRef } from "react";
 import {
   View,
   Text,
@@ -9,7 +9,7 @@ import {
   Pressable,
   ScrollView,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { Image } from "expo-image";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -21,6 +21,8 @@ import StartingPackageStoreBridge from "@/src/components/starting-package-store-
 import PurchaseIconShine from "@/src/components/purchase-icon-shine";
 import { ownsStartingPackage, ownsHarvestPackage, HARVEST_PACKAGE_PRODUCT_ID } from "@/src/game/starting-package-purchase";
 
+import MenuAttentionPulse from "@/src/components/menu-attention-pulse";
+
 const BG = require("../assets/images/mainpage.png");
 const LETTER_UNREAD = require("../assets/images/letter.png");
 const LETTER_READ = require("../assets/images/letter_open.png");
@@ -30,6 +32,8 @@ const STARTUP_MAIN_MENU_THEME = getRandomMainMenuTheme();
 const EARLY_ACCESS_READ_KEY = "@main-menu:early-access-read";
 const EARLY_ACCESS_HIDDEN_KEY = "@main-menu:early-access-do-not-show";
 const TESTER_GIFT_READ_KEY = "@main-menu:tester-gift-read";
+const STARTING_VIEWED_KEY = "@main-menu:starting-package-viewed";
+const HARVEST_VIEWED_KEY = "@main-menu:harvest-package-viewed";
 // Show once per app session, not each time the player returns to the menu.
 let earlyAccessDismissed = false;
 const NATIVE_IAP_AVAILABLE = (process.env.EXPO_OS === "android" || process.env.EXPO_OS === "ios")
@@ -94,6 +98,32 @@ export default function MainMenu() {
     setHarvestPurchaseError(message);
   }, []);
 
+  const [startingViewed, setStartingViewed] = useState(true);
+  const [harvestViewed, setHarvestViewed] = useState(true);
+  const [attentionReady, setAttentionReady] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [pulseTarget, setPulseTarget] = useState<number | null>(null);
+  const pulsed = useRef(new Set<number>());
+  useFocusEffect(useCallback(() => {
+    pulsed.current.clear();
+    setFocused(true);
+    return () => { setFocused(false); setPulseTarget(null); };
+  }, []));
+  useEffect(() => {
+    if (!focused || !attentionReady || showEarlyAccess || showTesterGift || showStartingPackage || showHarvestPackage) {
+      setPulseTarget(null);
+      return;
+    }
+    const eligible = [!earlyAccessRead, !testerGiftRead, !startingViewed && !startingPackageOwned, !harvestViewed && !harvestPackageOwned];
+    const queue = eligible.map((value, index) => value && !pulsed.current.has(index) ? index : -1).filter(index => index >= 0);
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    queue.forEach((index, order) => {
+      timers.push(setTimeout(() => { pulsed.current.add(index); setPulseTarget(index); }, 500 + order * 1000));
+    });
+    timers.push(setTimeout(() => setPulseTarget(null), 500 + queue.length * 1000));
+    return () => { timers.forEach(clearTimeout); setPulseTarget(null); };
+  }, [focused, attentionReady, showEarlyAccess, showTesterGift, showStartingPackage, showHarvestPackage, earlyAccessRead, testerGiftRead, startingViewed, harvestViewed, startingPackageOwned, harvestPackageOwned]);
+
   function markEarlyAccessRead() {
     setEarlyAccessRead(true);
     void AsyncStorage.setItem(EARLY_ACCESS_READ_KEY, "true").catch(() => {});
@@ -124,12 +154,15 @@ export default function MainMenu() {
   useEffect(() => {
     let active = true;
 
-    AsyncStorage.multiGet([EARLY_ACCESS_READ_KEY, EARLY_ACCESS_HIDDEN_KEY, TESTER_GIFT_READ_KEY])
+    AsyncStorage.multiGet([EARLY_ACCESS_READ_KEY, EARLY_ACCESS_HIDDEN_KEY, TESTER_GIFT_READ_KEY, STARTING_VIEWED_KEY, HARVEST_VIEWED_KEY])
       .then((entries) => {
         if (!active) return;
         const hasRead = entries[0][1] === "true";
         const isHidden = entries[1][1] === "true";
         const hasReadTesterGift = entries[2][1] === "true";
+        setStartingViewed(entries[3][1] === "true");
+        setHarvestViewed(entries[4][1] === "true");
+        setAttentionReady(true);
         setEarlyAccessRead(hasRead);
         setDoNotShowEarlyAccess(isHidden);
         setTesterGiftRead(hasReadTesterGift);
@@ -201,6 +234,7 @@ export default function MainMenu() {
       <View style={[styles.buttons, { paddingBottom: insets.bottom + 12 }]}>
         <View style={styles.topActions}>
           <View style={styles.mailButtons}>
+          <MenuAttentionPulse active={pulseTarget === 0}>
           <TouchableOpacity
             testID="early-access-mail-button"
             accessibilityRole="button"
@@ -215,6 +249,8 @@ export default function MainMenu() {
               contentFit="contain"
             />
           </TouchableOpacity>
+          </MenuAttentionPulse>
+          <MenuAttentionPulse active={pulseTarget === 1}>
           <TouchableOpacity
             testID="tester-gift-mail-button"
             accessibilityRole="button"
@@ -229,30 +265,35 @@ export default function MainMenu() {
               contentFit="contain"
             />
           </TouchableOpacity>
+          </MenuAttentionPulse>
           </View>
           <View style={styles.mailButtons}>
+          <MenuAttentionPulse active={pulseTarget === 2}>
           <TouchableOpacity
             testID="starting-package-button"
             accessibilityRole="button"
             accessibilityLabel="Open 7-Day Starting Package offer"
             style={styles.startingPackageButton}
-            onPress={() => { setPurchaseError(""); setShowStartingPackage(true); }}
+            onPress={() => { setStartingViewed(true); void AsyncStorage.setItem(STARTING_VIEWED_KEY, "true").catch(() => {}); setPurchaseError(""); setShowStartingPackage(true); }}
             activeOpacity={0.78}
           >
             <Image source={STARTING_PACKAGE} style={styles.startingPackageIcon} contentFit="contain" />
             <PurchaseIconShine />
           </TouchableOpacity>
+          </MenuAttentionPulse>
+          <MenuAttentionPulse active={pulseTarget === 3}>
           <TouchableOpacity
             testID="harvest-package-button"
             accessibilityRole="button"
             accessibilityLabel="Open Harvest Sun Package offer"
             style={styles.startingPackageButton}
-            onPress={() => { setHarvestPurchaseError(""); setShowHarvestPackage(true); }}
+            onPress={() => { setHarvestViewed(true); void AsyncStorage.setItem(HARVEST_VIEWED_KEY, "true").catch(() => {}); setHarvestPurchaseError(""); setShowHarvestPackage(true); }}
             activeOpacity={0.78}
           >
             <Image source={HARVEST_PACKAGE} style={styles.startingPackageIcon} contentFit="contain" />
             <PurchaseIconShine delay={3700} />
           </TouchableOpacity>
+          </MenuAttentionPulse>
           </View>
         </View>
         {MENU_ITEMS.map((item) => (
@@ -269,7 +310,7 @@ export default function MainMenu() {
           </TouchableOpacity>
         ))}
         <Text testID="version-text" style={styles.version}>
-          v1.0.5 · local save
+          v1.0.6 · local save
         </Text>
       </View>
       <Modal visible={showEarlyAccess} transparent animationType="fade" onRequestClose={dismissEarlyAccess}>

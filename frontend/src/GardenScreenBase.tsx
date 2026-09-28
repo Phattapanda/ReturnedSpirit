@@ -1,4 +1,5 @@
 import { useWaterStorage } from "@/src/hooks/use-water-storage";
+import WaterLocationHeading from "@/src/components/water-location-heading";
 import { loadWaterStorage, refillWaterStorage } from "@/src/game/water-storage";
 import React, { useState, useRef, useEffect } from "react";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
@@ -430,6 +431,7 @@ setExploreUnlocked(exploreAvailable);
   const woodLocked = useRef(false);
   const stoneLocked = useRef(false);
   const bagGiftLocked = useRef(false);
+  const questGardenTargetRef = useRef<View>(null);
   const bucketGiftLocked = useRef(false);
 
   // ── Flying item overlay (harvest, bucket, well animations)
@@ -2148,7 +2150,7 @@ setExploreUnlocked(exploreAvailable);
               <Text style={styles.statBarText}>{lifeCurrent}/{playerStats.maximumLife}</Text>
             </View>
           </View>
-          <QuestBookButton bagTargetRef={bagIconViewRef} onBagUpdated={setPlayerBag} />
+          <QuestBookButton gardenTargetRef={questGardenTargetRef} bagTargetRef={bagIconViewRef} onBagUpdated={setPlayerBag} />
           <View style={styles.rightHeaderColumn}>
             <View style={styles.rightHeader}>
               <View style={styles.dayBadge}><Text style={styles.dayText}>{DAYS[dayIdx]}</Text></View>
@@ -2163,7 +2165,7 @@ setExploreUnlocked(exploreAvailable);
             <CurrencyHud inline compact />
           </View>
         </View>
-        <Text style={styles.locationName}>Garden</Text>
+        <WaterLocationHeading name="Garden" />
       </View>
 
       {/* ── Scrollable content ── */}
@@ -2301,7 +2303,7 @@ setExploreUnlocked(exploreAvailable);
         </TouchableOpacity>
 
         {/* Garden Storage button */}
-        <RNAnimated.View style={{ flex: 1, transform: [{ scale: storagePulse }] }}>
+        <RNAnimated.View ref={questGardenTargetRef} collapsable={false} style={{ flex: 1, transform: [{ scale: storagePulse }] }}>
         <TouchableOpacity
           style={[styles.locBtn, navEnabled ? styles.locBtnActive : styles.locBtnLocked]}
           disabled={!navEnabled}

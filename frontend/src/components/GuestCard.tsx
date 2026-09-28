@@ -479,6 +479,8 @@ export default function DiningGuestArea({
 }: DiningGuestAreaProps) {
   const [guests, setGuests] = useState<GuestVisitView[]>([]);
   const [loading, setLoading] = useState(true);
+  const favorRewardHandler = useRef(onFavorRewardDialog);
+  useEffect(() => { favorRewardHandler.current = onFavorRewardDialog; }, [onFavorRewardDialog]);
 
   useEffect(() => {
     let active = true;
@@ -495,7 +497,7 @@ export default function DiningGuestArea({
         if (active) {
           setGuests(prepared);
           const reward = prepared.find((guest) => !!guest.favorRewardDialog);
-          if (reward?.favorRewardDialog) onFavorRewardDialog?.(reward, reward.favorRewardDialog);
+          if (reward?.favorRewardDialog) favorRewardHandler.current?.(reward, reward.favorRewardDialog);
         }
       } catch {
         if (active) setGuests([]);
@@ -505,12 +507,12 @@ export default function DiningGuestArea({
     })();
 
     return () => { active = false; };
-  }, [dayIndex, onFavorRewardDialog]);
+  }, [dayIndex]);
 
   useEffect(() => subscribeFavorRewardDialog((guestId, dialog) => {
     const guest = guests.find((entry) => entry.profile.id === guestId);
-    if (guest) onFavorRewardDialog?.(guest, dialog);
-  }), [guests, onFavorRewardDialog]);
+    if (guest) favorRewardHandler.current?.(guest, dialog);
+  }), [guests]);
 
   async function handleSelect(guestId: GuestId) {
     await setActiveGuest(guestId);
@@ -600,7 +602,7 @@ const styles = StyleSheet.create({
     gap: 14,
   },
 
-  // GardenPlot-style outer card. Active selection is conveyed only by movement/color.
+  // Selection changes colour only, keeping card geometry stable.
   card: {
     backgroundColor: "rgba(14,8,2,0.92)",
     borderRadius: 16,
@@ -614,10 +616,8 @@ const styles = StyleSheet.create({
     elevation: 18,
   },
   cardSelected: {
-    borderWidth: 2,
     borderColor: "#D8A64A",
     backgroundColor: "rgba(47,25,6,0.97)",
-    transform: [{ translateY: -8 }],
   },
 
   // Mirrors GardenPlot topRow/cropWrap: portrait left, information right.
