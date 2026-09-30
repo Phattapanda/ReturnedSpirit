@@ -43,6 +43,7 @@ import SeedSelectionModal, {
 export type GardenPlotStatus = "empty" | "growing" | "ready" | "withered";
 
 export type GardenPlotData = {
+  premiumFertilizerUses?: number;
   id: string;
   plotType: "small" | "medium" | "large";
   upgradeLevel: number;
@@ -390,6 +391,7 @@ export default function GardenPlot(props: GardenPlotProps) {
         ...secondData,
         fertilizedToday: true,
         fertilizerTypeUsedToday: selected,
+        premiumFertilizerUses: (secondData.premiumFertilizerUses ?? 0) + (selected === "premium_fertilizer" ? 1 : 0),
         accumulatedFertilizerYieldBonus:
           secondData.accumulatedFertilizerYieldBonus + fertilizerConfig.yieldBonus,
       };
@@ -411,7 +413,7 @@ export default function GardenPlot(props: GardenPlotProps) {
     setSecondBusy(true);
     try {
       const finalYield = secondData.baseYield + secondData.accumulatedWeedYieldBonus + secondData.accumulatedFertilizerYieldBonus;
-      const harvestBag: BagItem | null = createHarvestBagForCrop(secondData.seedItemId, finalYield);
+      const harvestBag: BagItem | null = createHarvestBagForCrop(secondData.seedItemId, finalYield, secondData);
       if (!harvestBag) {
         showPlayerThought('"I can\'t harvest this crop yet."');
         return;

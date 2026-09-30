@@ -1,3 +1,4 @@
+import ItemGradeBadge from "@/src/components/item-grade-badge";
 import { loadWaterStorage, consumeStoredWater } from "@/src/game/water-storage";
 import WaterLocationHeading from "@/src/components/water-location-heading";
 import React, { useState, useRef, useEffect } from "react";
@@ -3816,7 +3817,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     if (grantedEffectId) {
       const nextStats = {
         ...playerStats,
-        statusEffects: applyTemporaryEffect(playerStats.statusEffects, grantedEffectId, undefined, potionBuffPotency(item.id, playerStats.effectiveness)),
+        statusEffects: applyTemporaryEffect(playerStats.statusEffects, grantedEffectId, undefined, getItemBuffPotency(item, playerStats.effectiveness)),
       };
       setPlayerStats(nextStats);
       AsyncStorage.setItem(PLAYER_STATS_KEY, JSON.stringify(nextStats)).catch(() => {});
@@ -4042,7 +4043,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     for (let i = 0; i < newTable.length; i++) {
       if (i === bagSlot) continue;
       const t = newTable[i];
-      if (t && t.id === bagSpec.itemId && t.quantity < tableStackLimit) {
+      if (t && t.id === bagSpec.itemId && (t.grade ?? "D") === (harvestBag.grade ?? "D") && t.quantity < tableStackLimit) {
         newTable[i] = { ...t, quantity: t.quantity + 1 };
         placed = true;
         break;
@@ -4054,6 +4055,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         if (!newTable[i]) {
           newTable[i] = {
             id: bagSpec.itemId,
+            grade: harvestBag.grade ?? "D",
             itemType: bagSpec.itemId,
             name: ITEM_CATALOG[bagSpec.itemId]?.name ?? bagSpec.singular,
             quantity: 1,
@@ -4120,6 +4122,11 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     }
     const craftCount = getCraftableRecipeCount(ingredients, recipe, tool);
     if (craftCount < 1) return null;
+    // Butchering is random; never roll loot merely to display a preview.
+    if (!recipe.id.startsWith("butcher_")) {
+      return createRecipeOutputs(recipe, craftCount, getContainerStackLimit("kitchenTable"),
+        getEffectiveLuck(playerStats), tool, playerStats.effectiveness, ingredients)[0] ?? null;
+    }
     const preview = createCraftedItem(recipe.outputId, recipe.outputQuantity * craftCount);
     return recipe.seasonedStage
       ? { ...preview, name: `Seasoned ${preview.name}`, seasonedStage: recipe.seasonedStage }
@@ -4428,7 +4435,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       return;
     }
 
-    const outputs = createRecipeOutputs(recipe, craftCount, getContainerStackLimit("kitchenTable"), getEffectiveLuck(playerStats), currentTool, playerStats.effectiveness);
+    const outputs = createRecipeOutputs(recipe, craftCount, getContainerStackLimit("kitchenTable"), getEffectiveLuck(playerStats), currentTool, playerStats.effectiveness, currentIngredients);
     let recipeDrops = rollRecipeDrops(recipe, craftCount);
     while (recipeDrops > 0) {
       const quantity = Math.min(recipeDrops, getContainerStackLimit("kitchenTable"));
@@ -4796,7 +4803,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
             {!isBeingDragged && imgSrc && (
               <Image source={imgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
             )}
-            {!isBeingDragged && <SeasonedItemBadge visible={item.seasonedStage !== undefined || !!item.weaponEnhanced || !!item.armorEnhanced} />}
+            {!isBeingDragged && <><ItemGradeBadge item={item} /><SeasonedItemBadge visible={item.seasonedStage !== undefined || !!item.weaponEnhanced || !!item.armorEnhanced} /></>}
             {!isBeingDragged && <ItemDurabilityBadge item={item} />}
             {!isBeingDragged && item.quantity > 1 && (
               <Text style={styles.tableItemQty}>{item.quantity}</Text>
@@ -4827,7 +4834,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
             {!isBeingDragged && imgSrc && (
               <Image source={imgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
             )}
-            {!isBeingDragged && <SeasonedItemBadge visible={item.seasonedStage !== undefined || !!item.weaponEnhanced || !!item.armorEnhanced} />}
+            {!isBeingDragged && <><ItemGradeBadge item={item} /><SeasonedItemBadge visible={item.seasonedStage !== undefined || !!item.weaponEnhanced || !!item.armorEnhanced} /></>}
             {!isBeingDragged && <ItemDurabilityBadge item={item} />}
             {!isBeingDragged && item.quantity > 1 && (
               <Text style={styles.tableItemQty}>{item.quantity}</Text>
@@ -4866,7 +4873,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
         {imgSrc && (
           <Image source={imgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
         )}
-        <SeasonedItemBadge visible={item.seasonedStage !== undefined || !!item.weaponEnhanced || !!item.armorEnhanced} />
+        <><ItemGradeBadge item={item} /><SeasonedItemBadge visible={item.seasonedStage !== undefined || !!item.weaponEnhanced || !!item.armorEnhanced} /></>
         <ItemDurabilityBadge item={item} />
         {item.quantity > 1 && <Text style={styles.tableItemQty}>{item.quantity}</Text>}
       </Pressable>
@@ -5086,7 +5093,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                               {!craftBeingDragged && craftImgSrc && (
                                 <Image source={craftImgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
                               )}
-                              {!craftBeingDragged && <SeasonedItemBadge visible={craftItem.seasonedStage !== undefined || !!craftItem.weaponEnhanced || !!craftItem.armorEnhanced} />}
+                              {!craftBeingDragged && <><ItemGradeBadge item={craftItem} /><SeasonedItemBadge visible={craftItem.seasonedStage !== undefined || !!craftItem.weaponEnhanced || !!craftItem.armorEnhanced} /></>}
                               {!craftBeingDragged && <ItemDurabilityBadge item={craftItem} />}
                               {!craftBeingDragged && craftItem.quantity > 1 && (
                                 <Text style={styles.tableItemQty}>{craftItem.quantity}</Text>
@@ -5097,7 +5104,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                           <Pressable style={styles.soupSlotTouch} onPress={() => returnCraftIngToTable(i)}>
                             <View style={{ width: "100%", height: "100%", alignItems: "center", justifyContent: "center" }}>
                               {craftImgSrc && <Image source={craftImgSrc} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />}
-                              <SeasonedItemBadge visible={craftItem.seasonedStage !== undefined || !!craftItem.weaponEnhanced || !!craftItem.armorEnhanced} />
+                              <><ItemGradeBadge item={craftItem} /><SeasonedItemBadge visible={craftItem.seasonedStage !== undefined || !!craftItem.weaponEnhanced || !!craftItem.armorEnhanced} /></>
                               <ItemDurabilityBadge item={craftItem} />
                               {craftItem.quantity > 1 && <Text style={styles.tableItemQty}>{craftItem.quantity}</Text>}
                             </View>
@@ -5167,7 +5174,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                         ) : ITEM_IMAGES[craftResult.id] ? (
                           <>
                             <Image source={ITEM_IMAGES[craftResult.id]} style={styles.soupInSlotImg} resizeMode="contain" resizeMethod="resize" />
-                            <SeasonedItemBadge visible={craftResult.seasonedStage !== undefined || !!craftResult.weaponEnhanced || !!craftResult.armorEnhanced} />
+                            <><ItemGradeBadge item={craftResult} /><SeasonedItemBadge visible={craftResult.seasonedStage !== undefined || !!craftResult.weaponEnhanced || !!craftResult.armorEnhanced} /></>
                           </>
                         ) : null}
                         {previewDiscovered && craftResult.quantity > 1 && <Text style={styles.tableItemQty}>{craftResult.quantity}</Text>}
@@ -5249,7 +5256,7 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
                 {item && ITEM_IMAGES[item.id] ? (
                   <>
                     <Image source={ITEM_IMAGES[item.id]} style={styles.smallCrateItemImage} resizeMode="contain" />
-                    <SeasonedItemBadge visible={item.seasonedStage !== undefined || !!item.weaponEnhanced || !!item.armorEnhanced} />
+                    <><ItemGradeBadge item={item} /><SeasonedItemBadge visible={item.seasonedStage !== undefined || !!item.weaponEnhanced || !!item.armorEnhanced} /></>
                   </>
                 ) : null}
                 <ItemDurabilityBadge item={item} />
@@ -6027,7 +6034,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
               <View style={styles.detailPanel}>
                 <View style={styles.detailImageWrap}>
                   <Image source={ITEM_IMAGES[kitchenDetailItem.id] ?? ITEM_IMAGES.soup_herb} style={styles.detailImg} resizeMode="contain" resizeMethod="resize" />
-                  <SeasonedItemBadge visible={kitchenDetailItem.seasonedStage !== undefined || !!kitchenDetailItem.weaponEnhanced || !!kitchenDetailItem.armorEnhanced} />
+                  <><ItemGradeBadge item={kitchenDetailItem} /><SeasonedItemBadge visible={kitchenDetailItem.seasonedStage !== undefined || !!kitchenDetailItem.weaponEnhanced || !!kitchenDetailItem.armorEnhanced} /></>
                 </View>
                 <Text style={styles.detailName}>{kitchenDetailItem.seasonedStage !== undefined || kitchenDetailItem.weaponEnhanced || kitchenDetailItem.armorEnhanced || kitchenDetailItem.id === "monster_carcass" ? kitchenDetailItem.name : (ITEM_CATALOG[kitchenDetailItem.id]?.name ?? kitchenDetailItem.name)}</Text>
                 {kitchenDetailItem.containedItem && kitchenDetailItem.containedQuantity != null && (
@@ -6654,3 +6661,4 @@ const styles = StyleSheet.create({
   closeBtnText: { color: "#F5E6C8", fontSize: 14, fontFamily: "Oldenburg", letterSpacing: 0.5 },
 
 });
+import { getItemBuffPotency } from "@/src/game/item-system";

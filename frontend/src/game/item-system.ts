@@ -1,5 +1,7 @@
 // ─── Central Item & Bag System ────────────────────────────────────────────────
-import { potionRecoveryBonus } from "@/src/game/potion-effectiveness";
+import { potionRecoveryBonus, potionBuffPotency } from "@/src/game/potion-effectiveness";
+import { STATUS_EFFECT_DEFINITIONS } from "@/src/game/status-effect-system";
+import { gradeLevel, normalizeGrade, type ItemGrade } from "@/src/game/item-grade";
 
 export const ITEM_ATTRIBUTE = {
   EDIBLE: "edible",
@@ -47,6 +49,9 @@ export type BagItem = {
   name: string;
   quantity: number;
   quality?: string;
+  grade?: ItemGrade;
+  /** Number of non-water ingredients per dish, used for its collective price bonus. */
+  gradeIngredientCount?: number;
   containedItem?: string;
   containedQuantity?: number;
   attributes?: ItemAttribute[];
@@ -236,6 +241,8 @@ export function canStack(a: BagItem, b: BagItem): boolean {
     (bothPotions || normalizeItemId(a.itemType) === normalizeItemId(b.itemType)) &&
     normalizeItemId(a.id)       === normalizeItemId(b.id) &&
     (a.quality          ?? null) === (b.quality          ?? null) &&
+    normalizeGrade(a.grade) === normalizeGrade(b.grade) &&
+    (gradeLevel(a.grade) === 0 || (a.gradeIngredientCount ?? 1) === (b.gradeIngredientCount ?? 1)) &&
     (a.containedItem    ?? null) === (b.containedItem    ?? null) &&
     (a.containedQuantity ?? null) === (b.containedQuantity ?? null) &&
     sameOptionalTagSet(a.mealTags, b.mealTags) &&
@@ -953,11 +960,39 @@ export function getMealBaseSellPriceCopper(itemOrId: BagItem | string): number |
   if (!Number.isFinite(price)) return null;
   const seasonedStage = typeof itemOrId === "string" ? undefined : itemOrId.seasonedStage;
   const seasoningBonus = seasonedStage === 1 ? 10 : seasonedStage === 2 ? 15 : seasonedStage === 3 ? 20 : 0;
-  return Math.max(0, Math.floor(price!)) + seasoningBonus;
+  return Math.max(0, Math.floor(price!)) + seasoningBonus + getGradePriceBonus(itemOrId);
+}
+
+export function hasItemGrade(item: BagItem): boolean {
+  const attributes = getItemAttributes(item);
+  return attributes.includes(ITEM_ATTRIBUTE.INGREDIENT) || !!ITEM_CATALOG[item.id]?.mealTags?.length ||
+    (!!item.containedItem && item.id.startsWith("bag_"));
+}
+
+export function getGradePriceBonus(item: BagItem | string): number {
+  return typeof item === "string" || !hasItemGrade(item) ? 0 :
+    gradeLevel(item.grade) * 3 * Math.max(1, item.gradeIngredientCount ?? 1);
+}
+
+export function foodRecoveryBonus(item: BagItem | string, effectiveness = 1): number {
+  const id = itemId(item);
+  const attributes = ITEM_CATALOG[id]?.attributes ?? [];
+  if (!attributes.includes(ITEM_ATTRIBUTE.EDIBLE) || getConsumableCategory(item) === CONSUMABLE_CATEGORY.POTION) return 0;
+  return (typeof item === "string" ? 0 : gradeLevel(item.grade) * 5) + Math.max(0, Math.floor(effectiveness));
 }
 
 export function getGrantedStatusEffectId(itemOrId: BagItem | string): string | null {
   return ITEM_CATALOG[itemId(itemOrId)]?.grantedStatusEffectId ?? null;
+}
+
+export function getItemBuffPotency(item: BagItem, effectiveness: number): number | undefined {
+  const potion = potionBuffPotency(item.id, effectiveness);
+  if (potion !== undefined) return potion;
+  const effectId = getGrantedStatusEffectId(item);
+  const modifiers = effectId ? STATUS_EFFECT_DEFINITIONS[effectId]?.modifiers : undefined;
+  if (!modifiers || !ITEM_CATALOG[item.id]?.mealTags?.length) return undefined;
+  const base = Object.values(modifiers).find(value => value > 0);
+  return base === undefined ? undefined : base + gradeLevel(item.grade);
 }
 
 export type StaminaRecoveryEffect = {
@@ -995,7 +1030,7 @@ export function applyStaminaRecovery(
   const effect = getStaminaRecoveryEffect(itemOrId);
   if (!effect) return currentStamina;
   const bonus = itemId(itemOrId) === "potion_stamina_low_grade" ? potionRecoveryBonus(effectiveness) : 0;
-  const recovered = currentStamina + effect.amount + bonus;
+  const recovered = currentStamina + effect.amount + bonus + foodRecoveryBonus(itemOrId, effectiveness);
   return effect.allowsOverflow ? recovered : Math.min(maximumStamina, recovered);
 }
 
@@ -1008,5 +1043,8 @@ export function applyLifeRecovery(
 ): number {
   const recovery = ITEM_CATALOG[itemId(itemOrId)]?.lifeRecovery ?? 0;
   const bonus = itemId(itemOrId) === "potion_healing_low_grade" ? potionRecoveryBonus(effectiveness) : 0;
-  return Math.min(maximumLife, Math.max(0, currentLife) + Math.max(0, recovery) + bonus);
+  return Math.min(maximumLife, Math.max(0, currentLife) + Math.max(0, recovery) + bonus +
+    (recovery > 0 ? foodRecoveryBonus(itemOrId, effectiveness) :
+      typeof itemOrId !== "string" && ITEM_CATALOG[itemOrId.id]?.mealTags?.length && gradeLevel(itemOrId.grade) > 0
+        ? foodRecoveryBonus(itemOrId, effectiveness) : 0));
 }

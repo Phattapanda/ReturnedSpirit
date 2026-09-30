@@ -721,13 +721,16 @@ export const CITY_BUY_PRICES: Record<string, number> = {
   seed_lettuce: 24, seed_cucumber: 28, seed_spinach: 30, seed_tomato: 32, seed_pumpkin: 36,
   standard_fertilizer: 5, premium_fertilizer: 15,
 };
-export function citySellPrice(id: string): number { return Math.ceil((BASE_PRICES[id] ?? ITEM_CATALOG[id]?.baseSellPriceCopper ?? 2) * 0.5); }
+export function citySellPrice(item: string | BagItem): number {
+  const id = typeof item === "string" ? item : item.id;
+  return Math.ceil((BASE_PRICES[id] ?? ITEM_CATALOG[id]?.baseSellPriceCopper ?? 2) * 0.5) + getGradePriceBonus(item);
+}
 
 export async function sellCityItem(slot: number): Promise<CityActionResult> {
   const bag = await loadBag(); const item = bag.slots[slot];
   if (!item) return { ok: false, message: "That slot is empty." };
   if (item.equipped || (ITEM_CATALOG[item.id]?.attributes ?? []).includes(ITEM_ATTRIBUTE.QUEST_ITEM)) return { ok: false, message: "That item cannot be sold." };
-  const price = citySellPrice(item.id); const next = removeBagItem(bag, slot, 1);
+  const price = citySellPrice(item); const next = removeBagItem(bag, slot, 1);
   await AsyncStorage.setItem(PLAYER_BAG_KEY, JSON.stringify(next)); await addIncomeCopper(price);
   return { ok: true, message: `Sold 1× ${item.name} for ${formatCurrencyAmount(price)}.` };
 }
@@ -1147,3 +1150,4 @@ export async function processTutorialWildWolf(): Promise<CityActionResult> {
 }
 
 export function guildRank(reputation: number): string { return ["H", "G", "F", "E", "D", "C", "B", "A", "S", "L"][Math.min(9, Math.floor(Math.max(0, reputation) / 50))]; }
+import { getGradePriceBonus } from "@/src/game/item-system";

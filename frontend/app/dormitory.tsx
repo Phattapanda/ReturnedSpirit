@@ -1396,7 +1396,7 @@ function RoomStorageSlot({ slotIndex, item, onDropOnBag }: RoomStorageSlotProps)
         <GestureDetector gesture={dragGesture}>
           <Animated.View style={[styles.storageItemTouch, dragStyle]}>
             {itemImage ? (
-              <Image source={itemImage} style={styles.storageItemImage} resizeMode="contain" resizeMethod="resize" />
+              <><Image source={itemImage} style={styles.storageItemImage} resizeMode="contain" resizeMethod="resize" /><ItemGradeBadge item={item} /></>
             ) : (
               <Text style={styles.storageItemFallback} numberOfLines={2}>{item.name}</Text>
             )}
@@ -1732,3 +1732,4 @@ const styles = StyleSheet.create({
   storageItemFallback: { color: "#C4943A", fontSize: 8, lineHeight: 10, textAlign: "center", paddingHorizontal: 2 },
   storageQuantity: { position: "absolute", right: 3, bottom: 1, color: "#FFF", fontSize: 10, fontFamily: "Oldenburg", textShadowColor: "#000", textShadowRadius: 2 },
 });
+import ItemGradeBadge from "@/src/components/item-grade-badge";

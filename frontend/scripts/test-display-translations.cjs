@@ -14,6 +14,29 @@ const dialogues = load('../src/i18n/de-dialogues.ts');
 const messages = load('../src/i18n/de-messages.ts');
 const items = load('../src/i18n/de-items.ts');
 const { translateDisplay: t } = load('../src/i18n/use-language.ts', { './de-game': catalog, './de-dialogues': dialogues, './de-messages': messages, './de-items': items });
+// Keep every intro dialogue, narrator line and player choice translated.
+const introSource = fs.readFileSync(path.join(__dirname, '../app/intro.tsx'), 'utf8');
+const introAst = ts.createSourceFile('intro.tsx', introSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+let introLines = 0;
+function checkIntro(node) {
+  if (ts.isPropertyAssignment(node) && ['text', 'label', 'speakerName'].includes(node.name.getText(introAst)) && ts.isStringLiteral(node.initializer)) {
+    const english = node.initializer.text;
+    assert.notEqual(t(english, 'de'), english, `Missing intro translation: ${english}`);
+    assert.equal(t(english, 'en'), english);
+    introLines++;
+  }
+  ts.forEachChild(node, checkIntro);
+}
+checkIntro(introAst);
+assert.equal(introLines, 13);
+assert.equal(t('"Good to see you on your feet."', 'de'), '„Schön, dass du wieder auf den Beinen bist.“');
+assert.equal(t('Look around.', 'de'), 'Umsehen.');
+assert.equal(t('Go downstairs.', 'de'), 'Nach unten gehen.');
+for (const english of ['Hold to skip', 'Keep holding...', 'Continue']) {
+  assert.notEqual(t(english, 'de'), english);
+  assert.equal(t(english, 'en'), english);
+}
+console.log(`Verified ${introLines} intro dialogue and choice entries in both languages.`);
 let checkedDescriptions = 0;
 for (const file of ['src/game/item-system.ts', 'src/game/city-system.ts', 'app/next-city.tsx']) {
   const source = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');

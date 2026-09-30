@@ -362,15 +362,15 @@ export function getStatusModifiers(state: StatusEffectState): {
 } {
   const staminaCostReduction = state.temporary.reduce((total, active) => {
     const value = STATUS_EFFECT_DEFINITIONS[active.id]?.modifiers?.staminaCostReduction ?? 0;
-    return total + value * active.stacks;
+    return total + (value > 0 ? active.potency ?? value : 0) * active.stacks;
   }, 0);
   const fireResistance = state.temporary.reduce((total, active) => {
     const value = STATUS_EFFECT_DEFINITIONS[active.id]?.modifiers?.fireResistance ?? 0;
-    return total + value * active.stacks;
+    return total + (value > 0 ? active.potency ?? value : 0) * active.stacks;
   }, 0);
   const luck = state.temporary.reduce((total, active) => {
     const value = STATUS_EFFECT_DEFINITIONS[active.id]?.modifiers?.luck ?? 0;
-    return total + value * active.stacks;
+    return total + (value > 0 ? active.potency ?? value : 0) * active.stacks;
   }, 0);
   const physicalDamageBonus = state.temporary.reduce((total, active) => total + (active.id === "strength_potion" ? active.potency ?? 5 : (STATUS_EFFECT_DEFINITIONS[active.id]?.modifiers?.physicalDamageBonus ?? 0) * active.stacks), 0);
   const endurance = state.temporary.reduce((total, active) => total + (active.id === "defense_potion" ? active.potency ?? 5 : (STATUS_EFFECT_DEFINITIONS[active.id]?.modifiers?.endurance ?? 0) * active.stacks), 0);

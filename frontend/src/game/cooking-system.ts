@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { ITEM_CATALOG, normalizeItemId, type BagItem, type MealTag } from "@/src/game/item-system";
 import { createCraftedScroll, SCROLL_BASE_USES } from "@/src/game/scroll-system";
+import { collectiveGrade } from "@/src/game/item-grade";
 import {
   getButcheringDefinition,
   getButcheringKnifeTier,
@@ -542,7 +543,31 @@ export function createRecipeOutputs(
   luck = 0,
   tool: BagItem | null = null,
   effectiveness = 1,
+  ingredientSlots: readonly (BagItem | null)[] = [],
 ): BagItem[] {
+  // Resolve each batch separately, in the same slot order as ingredient consumption.
+  if (ingredientSlots.length > 0 && !recipe.enhancementKind && !recipe.id.startsWith("butcher_")) {
+    let remaining = ingredientSlots.map(item => item ? { ...item } : null);
+    const result: BagItem[] = [];
+    for (let batch = 0; batch < craftCount; batch++) {
+      const next = consumeRecipeIngredients(remaining, recipe);
+      if (!next) return [];
+      const used = remaining.flatMap((item, index) => {
+        if (!item || ["water", "bucketwater", "water_bucket"].includes(item.id)) return [];
+        const quantity = item.quantity - (next[index]?.quantity ?? 0);
+        return quantity > 0 ? [{ ...item, quantity }] : [];
+      });
+      const meal = used.find(item => ITEM_CATALOG[item.id]?.mealTags?.length);
+      const grade = recipe.seasonedStage && meal ? meal.grade ?? "D" : collectiveGrade(used);
+      const count = recipe.seasonedStage && meal ? meal.gradeIngredientCount ?? 1 :
+        used.reduce((sum, item) => sum + item.quantity, 0);
+      result.push(...createRecipeOutputs(recipe, 1, maxStackQuantity, luck, tool, effectiveness).map(item =>
+        ITEM_CATALOG[item.id]?.mealTags?.length || ITEM_CATALOG[item.id]?.attributes.includes("ingredient")
+          ? { ...item, grade, ...(ITEM_CATALOG[item.id]?.mealTags?.length ? { gradeIngredientCount: count } : {}) } : item));
+      remaining = next;
+    }
+    return result;
+  }
   if (Object.hasOwn(SCROLL_BASE_USES, recipe.outputId)) {
     return Array.from({ length: recipe.outputQuantity * craftCount }, () => createCraftedScroll(recipe.outputId, effectiveness));
   }
@@ -581,7 +606,8 @@ export function createRecipeOutputs(
     return outputs;
   }
   const outputs = [
-    { id: recipe.outputId, quantity: recipe.outputQuantity * craftCount },
+    { id: recipe.outputId, quantity: (recipe.outputQuantity +
+      (ITEM_CATALOG[recipe.outputId]?.mealTags?.length ? Math.floor(Math.max(0, effectiveness) / 10) : 0)) * craftCount },
     ...(recipe.byproducts ?? []).map((item) => ({ id: item.id, quantity: item.quantity * craftCount })),
   ];
 

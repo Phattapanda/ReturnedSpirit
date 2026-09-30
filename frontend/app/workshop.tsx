@@ -1,3 +1,4 @@
+import ItemGradeBadge from "@/src/components/item-grade-badge";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Image, Modal, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 import { Text } from "@/src/i18n/localized-text";
@@ -50,7 +51,7 @@ function ItemSlot({ item, label, onPress }: { item: BagItem | null; label?: stri
   const source = item ? getItemImageSource(item.id) : undefined;
   return <TouchableOpacity disabled={!onPress} onPress={onPress} style={styles.slot} activeOpacity={0.78}>
     {source ? <Image source={source} style={styles.slotImage} resizeMode="contain" /> : <Ionicons name={item ? "cube-outline" : "add"} size={item ? 25 : 18} color={item ? "#D6A33B" : "rgba(228,200,130,0.38)"} />}
-    {item ? <><SeasonedItemBadge visible={!!item.weaponEnhanced || !!item.armorEnhanced || item.seasonedStage !== undefined} /><ItemDurabilityBadge item={item} /></> : null}
+    {item ? <><><ItemGradeBadge item={item} /><SeasonedItemBadge visible={!!item.weaponEnhanced || !!item.armorEnhanced || item.seasonedStage !== undefined} /></><ItemDurabilityBadge item={item} /></> : null}
     {item && item.quantity > 1 ? <Text style={styles.quantity}>{item.quantity}</Text> : null}
     {!item && label ? <Text style={styles.slotLabel}>{label}</Text> : null}
   </TouchableOpacity>;
@@ -124,7 +125,7 @@ export default function WorkshopScreen() {
     setEffectiveness(currentEffectiveness);
     const output = Object.hasOwn(SCROLL_BASE_USES, recipe.outputId)
       ? createCraftedScroll(recipe.outputId, currentEffectiveness)
-      : createRecipeOutputs(recipe, 1, 20, 0, tool)[0] ?? null;
+      : createRecipeOutputs(recipe, 1, 20, 0, tool, currentEffectiveness, ingredients)[0] ?? null;
     const alchemyRecipeDrops = rollAlchemyRecipeDrops(recipe, 1);
     const recipeDrop = alchemyRecipeDrops > 0
       ? addToSlots(storage, { id: "alchemy_recipe", itemType: "alchemy_recipe", name: "Alchemy Recipe", quantity: alchemyRecipeDrops })
@@ -145,7 +146,7 @@ export default function WorkshopScreen() {
     <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}>
       <View style={styles.panel}>
         <View style={styles.titleRow}><Text style={styles.title}>Crafting Workbench</Text><TouchableOpacity style={styles.bookButton} onPress={() => setBookOpen(true)}><Ionicons name="book-outline" size={22} color="#FFF1CB" /><Text style={styles.bookText}>Recipes</Text></TouchableOpacity></View>
-        <View style={styles.craftRow}><View style={styles.ingredients}>{ingredients.map((item, index) => <ItemSlot key={index} item={item} label="Ingredient" onPress={item ? () => { void returnToStorage(item, "ingredient", index); } : undefined} />)}</View><Ionicons name="add" size={20} color="#C4943A" /><ItemSlot item={tool} label="Tool" onPress={tool ? () => { void returnToStorage(tool, "tool"); } : undefined} /><Ionicons name="arrow-forward" size={20} color="#C4943A" /><ItemSlot item={result ?? (recipe ? createRecipeOutputs(recipe, 1, 20, 0, tool, effectiveness)[0] : null)} label="Result" onPress={result ? () => { void returnToStorage(result, "result"); } : undefined} /></View>
+<View style={styles.craftRow}><View style={styles.ingredients}>{ingredients.map((item, index) => <ItemSlot key={index} item={item} label="Ingredient" onPress={item ? () => { void returnToStorage(item, "ingredient", index); } : undefined} />)}</View><Ionicons name="add" size={20} color="#C4943A" /><ItemSlot item={tool} label="Tool" onPress={tool ? () => { void returnToStorage(tool, "tool"); } : undefined} /><Ionicons name="arrow-forward" size={20} color="#C4943A" /><ItemSlot item={result ?? (recipe ? createRecipeOutputs(recipe, 1, 20, 0, tool, effectiveness, ingredients)[0] : null)} label="Result" onPress={result ? () => { void returnToStorage(result, "result"); } : undefined} /></View>
         <TouchableOpacity style={[styles.craftButton, (!recipe || !!result) && styles.disabled]} disabled={!recipe || !!result} onPress={() => { void craft(); }}><Text style={styles.craftText}>CRAFT</Text></TouchableOpacity>
         {message ? <Text style={styles.message}>{message}</Text> : null}
       </View>

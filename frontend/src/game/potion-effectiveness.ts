@@ -1,6 +1,6 @@
-/** Effectiveness starts at 1; recovery gains 2 per additional point. */
+/** Each Effectiveness point adds one point of recovery. */
 export function potionRecoveryBonus(effectiveness: number): number {
-  return Math.max(0, Math.floor(effectiveness) - 1) * 2;
+  return Math.max(0, Math.floor(effectiveness));
 }
 
 /** Strength and Defense gain one point at 5, 10, 15, ... Effectiveness. */

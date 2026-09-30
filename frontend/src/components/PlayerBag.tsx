@@ -1,3 +1,4 @@
+import ItemGradeBadge from "@/src/components/item-grade-badge";
 import { expandWaterStorageFromBag } from "@/src/game/water-storage";
 import React, { useState, useRef, useEffect } from "react";
 import { View, TouchableOpacity, Pressable, Image, Modal, StyleSheet, useWindowDimensions, type ImageSourcePropType } from "react-native";
@@ -432,7 +433,7 @@ export default function PlayerBag({
         nextStamina = applyStaminaRecovery(item, currentStamina, stats.maximumStamina, stats.effectiveness);
         nextLife = applyLifeRecovery(item, currentLife, stats.maximumLife, stats.effectiveness);
       }
-      if (grantedEffectId) nextStats = { ...stats, statusEffects: applyTemporaryEffect(stats.statusEffects, grantedEffectId, undefined, potionBuffPotency(item.id, stats.effectiveness)) };
+      if (grantedEffectId) nextStats = { ...stats, statusEffects: applyTemporaryEffect(stats.statusEffects, grantedEffectId, undefined, getItemBuffPotency(item, stats.effectiveness)) };
       if (!grantedEffectId && nextStamina === currentStamina && nextLife === currentLife) {
         onShowThoughtBubble?.('"I don\'t need this right now."');
         return;
@@ -594,7 +595,7 @@ export default function PlayerBag({
                 {ITEM_IMAGES[infoItem.id] && (
                   <View style={styles.infoImageWrap}>
                     <Image source={ITEM_IMAGES[infoItem.id]} style={styles.infoImg} resizeMode="contain" resizeMethod="resize" />
-                    <SeasonedItemBadge visible={infoItem.seasonedStage !== undefined || !!infoItem.weaponEnhanced || !!infoItem.armorEnhanced} />
+                    <><ItemGradeBadge item={infoItem} /><SeasonedItemBadge visible={infoItem.seasonedStage !== undefined || !!infoItem.weaponEnhanced || !!infoItem.armorEnhanced} /></>
                   </View>
                 )}
                 <Text style={styles.infoName}>{infoItem.seasonedStage !== undefined || infoItem.weaponEnhanced || infoItem.armorEnhanced || infoItem.id === "monster_carcass" ? infoItem.name : (ITEM_CATALOG[infoItem.id]?.name ?? infoItem.name)}</Text>
@@ -657,8 +658,8 @@ export default function PlayerBag({
         const discardable = isItemDiscardable(item);
         const durability = getItemDurability(item);
         const effects = [
-          catalog?.staminaRecovery ? `Restores ${catalog.staminaRecovery + (item.id === "potion_stamina_low_grade" ? potionRecoveryBonus(effectiveness) : 0)} Stamina` : null,
-          catalog?.lifeRecovery ? `Restores ${catalog.lifeRecovery + (item.id === "potion_healing_low_grade" ? potionRecoveryBonus(effectiveness) : 0)} Life Points` : null,
+          catalog?.staminaRecovery ? `Restores ${catalog.staminaRecovery + foodRecoveryBonus(item, effectiveness) + (item.id === "potion_stamina_low_grade" ? potionRecoveryBonus(effectiveness) : 0)} Stamina` : null,
+          applyLifeRecovery(item, 0, Number.MAX_SAFE_INTEGER, effectiveness) > 0 ? `Restores ${applyLifeRecovery(item, 0, Number.MAX_SAFE_INTEGER, effectiveness)} Life Points` : null,
           catalog?.grantedStatusEffectId ? item.id === "potion_strength" ? `Damage +${potionBuffPotency(item.id, effectiveness)} for 1 day` : item.id === "potion_defense" ? `Endurance +${potionBuffPotency(item.id, effectiveness)} for 1 day` : `Effect: ${catalog.grantedStatusEffectId.replaceAll("_", " ")}` : null,
         ].filter((effect): effect is string => !!effect);
         const equipmentValues = equipmentKind === "weapon"
@@ -673,7 +674,7 @@ export default function PlayerBag({
             <TouchableOpacity activeOpacity={1} onPress={() => {}}>
               <View style={styles.actionPanel}>
                 <TouchableOpacity style={styles.actionClose} onPress={() => setActionTarget(null)}><Text style={styles.closeText}>✕</Text></TouchableOpacity>
-                {ITEM_IMAGES[item.id] ? <Image source={ITEM_IMAGES[item.id]} style={styles.actionImage} resizeMode="contain" /> : null}
+                {ITEM_IMAGES[item.id] ? <View style={styles.actionImage}><Image source={ITEM_IMAGES[item.id]} style={styles.actionImage} resizeMode="contain" /><ItemGradeBadge item={item} /></View> : null}
                 <Text selectable style={styles.actionName}>{item.id === "monster_carcass" || item.weaponEnhanced || item.armorEnhanced ? item.name : (catalog?.name ?? item.name)}</Text>
                 {(effects.length > 0 ? effects : equipmentValues).map((value) => <Text selectable key={value} style={styles.actionValue}>{value}</Text>)}
                 {effects.length === 0 && equipmentValues.length === 0 ? <Text selectable style={styles.actionDescription}>{catalog?.description ?? "No usable effect."}</Text> : null}
@@ -810,7 +811,7 @@ function BagSlot({ item, size, selected, onPressIn, onLongPress, onPress }: Slot
       {imgSrc ? (
         <>
           <Image source={imgSrc} style={styles.slotImg} resizeMode="contain" resizeMethod="resize" />
-          <SeasonedItemBadge visible={item?.seasonedStage !== undefined || !!item?.weaponEnhanced || !!item?.armorEnhanced} />
+          <><ItemGradeBadge item={item} /><SeasonedItemBadge visible={item?.seasonedStage !== undefined || !!item?.weaponEnhanced || !!item?.armorEnhanced} /></>
           <ItemDurabilityBadge item={item} />
           {item?.containedQuantity != null && item.containedQuantity > 0 && (
             <View style={styles.contentsCircle}>
@@ -975,3 +976,4 @@ const styles = StyleSheet.create({
   bagIconLocked: { borderColor: "rgba(58,58,58,0.8)", backgroundColor: "rgba(25,20,15,0.70)", opacity: 1 },
   bagIconImg: { width: 96, height: 96 },
 });
+import { getItemBuffPotency, foodRecoveryBonus } from "@/src/game/item-system";

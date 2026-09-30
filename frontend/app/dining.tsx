@@ -1,3 +1,4 @@
+import ItemGradeBadge from "@/src/components/item-grade-badge";
 import { consumeStoredWater, loadWaterStorage } from "@/src/game/water-storage";
 import WaterLocationHeading from "@/src/components/water-location-heading";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -1718,7 +1719,7 @@ export default function DiningScreen() {
                       mealImage ? (
                         <>
                           <Image source={mealImage} style={styles.mealImage} resizeMode="contain" resizeMethod="resize" />
-                          <SeasonedItemBadge visible={meal.seasonedStage !== undefined} />
+                          <><ItemGradeBadge item={meal} /><SeasonedItemBadge visible={meal.seasonedStage !== undefined} /></>
                         </>
                       ) : (
                         <Text style={styles.mealFallbackText} numberOfLines={2}>{meal.name}</Text>

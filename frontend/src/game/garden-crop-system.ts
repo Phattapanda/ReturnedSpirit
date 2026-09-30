@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import type { GardenPlotData } from "@/src/components/GardenPlot";
 import type { BagItem } from "@/src/game/item-system";
+import { cropGrade } from "@/src/game/item-grade";
 
 export const SECOND_GARDEN_PLOT_KEY = "@garden:plot_02_data";
 export const THIRD_GARDEN_PLOT_KEY = "@garden:plot_03_data";
@@ -242,6 +243,7 @@ export function createGardenPlotFromSeed(
 
   return {
     ...basePlot,
+    premiumFertilizerUses: 0,
     status: "growing",
     cropType: config.cropType,
     cropAsset: config.cropAsset,
@@ -266,9 +268,10 @@ export function createGardenPlotFromSeed(
 export function createHarvestBagForCrop(
   seedItemId: string | null,
   containedQuantity: number,
+  plot: { yieldUpgradeLevel?: number; premiumFertilizerUses?: number } = {},
 ): BagItem | null {
   const config = getGardenSeedConfig(seedItemId);
-  return config ? { ...config.harvestBag, containedQuantity } : null;
+  return config ? { ...config.harvestBag, containedQuantity, grade: cropGrade(plot) } : null;
 }
 
 export function getCropYieldLabel(seedItemId: string | null): string {

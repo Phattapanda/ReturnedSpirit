@@ -1277,6 +1277,7 @@ setExploreUnlocked(exploreAvailable);
       ...plotData,
       fertilizedToday: true,
       fertilizerTypeUsedToday: selectedFertilizer,
+      premiumFertilizerUses: (plotData.premiumFertilizerUses ?? 0) + (fertConfig.id === "premium_fertilizer" ? 1 : 0),
       accumulatedFertilizerYieldBonus: plotData.accumulatedFertilizerYieldBonus + fertConfig.yieldBonus,
     };
     setPlotData(newPlot);
@@ -1341,6 +1342,7 @@ setExploreUnlocked(exploreAvailable);
       const finalYield = plotData.baseYield + plotData.accumulatedWeedYieldBonus + plotData.accumulatedFertilizerYieldBonus;
 
       const herbBagItem: BagItem = {
+        grade: cropGrade(plotData),
         id: "bag_herb",
         itemType: "bag_herb",
         name: `Herb Bag`,
@@ -1411,7 +1413,7 @@ setExploreUnlocked(exploreAvailable);
     actionLocked.current = true;
 
     const finalYield = plotData.baseYield + plotData.accumulatedWeedYieldBonus + plotData.accumulatedFertilizerYieldBonus;
-    const harvestBag = createHarvestBagForCrop(plotData.seedItemId, finalYield);
+    const harvestBag = createHarvestBagForCrop(plotData.seedItemId, finalYield, plotData);
     if (!harvestBag) {
       showPlayerBubble('"I can\'t harvest this crop yet."');
       actionLocked.current = false;
@@ -2889,3 +2891,4 @@ const styles = StyleSheet.create({
   menuRow: { flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 13, paddingHorizontal: 6, borderRadius: 10 },
   menuRowText: { color: "#F0E8D5", fontSize: 15, fontFamily: "Oldenburg", letterSpacing: 0.4 },
 });
+import { cropGrade } from "@/src/game/item-grade";
