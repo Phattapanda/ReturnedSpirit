@@ -1,13 +1,6 @@
 import React, { useEffect, useState } from "react";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  Image,
-  StyleSheet,
-  useWindowDimensions,
-  type ImageSourcePropType,
-} from "react-native";
+import { View, TouchableOpacity, Image, StyleSheet, useWindowDimensions, type ImageSourcePropType } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { ACTIVITIES, type ActivityId } from "@/src/game/activity-config";
 import { calcEffectiveStaminaCost } from "@/src/game/player-stats";
 import {

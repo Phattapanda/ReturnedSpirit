@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
-import { Animated, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions, type ImageSourcePropType } from "react-native";
+import { Animated, ScrollView, StyleSheet, TouchableOpacity, View, useWindowDimensions, type ImageSourcePropType } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import Reanimated, { useAnimatedStyle, useSharedValue, withSequence, withTiming } from "react-native-reanimated";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -30,7 +31,7 @@ const SLASH = require("../assets/images/slash.png");
 const CRITICAL = require("../assets/images/critical.png");
 const PUNCH = require("../assets/images/punch.png");
 const CARCASS = require("../assets/images/monster_carcass.png");
-const BACKGROUND = require("../assets/images/battle_tutorial.png");
+const BACKGROUND = require("../assets/images/battle_tutorial.webp");
 const WOLF_MAX_LIFE = 18;
 
 type Phase = "journey" | "combat" | "victory" | "post" | "leaving";

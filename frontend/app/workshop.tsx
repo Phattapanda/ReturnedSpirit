@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Image, Modal, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -19,7 +20,7 @@ import { createCraftedScroll, SCROLL_BASE_USES } from "@/src/game/scroll-system"
 import { PLAYER_STATS_KEY, normalizePlayerStats } from "@/src/game/player-stats";
 import { UI_NOTIFICATION_DURATION_MS } from "@/src/ui/timings";
 
-const BACKGROUND = require("../assets/images/workshop.png");
+const BACKGROUND = require("../assets/images/workshop.webp");
 const TOOL_CATEGORIES = [
   { id: "hand", label: "Hand", image: null },
   { id: "mortar_and_pestle", label: "Mortar and Pestle", image: require("../assets/images/mortar_and_pestle.png") },

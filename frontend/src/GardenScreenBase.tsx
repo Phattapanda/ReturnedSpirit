@@ -4,21 +4,8 @@ import { loadWaterStorage, refillWaterStorage } from "@/src/game/water-storage";
 import React, { useState, useRef, useEffect } from "react";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
 import { UI_NOTIFICATION_DURATION_MS } from "@/src/ui/timings";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  Modal,
-  StyleSheet,
-  ScrollView,
-  Platform,
-  Keyboard,
-  Pressable,
-  Animated as RNAnimated,
-  Image,
-  useWindowDimensions,
-  type ImageSourcePropType,
-} from "react-native";
+import { View, TouchableOpacity, Modal, StyleSheet, ScrollView, Platform, Keyboard, Pressable, Animated as RNAnimated, Image, useWindowDimensions, type ImageSourcePropType } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -195,7 +182,7 @@ const DAYS = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"] as const;
 // ─── Assets ───────────────────────────────────────────────────────────────────
 
 const IMG = {
-  garden:      require("../assets/images/garden1.png"),
+  garden:      require("../assets/images/garden1.webp"),
   rupert:      require("../assets/images/rupert.png"),
   rupertsad:   require("../assets/images/rupertsad.png"),
   rupertlaugh: require("../assets/images/rupertlaugh.png"),

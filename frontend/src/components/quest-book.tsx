@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions, type ImageSourcePropType } from "react-native";
+import { Animated, Image, Modal, ScrollView, StyleSheet, TouchableOpacity, View, useWindowDimensions, type ImageSourcePropType } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 
 import { DIALOG_CHARACTER_ASSETS, RUPERT_DIALOG_SCALE } from "@/src/assets/dialog-character-assets";
 import StoryDialogOverlay, { type StoryDialogLine } from "@/src/components/story-dialog-overlay";

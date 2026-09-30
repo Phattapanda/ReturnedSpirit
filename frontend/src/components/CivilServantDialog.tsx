@@ -1,5 +1,6 @@
 import React from "react";
-import { StyleSheet, Text, TouchableOpacity, type ImageSourcePropType } from "react-native";
+import { StyleSheet, TouchableOpacity, type ImageSourcePropType } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { Ionicons } from "@expo/vector-icons";
 import CharacterDialogFrame from "@/src/components/character-dialog-frame";
 

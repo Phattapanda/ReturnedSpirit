@@ -1,17 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  Modal,
-  TextInput,
-  KeyboardAvoidingView,
-  Platform,
-  Image,
-  Keyboard,
-} from "react-native";
+import { View, TouchableOpacity, StyleSheet, ScrollView, Modal, TextInput, KeyboardAvoidingView, Platform, Image, Keyboard } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Image as BackgroundImage } from "expo-image";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -27,7 +16,7 @@ import {
   type PlayerAvatarId,
 } from "@/src/game/player-avatar";
 
-const BG = require("../assets/images/mainpage.png");
+const BG = require("../assets/images/mainpage_1.0.6.webp");
 
 type SaveSlot = {
   slot: number;
@@ -210,7 +199,7 @@ export default function NewGame() {
               />
             </View>
             <View style={styles.cardInfo}>
-              <Text style={[styles.slotName, slot.occupied && styles.slotNameOccupied]}>
+              <Text translate={!slot.occupied} style={[styles.slotName, slot.occupied && styles.slotNameOccupied]}>
                 {slot.occupied ? slot.name! : `Slot ${slot.slot}`}
               </Text>
               <Text style={styles.slotSub}>

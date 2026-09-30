@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { BackHandler, Modal, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { BackHandler, Modal, StyleSheet, TouchableOpacity, View } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { usePathname, useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 

@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState } from "react";
-import { Image, Modal, StyleSheet, Text, TouchableOpacity, View, type ImageSourcePropType } from "react-native";
+import { Image, Modal, StyleSheet, TouchableOpacity, View, type ImageSourcePropType } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter, usePathname } from "expo-router";
 import { createSnapshot } from "@/src/game/save-manager";

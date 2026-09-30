@@ -1,12 +1,7 @@
 import React, { useState } from "react";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-} from "react-native";
+import { View, TouchableOpacity, StyleSheet, ScrollView } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { useRouter } from "expo-router";
 import { Image } from "expo-image";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -16,13 +11,14 @@ import Slider from "@react-native-community/slider";
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { useHaptics } from "@/src/feedback/haptics-provider";
 import { updateGameSettings, type HapticsMode } from "@/src/settings/game-settings";
+import { useLanguage } from "@/src/i18n/use-language";
 
-const BG = require("../assets/images/mainpage.png");
+const BG = require("../assets/images/mainpage_1.0.6.webp");
 
 const HAPTICS_MODES: HapticsMode[] = ["off", "light", "medium", "strong"];
-const HAPTICS_LABELS: Record<HapticsMode, string> = {
+const HAPTICS_LABELS = {
   off: "Off", light: "Light", medium: "Medium", strong: "Strong",
-};
+} as const;
 
 export default function Settings() {
   const { setManagedTimeout: setTimeout } = useManagedTimers();
@@ -31,7 +27,9 @@ export default function Settings() {
 
   const { musicVolume, sfxVolume, setMusicVolume, setSfxVolume, playSoundEffect, unlockAudio } = useAudioManager();
   const { hapticsMode, setHapticsMode } = useHaptics();
-  const [language] = useState("English");
+  const { language, setLanguage, t } = useLanguage();
+  const [languagePending, setLanguagePending] = useState(false);
+  const [languageError, setLanguageError] = useState(false);
 
   const saveMusicVolume = (value: number) => {
     updateGameSettings({ musicVolume: Math.round(value) }).catch(() => {});
@@ -56,7 +54,7 @@ export default function Settings() {
         }}>
           <Ionicons name="chevron-back" size={22} color="#2C1810" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Settings</Text>
+        <Text style={styles.headerTitle}>{t("Settings")}</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -66,7 +64,7 @@ export default function Settings() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <MaterialCommunityIcons name="music-note" size={20} color="#C4943A" />
-            <Text style={styles.sectionTitle}>Music Volume</Text>
+            <Text style={styles.sectionTitle}>{t("Music Volume")}</Text>
             <Text testID="music-volume-value" style={styles.sectionValue}>{musicVolume}%</Text>
           </View>
           <Slider
@@ -80,7 +78,7 @@ export default function Settings() {
             minimumTrackTintColor="#6B7C55"
             maximumTrackTintColor="#D7CEBD"
             thumbTintColor="#C4943A"
-            accessibilityLabel="Music volume"
+            accessibilityLabel={t("Music Volume")}
           />
         </View>
 
@@ -88,7 +86,7 @@ export default function Settings() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <MaterialCommunityIcons name="volume-high" size={20} color="#C4943A" />
-            <Text style={styles.sectionTitle}>Sound Effects</Text>
+            <Text style={styles.sectionTitle}>{t("Sound Effects")}</Text>
             <Text testID="sfx-volume-value" style={styles.sectionValue}>{sfxVolume}%</Text>
           </View>
           <Slider
@@ -102,7 +100,7 @@ export default function Settings() {
             minimumTrackTintColor="#6B7C55"
             maximumTrackTintColor="#D7CEBD"
             thumbTintColor="#C4943A"
-            accessibilityLabel="Sound effects volume"
+            accessibilityLabel={t("Sound Effects")}
           />
         </View>
 
@@ -110,8 +108,8 @@ export default function Settings() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <MaterialCommunityIcons name="vibrate" size={20} color="#C4943A" />
-            <Text style={styles.sectionTitle}>Haptics</Text>
-            <Text testID="haptics-value" style={styles.sectionValue}>{HAPTICS_LABELS[hapticsMode]}</Text>
+            <Text style={styles.sectionTitle}>{t("Haptics")}</Text>
+            <Text testID="haptics-value" style={styles.sectionValue}>{t(HAPTICS_LABELS[hapticsMode])}</Text>
           </View>
           <View style={styles.toggleRow}>
             {HAPTICS_MODES.map((mode) => (
@@ -122,22 +120,36 @@ export default function Settings() {
                 onPress={() => setHapticsMode(mode)}
               >
                 <Text style={[styles.toggleText, hapticsMode === mode && styles.toggleTextActive]}>
-                  {HAPTICS_LABELS[mode]}
+                  {t(HAPTICS_LABELS[mode])}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
-          <Text style={styles.settingHint}>Only important actions: crafting, serving guests, level ups, and story choices.</Text>
+          <Text style={styles.settingHint}>{t("Only important actions: crafting, serving guests, level ups, and story choices.")}</Text>
         </View>
 
         {/* Language */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <MaterialCommunityIcons name="translate" size={20} color="#C4943A" />
-            <Text style={styles.sectionTitle}>Language</Text>
-            <Text testID="language-value" style={styles.sectionValue}>{language}</Text>
+            <Text style={styles.sectionTitle}>{t("Language")}</Text>
+            <Text testID="language-value" style={styles.sectionValue}>{language === "de" ? "Deutsch" : "English"}</Text>
           </View>
-          <Text style={styles.comingSoon}>More languages coming soon.</Text>
+          <View style={styles.toggleRow}>
+            {(["en", "de"] as const).map(code => (
+              <TouchableOpacity key={code} testID={`language-${code}`} accessibilityRole="button"
+                accessibilityState={{ selected: language === code, disabled: languagePending }}
+                disabled={languagePending} style={[styles.toggleBtn, language === code && styles.toggleBtnActive]}
+                onPress={async () => {
+                  setLanguagePending(true); setLanguageError(false);
+                  try { await setLanguage(code); } catch { setLanguageError(true); }
+                  finally { setLanguagePending(false); }
+                }}>
+                <Text style={[styles.toggleText, language === code && styles.toggleTextActive]}>{code === "de" ? "Deutsch" : "English"}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          {languageError && <Text accessibilityRole="alert" style={styles.settingHint}>{t("Could not save language. Please try again.")}</Text>}
         </View>
 
       </ScrollView>

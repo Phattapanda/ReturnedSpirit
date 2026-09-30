@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { StyleSheet, Text, View, type LayoutChangeEvent } from "react-native";
+import { StyleSheet, View, type LayoutChangeEvent } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 
 type PortraitBubbleProps = {
   anchorX: number;

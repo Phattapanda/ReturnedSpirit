@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useRef } from "react";
-import { View, Text, TouchableOpacity, FlatList, StyleSheet } from "react-native";
+import { View, TouchableOpacity, FlatList, StyleSheet } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";

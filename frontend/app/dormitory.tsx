@@ -1,15 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  Modal,
-  ScrollView,
-  Image,
-  StyleSheet,
-  useWindowDimensions,
-} from "react-native";
+import { View, TouchableOpacity, Modal, ScrollView, Image, StyleSheet, useWindowDimensions } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";

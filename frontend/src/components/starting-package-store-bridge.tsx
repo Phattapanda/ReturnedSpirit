@@ -7,6 +7,7 @@ import {
   STARTING_PACKAGE_PRODUCT_ID,
   HARVEST_PACKAGE_PRODUCT_ID,
   grantHarvestPackageEntitlement,
+  IN_APP_PURCHASES_ENABLED,
 } from "@/src/game/starting-package-purchase";
 
 type Props = {
@@ -58,7 +59,7 @@ export default function StartingPackageStoreBridge({ productId = STARTING_PACKAG
   }, [availablePurchases, onError, onOwned, productId, grantEntitlement]);
 
   useEffect(() => {
-    if (!purchaseRequest || purchaseRequest === handledRequest.current) return;
+    if (!IN_APP_PURCHASES_ENABLED || !purchaseRequest || purchaseRequest === handledRequest.current) return;
     handledRequest.current = purchaseRequest;
     if (!connected) {
       onError("The store is not available yet. Please try again shortly.");

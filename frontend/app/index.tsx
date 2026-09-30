@@ -1,14 +1,6 @@
 import React, { useCallback, useEffect, useState, useRef } from "react";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  StatusBar,
-  Modal,
-  Pressable,
-  ScrollView,
-} from "react-native";
+import { View, TouchableOpacity, StyleSheet, StatusBar, Modal, Pressable, ScrollView } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Image } from "expo-image";
 import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
@@ -19,11 +11,12 @@ import { useAudioManager } from "@/src/audio/AudioProvider";
 import { audioEngine, getRandomMainMenuTheme } from "@/src/audio/audioEngine";
 import StartingPackageStoreBridge from "@/src/components/starting-package-store-bridge";
 import PurchaseIconShine from "@/src/components/purchase-icon-shine";
-import { ownsStartingPackage, ownsHarvestPackage, HARVEST_PACKAGE_PRODUCT_ID } from "@/src/game/starting-package-purchase";
+import { ownsStartingPackage, ownsHarvestPackage, HARVEST_PACKAGE_PRODUCT_ID, IN_APP_PURCHASES_ENABLED } from "@/src/game/starting-package-purchase";
 
 import MenuAttentionPulse from "@/src/components/menu-attention-pulse";
+import { useLanguage } from "@/src/i18n/use-language";
 
-const BG = require("../assets/images/mainpage.png");
+const BG = require("../assets/images/mainpage_1.0.6.webp");
 const LETTER_UNREAD = require("../assets/images/letter.png");
 const LETTER_READ = require("../assets/images/letter_open.png");
 const STARTING_PACKAGE = require("../assets/images/startingpackage7days.png");
@@ -36,7 +29,7 @@ const STARTING_VIEWED_KEY = "@main-menu:starting-package-viewed";
 const HARVEST_VIEWED_KEY = "@main-menu:harvest-package-viewed";
 // Show once per app session, not each time the player returns to the menu.
 let earlyAccessDismissed = false;
-const NATIVE_IAP_AVAILABLE = (process.env.EXPO_OS === "android" || process.env.EXPO_OS === "ios")
+const NATIVE_IAP_AVAILABLE = IN_APP_PURCHASES_ENABLED && (process.env.EXPO_OS === "android" || process.env.EXPO_OS === "ios")
   && requireOptionalNativeModule("ExpoIap") !== null;
 
 const MENU_ITEMS = [
@@ -44,9 +37,10 @@ const MENU_ITEMS = [
   { id: "load-game", label: "Load Game", icon: "bookmark-multiple-outline" as const },
   { id: "settings", label: "Settings", icon: "cog-outline" as const },
   { id: "support", label: "Support", icon: "email-outline" as const },
-];
+] as const;
 
 export default function MainMenu() {
+  const { t } = useLanguage();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [showEarlyAccess, setShowEarlyAccess] = useState(false);
@@ -114,7 +108,7 @@ export default function MainMenu() {
       setPulseTarget(null);
       return;
     }
-    const eligible = [!earlyAccessRead, !testerGiftRead, !startingViewed && !startingPackageOwned, !harvestViewed && !harvestPackageOwned];
+    const eligible = [!earlyAccessRead, !testerGiftRead, IN_APP_PURCHASES_ENABLED && !startingViewed && !startingPackageOwned, IN_APP_PURCHASES_ENABLED && !harvestViewed && !harvestPackageOwned];
     const queue = eligible.map((value, index) => value && !pulsed.current.has(index) ? index : -1).filter(index => index >= 0);
     const timers: ReturnType<typeof setTimeout>[] = [];
     queue.forEach((index, order) => {
@@ -267,7 +261,7 @@ export default function MainMenu() {
           </TouchableOpacity>
           </MenuAttentionPulse>
           </View>
-          <View style={styles.mailButtons}>
+          {IN_APP_PURCHASES_ENABLED && <View style={styles.mailButtons}>
           <MenuAttentionPulse active={pulseTarget === 2}>
           <TouchableOpacity
             testID="starting-package-button"
@@ -285,7 +279,7 @@ export default function MainMenu() {
           <TouchableOpacity
             testID="harvest-package-button"
             accessibilityRole="button"
-            accessibilityLabel="Open Harvest Sun Package offer"
+            accessibilityLabel="Open Garden-Bundle offer"
             style={styles.startingPackageButton}
             onPress={() => { setHarvestViewed(true); void AsyncStorage.setItem(HARVEST_VIEWED_KEY, "true").catch(() => {}); setHarvestPurchaseError(""); setShowHarvestPackage(true); }}
             activeOpacity={0.78}
@@ -294,7 +288,7 @@ export default function MainMenu() {
             <PurchaseIconShine delay={3700} />
           </TouchableOpacity>
           </MenuAttentionPulse>
-          </View>
+          </View>}
         </View>
         {MENU_ITEMS.map((item) => (
           <TouchableOpacity
@@ -305,7 +299,7 @@ export default function MainMenu() {
             activeOpacity={0.75}
           >
             <MaterialCommunityIcons name={item.icon} size={22} color="#C4943A" />
-            <Text style={styles.btnText}>{item.label}</Text>
+            <Text style={styles.btnText}>{t(item.label)}</Text>
             <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.45)" />
           </TouchableOpacity>
         ))}
@@ -324,9 +318,9 @@ export default function MainMenu() {
               </Pressable>
             </View>
             <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ gap: 16 }}>
-              <Text selectable style={styles.noticeText}><Text style={{ fontStyle: "italic" }}>A Returned Spirit</Text> is still in <Text style={{ fontWeight: "700" }}>Early Access</Text> and is actively being developed.</Text>
+              <Text selectable style={styles.noticeText}>A Returned Spirit is still in Early Access and is actively being developed.</Text>
               <Text selectable style={styles.noticeText}>New content, features and improvements will be added regularly.</Text>
-              <Text selectable style={styles.noticeText}>If you encounter any bugs or problems, please let me know using the <Text style={{ fontWeight: "700" }}>Support</Text> button.</Text>
+              <Text selectable style={styles.noticeText}>If you encounter any bugs or problems, please let me know using the Support button.</Text>
               <Text selectable style={styles.noticeText}>Thank you for playing and helping improve the game! ❤️</Text>
             </ScrollView>
             <Pressable
@@ -368,9 +362,9 @@ export default function MainMenu() {
             </View>
             <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ gap: 16 }}>
               <Text selectable style={styles.noticeText}>
-                As a little thank-you for testing, use the code{" "}
-                <Text style={styles.bonusCode}>welcometraveller</Text> in-game to receive
+                As a little thank-you for testing, use the following code in-game:
               </Text>
+              <Text selectable translate={false} style={styles.bonusCode}>welcometraveller</Text>
               <Text selectable style={[styles.noticeText, styles.rewardText]}>
                 1 Silver Coin + 3× Low Grade Stamina Potions. 🎁
               </Text>
@@ -379,7 +373,7 @@ export default function MainMenu() {
           </View>
         </View>
       </Modal>
-      <Modal visible={showStartingPackage} transparent animationType="fade" onRequestClose={() => setShowStartingPackage(false)}>
+      <Modal visible={IN_APP_PURCHASES_ENABLED && showStartingPackage} transparent animationType="fade" onRequestClose={() => setShowStartingPackage(false)}>
         <View style={[styles.noticeOverlay, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowStartingPackage(false)} />
           <View accessibilityViewIsModal style={styles.noticePanel}>
@@ -406,12 +400,12 @@ export default function MainMenu() {
           </View>
         </View>
       </Modal>
-      <Modal visible={showHarvestPackage} transparent animationType="fade" onRequestClose={() => setShowHarvestPackage(false)}>
+      <Modal visible={IN_APP_PURCHASES_ENABLED && showHarvestPackage} transparent animationType="fade" onRequestClose={() => setShowHarvestPackage(false)}>
         <View style={[styles.noticeOverlay, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowHarvestPackage(false)} />
           <View accessibilityViewIsModal style={styles.noticePanel}>
             <View style={styles.noticeHeader}>
-              <Text selectable accessibilityRole="header" style={styles.noticeTitle}>Harvest Sun Package</Text>
+              <Text selectable accessibilityRole="header" style={styles.noticeTitle}>Garden-Bundle</Text>
               <Pressable accessibilityRole="button" accessibilityLabel="Close offer" onPress={() => setShowHarvestPackage(false)} style={styles.noticeClose}>
                 <Text style={styles.noticeCloseText}>×</Text>
               </Pressable>

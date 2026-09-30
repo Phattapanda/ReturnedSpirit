@@ -719,6 +719,7 @@ export const CITY_BUY_PRICES: Record<string, number> = {
   herbs: 6, carrot: 8, potato: 10, onion: 12, tomato: 18, cucumber: 16, lettuce: 14, spinach: 17, pumpkin: 20,
   egg: 14, fish: 25, white_meat: 23, red_meat: 28,
   seed_lettuce: 24, seed_cucumber: 28, seed_spinach: 30, seed_tomato: 32, seed_pumpkin: 36,
+  standard_fertilizer: 5, premium_fertilizer: 15,
 };
 export function citySellPrice(id: string): number { return Math.ceil((BASE_PRICES[id] ?? ITEM_CATALOG[id]?.baseSellPriceCopper ?? 2) * 0.5); }
 

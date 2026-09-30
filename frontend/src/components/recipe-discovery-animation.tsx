@@ -1,5 +1,6 @@
 import React, { useEffect } from "react";
-import { Image, StyleSheet, Text, View, useWindowDimensions, type ImageSourcePropType } from "react-native";
+import { Image, StyleSheet, View, useWindowDimensions, type ImageSourcePropType } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import Animated, { useAnimatedStyle, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
 
 export default function RecipeDiscoveryAnimation({ name, image }: { name: string; image?: ImageSourcePropType }) {

@@ -1,4 +1,5 @@
-import { Text, View } from "react-native";
+import { View } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { Image } from "expo-image";
 import { useWaterStorage } from "@/src/hooks/use-water-storage";
 

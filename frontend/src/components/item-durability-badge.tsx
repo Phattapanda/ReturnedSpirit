@@ -1,5 +1,6 @@
 import React from "react";
-import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 
 import { getItemDurability, type BagItem } from "@/src/game/item-system";
 

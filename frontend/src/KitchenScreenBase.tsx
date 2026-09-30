@@ -3,22 +3,9 @@ import WaterLocationHeading from "@/src/components/water-location-heading";
 import React, { useState, useRef, useEffect } from "react";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
 import { UI_NOTIFICATION_DURATION_MS } from "@/src/ui/timings";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  Pressable,
-  Image,
-  Modal,
-  StyleSheet,
-  ScrollView,
-  TextInput,
-  KeyboardAvoidingView,
-  Platform,
-  Keyboard,
-  useWindowDimensions,
-  type ImageSourcePropType,
-} from "react-native";
+import { View, TouchableOpacity, Pressable, Image, Modal, StyleSheet, ScrollView, TextInput, KeyboardAvoidingView, Platform, Keyboard, useWindowDimensions, type ImageSourcePropType } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
+import { useLanguage } from "@/src/i18n/use-language";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -269,8 +256,10 @@ interface BubbleConfig {
   highlightedPhrases?: readonly string[];
 }
 
-function highlightedTextParts(text: string, phrases: readonly string[] = []) {
-  const filtered = phrases.filter(Boolean);
+function TranslatedDialogText({ text: original, phrases = [] }: { text: string; phrases?: readonly string[] }) {
+  const { t } = useLanguage();
+  const text = t(original);
+  const filtered = phrases.filter(Boolean).map(t);
   if (filtered.length === 0) return text;
   const matcher = new RegExp(`(${filtered.map((phrase) => phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "gi");
   return text.split(matcher).map((part, index) => {
@@ -5522,7 +5511,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
             </TouchableOpacity>
           ) : null}
         >
-          {ts === "NAME_INPUT" && nameInputOpen ? <Text style={styles.dlgText}>{D_WHO_ASK.text}</Text> : curLine ? <Text style={styles.dlgText}>{highlightedTextParts(curLine.text, curLine.highlightedPhrases)}</Text> : null}
+          {ts === "NAME_INPUT" && nameInputOpen ? <Text style={styles.dlgText}>{D_WHO_ASK.text}</Text> : curLine ? <Text style={styles.dlgText}><TranslatedDialogText text={curLine.text} phrases={curLine.highlightedPhrases} /></Text> : null}
         </CharacterDialogFrame>
       )}
 

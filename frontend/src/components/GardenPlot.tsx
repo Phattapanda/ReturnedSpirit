@@ -1,14 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  Image,
-  Modal,
-  Pressable,
-  StyleSheet,
-  type ImageSourcePropType,
-} from "react-native";
+import { View, TouchableOpacity, Image, Modal, Pressable, StyleSheet, type ImageSourcePropType } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Animated, {
   useSharedValue,

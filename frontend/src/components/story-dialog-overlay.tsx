@@ -1,7 +1,9 @@
 import React from "react";
-import { StyleSheet, Text, TouchableOpacity, View, type ImageSourcePropType } from "react-native";
+import { StyleSheet, TouchableOpacity, View, type ImageSourcePropType } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { Ionicons } from "@expo/vector-icons";
 import CharacterDialogFrame from "@/src/components/character-dialog-frame";
+import { useLanguage } from "@/src/i18n/use-language";
 
 export type StoryDialogLine = {
   speaker?: string;
@@ -24,10 +26,12 @@ type Props = {
 };
 
 function RichText({ line }: { line: StoryDialogLine }) {
-  const phrases = line.highlightedPhrases ?? [];
-  if (!phrases.length) return <Text selectable style={styles.dialogText}>{line.text}</Text>;
+  const { t } = useLanguage();
+  const text = t(line.text);
+  const phrases = (line.highlightedPhrases ?? []).map(t);
+  if (!phrases.length) return <Text selectable style={styles.dialogText}>{text}</Text>;
   const matcher = new RegExp(`(${phrases.map((phrase) => phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "gi");
-  return <Text selectable style={styles.dialogText}>{line.text.split(matcher).map((part, index) => {
+  return <Text selectable style={styles.dialogText}>{text.split(matcher).map((part, index) => {
     const highlighted = phrases.some((phrase) => phrase.toLocaleLowerCase() === part.toLocaleLowerCase());
     return <Text key={`${index}-${part}`} style={highlighted ? styles.highlight : undefined}>{part}</Text>;
   })}</Text>;

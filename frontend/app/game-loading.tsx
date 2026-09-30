@@ -28,14 +28,8 @@ import { migrateLegacyWaterBuckets } from "@/src/game/water-storage";
  */
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Animated as RNAnimated,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-  useWindowDimensions,
-} from "react-native";
+import { Animated as RNAnimated, StyleSheet, TouchableOpacity, View, useWindowDimensions } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -51,7 +45,7 @@ import { NEXT_RUN_INTRO_PENDING_KEY } from "@/src/game/tithe-system";
 import { ensureStartingPackageForCurrentRun } from "@/src/game/starting-package-purchase";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const BG = require("../assets/images/mainpage.png");
+const BG = require("../assets/images/mainpage_1.0.6.webp");
 const MIN_DISPLAY_MS = 650; // prevent sub-second flash when cache is warm
 const TIP_DISPLAY_MS = 2900;
 

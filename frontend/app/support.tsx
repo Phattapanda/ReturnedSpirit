@@ -1,14 +1,7 @@
 import { useRef, useState } from "react";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  TextInput,
-  KeyboardAvoidingView,
-  Platform,
-} from "react-native";
+import { View, TouchableOpacity, StyleSheet, ScrollView, TextInput, KeyboardAvoidingView, Platform } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
+import { useLanguage } from "@/src/i18n/use-language";
 import { useRouter } from "expo-router";
 import { Image } from "expo-image";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -16,7 +9,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { fetch } from "expo/fetch";
 
-const BG = require("../assets/images/mainpage.png");
+const BG = require("../assets/images/mainpage_1.0.6.webp");
 
 const CATEGORIES = [
   { key: "bug", label: "Bug" },
@@ -27,6 +20,7 @@ const CATEGORIES = [
 type CategoryKey = (typeof CATEGORIES)[number]["key"];
 
 export default function Support() {
+  const { t } = useLanguage();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [message, setMessage] = useState("");
@@ -161,7 +155,7 @@ export default function Support() {
                 editable={!sending}
                 maxLength={5000}
                 onChangeText={setMessage}
-                placeholder="Found a bug, have a suggestion, or just want to say hi?"
+                placeholder={t("Found a bug, have a suggestion, or just want to say hi?")}
                 placeholderTextColor="#A89880"
                 multiline
                 numberOfLines={5}
@@ -178,7 +172,7 @@ export default function Support() {
                 value={replyEmail}
                 editable={!sending}
                 onChangeText={(value) => { setReplyEmail(value); setEmailError(null); }}
-                placeholder="Only if you would like a reply"
+                placeholder={t("Only if you would like a reply")}
                 placeholderTextColor="#A89880"
                 keyboardType="email-address"
                 autoCapitalize="none"

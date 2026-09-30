@@ -1,16 +1,7 @@
 import { expandWaterStorageFromBag } from "@/src/game/water-storage";
 import React, { useState, useRef, useEffect } from "react";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  Pressable,
-  Image,
-  Modal,
-  StyleSheet,
-  useWindowDimensions,
-  type ImageSourcePropType,
-} from "react-native";
+import { View, TouchableOpacity, Pressable, Image, Modal, StyleSheet, useWindowDimensions, type ImageSourcePropType } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";

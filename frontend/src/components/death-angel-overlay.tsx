@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import { useEventListener } from "expo";
 import { VideoView, useVideoPlayer } from "expo-video";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Animated, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Animated, Image, ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { KARMA_TAVERN_RETURN_COST, nextRunBonusCost, REPEAT_FIGHT_KP_COST } from "@/src/game/death-angel-system";
@@ -12,7 +13,7 @@ import { PLAYER_STATS_KEY, normalizePlayerStats } from "@/src/game/player-stats"
 
 const MEETING_DEATH_VIDEO = require("../../assets/video/meeting_death.mp4");
 const REBIRTH_VIDEO = require("../../assets/video/rebirth.mp4");
-const MEETING_DEATH_BACKGROUND = require("../../assets/images/meeting_death.png");
+const MEETING_DEATH_BACKGROUND = require("../../assets/images/meeting_death.webp");
 const DEATH_AVATARS = {
   1: require("../../assets/images/avatar1_death.jpeg"),
   2: require("../../assets/images/avatar2_death.jpeg"),

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, type ReactNode } from "react";
-import { Animated, Image as NativeImage, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions, type ImageSourcePropType, type LayoutRectangle } from "react-native";
+import { Animated, Image as NativeImage, StyleSheet, TouchableOpacity, View, useWindowDimensions, type ImageSourcePropType, type LayoutRectangle } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -95,7 +96,7 @@ export default function CharacterDialogFrame({
         ]}
       >
         <View style={styles.metaRow}>
-          <Text selectable style={styles.speaker}>{speakerName || "• • •"}</Text>
+          <Text translate={!playerCharacter} selectable style={styles.speaker}>{speakerName || "• • •"}</Text>
           {onSkip ? (
             <TouchableOpacity style={styles.skipButton} onPress={onSkip} activeOpacity={0.78} accessibilityRole="button" accessibilityLabel="Skip dialog">
               <Text style={styles.skipText}>Skip</Text>

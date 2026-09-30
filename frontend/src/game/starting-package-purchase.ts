@@ -3,6 +3,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { activatePurchasedStartingPackage, activatePurchasedHarvestPackage } from "@/src/game/mailbox-system";
 
 export const STARTING_PACKAGE_PRODUCT_ID = "startingpackage7days";
+// Enable explicitly when the Google Play release and store products are ready.
+export const IN_APP_PURCHASES_ENABLED = false;
 export const STARTING_PACKAGE_ENTITLEMENT_KEY = "@iap:starting-package-7-days-owned";
 
 export async function ownsStartingPackage(): Promise<boolean> {

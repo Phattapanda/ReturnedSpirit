@@ -591,7 +591,7 @@ export async function activatePurchasedHarvestPackage(): Promise<MailboxState> {
     redeemedCodes: [...state.redeemedCodes, "PURCHASE_HARVESTSUN"],
     messages: [...state.messages, {
       id, sender: definition.sender, senderKind: "system",
-      subject: "Harvest Sun Package", body: definition.body,
+      subject: "Garden-Bundle", body: definition.body,
       rewards: definition.rewards.map(reward => ({...reward})),
       deliveredAt: Date.now(), read: false, claimed: false,
     }],

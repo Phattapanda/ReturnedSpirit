@@ -2,18 +2,8 @@ import { consumeStoredWater, loadWaterStorage } from "@/src/game/water-storage";
 import WaterLocationHeading from "@/src/components/water-location-heading";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  Modal,
-  ScrollView,
-  Animated as RNAnimated,
-  Image,
-  StyleSheet,
-  useWindowDimensions,
-  type ImageSourcePropType,
-} from "react-native";
+import { View, TouchableOpacity, Modal, ScrollView, Animated as RNAnimated, Image, StyleSheet, useWindowDimensions, type ImageSourcePropType } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";

@@ -1,14 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  Animated,
-  Image,
-  Pressable,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-  useWindowDimensions,
-} from "react-native";
+import { Animated, Image, Pressable, StyleSheet, TouchableOpacity, View, useWindowDimensions } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { useEventListener } from "expo";
 import { useRouter } from "expo-router";
 import { useAudioPlayer } from "expo-audio";

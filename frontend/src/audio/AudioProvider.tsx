@@ -64,7 +64,10 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     });
 
     // App foreground/background handling
+    audioEngine.setAppActive(AppState.currentState === 'active');
+    const recoveryTimer = setInterval(() => { void audioEngine.recoverGameplayMusic(); }, 3000);
     const appStateSub = AppState.addEventListener('change', (next: AppStateStatus) => {
+      audioEngine.setAppActive(next === 'active');
       if (next === 'active') {
         // Reload settings in case they changed while in background
         audioEngine.loadSettings().catch(() => {});
@@ -74,6 +77,7 @@ export function AudioProvider({ children }: { children: React.ReactNode }) {
     });
 
     return () => {
+      clearInterval(recoveryTimer);
       unsub();
       appStateSub.remove();
     };

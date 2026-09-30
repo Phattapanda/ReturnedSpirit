@@ -1,12 +1,6 @@
 import { useState, useCallback } from "react";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  Modal,
-} from "react-native";
+import { View, TouchableOpacity, StyleSheet, ScrollView, Modal } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Image } from "expo-image";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -15,7 +9,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { clearSlotSnapshot } from "@/src/game/save-manager";
 import { copySave } from "@/src/game/copy-save";
 
-const BG = require("../assets/images/mainpage.png");
+const BG = require("../assets/images/mainpage_1.0.6.webp");
 
 type SaveSlot = {
   slot: number;
@@ -140,7 +134,7 @@ export default function LoadGame() {
               activeOpacity={slot.occupied ? 0.7 : 1}
               disabled={!slot.occupied}
             >
-              <Text style={[styles.slotName, !slot.occupied && styles.slotNameEmpty]}>
+              <Text translate={!slot.occupied} style={[styles.slotName, !slot.occupied && styles.slotNameEmpty]}>
                 {slot.occupied ? slot.name! : `Slot ${slot.slot} · empty`}
               </Text>
               {slot.occupied ? (

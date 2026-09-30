@@ -1,7 +1,9 @@
 import React from "react";
-import { StyleSheet, Text, TouchableOpacity, type ImageSourcePropType } from "react-native";
+import { StyleSheet, TouchableOpacity, type ImageSourcePropType } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { Ionicons } from "@expo/vector-icons";
 import CharacterDialogFrame from "@/src/components/character-dialog-frame";
+import { useLanguage } from "@/src/i18n/use-language";
 
 export type GuestTutorialDialogLine = {
   speaker: string;
@@ -67,6 +69,7 @@ function splitHighlightedText(text: string, phrases: readonly string[] = []): Di
  * It intentionally matches the standard story-dialog portrait size and crop.
  */
 export default function GuestTutorialDialog({ visible, line, onContinue, onSkip }: Props) {
+  const { t } = useLanguage();
   if (!visible || !line) return null;
 
   return (
@@ -86,7 +89,7 @@ export default function GuestTutorialDialog({ visible, line, onContinue, onSkip 
       )}
     >
       <Text style={styles.dialogText}>
-            {splitHighlightedText(line.text, line.highlightedPhrases).map((segment, index) => (
+            {splitHighlightedText(t(line.text), line.highlightedPhrases?.map(t)).map((segment, index) => (
               <Text key={`${index}-${segment.text}`} style={segment.highlighted ? styles.requiredStepText : undefined}>
                 {segment.text}
               </Text>

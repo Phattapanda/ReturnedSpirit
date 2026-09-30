@@ -175,6 +175,40 @@ class AudioEngine {
   // State
   private audioUnlocked = false;
   private initialized = false;
+  private gameplayMusicWanted = false;
+  private appActive = true;
+  private recoveringMusic = false;
+
+  setAppActive(active: boolean): void {
+    this.appActive = active;
+    if (active) void this.recoverGameplayMusic();
+  }
+
+  /** Recover interrupted playback, but never override a stop or a transition. */
+  async recoverGameplayMusic(): Promise<void> {
+    if (!this.appActive || !this.gameplayMusicWanted || this.recoveringMusic
+      || this.crossfadeIntervalId !== null || this.loadCheckTimerId !== null
+      || this.stopFadeIntervalId !== null || !this.activeChannel || !this.currentThemeKey) return;
+    const player = this.getChannel(this.activeChannel);
+    if (!player || !player.isLoaded || player.playing || player.isBuffering) return;
+    const requestId = this.crossfadeRequestId;
+    this.recoveringMusic = true;
+    try {
+      player.loop = true;
+      if (player.duration > 0 && player.currentTime >= player.duration - 0.1) {
+        await player.seekTo(0);
+      }
+      // Seeking is asynchronous: a video, death or location change may intervene.
+      if (!this.appActive || !this.gameplayMusicWanted || requestId !== this.crossfadeRequestId
+        || !this.activeChannel || this.getChannel(this.activeChannel) !== player) return;
+      player.volume = this.effectiveMusicVol();
+      player.play();
+    } catch (error) {
+      if (__DEV__) console.warn('[AudioEngine] Music recovery failed:', error);
+    } finally {
+      this.recoveringMusic = false;
+    }
+  }
 
   // React listeners
   private listeners = new Set<() => void>();
@@ -294,8 +328,13 @@ class AudioEngine {
       return;
     }
 
-    // Same theme already active → no-op
-    if (themeKey === this.currentThemeKey && this.activeChannel !== null && themeKey !== null) return;
+    // Repeated requests must also recover an interrupted player.
+    if (themeKey === this.currentThemeKey && this.activeChannel !== null && themeKey !== null
+      && this.stopFadeIntervalId === null) {
+      this.gameplayMusicWanted = true;
+      void this.recoverGameplayMusic();
+      return;
+    }
 
     // Null → stop music
     if (themeKey === null) {
@@ -304,6 +343,7 @@ class AudioEngine {
     }
 
     const myId = ++this.crossfadeRequestId;
+    this.gameplayMusicWanted = true;
     this.clearCrossfadeTimers();
 
     const source = THEME_SOURCES[themeKey];
@@ -417,6 +457,7 @@ class AudioEngine {
   // ── Stop gameplay music ─────────────────────────────────────────────────────
 
   stopGameplayMusic(durationMs = 1500): void {
+    this.gameplayMusicWanted = false;
     this.crossfadeRequestId++;
     this.clearCrossfadeTimers();
 

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useManagedTimers } from "@/src/hooks/use-managed-timers";
-import { ActivityIndicator, Animated, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View, useWindowDimensions, type ImageSourcePropType } from "react-native";
+import { ActivityIndicator, Animated, Image, Modal, Pressable, ScrollView, StyleSheet, TouchableOpacity, View, useWindowDimensions, type ImageSourcePropType } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import Reanimated, { runOnJS, useAnimatedStyle, useSharedValue, withSequence, withTiming } from "react-native-reanimated";
 import { useEventListener } from "expo";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -39,14 +40,14 @@ import { PLAYER_AVATAR_KEY, type PlayerAvatarId } from "@/src/game/player-avatar
 import { getForestVideoSource, preloadForestAssets } from "@/src/game/forest-assets";
 
 const BACKGROUNDS: Record<ReturnType<typeof forestAreaForFloor>, ImageSourcePropType> = {
-  "Forest Edge": require("../assets/images/forest_edge.png"),
-  "Deeper Forest": require("../assets/images/forest_deeper.png"),
-  "Forest Heart": require("../assets/images/forest_heart.png"),
-  "Forest Rest Area": require("../assets/images/forest_rest_area.png"),
-  "Forest Nest": require("../assets/images/forest_nest.png"),
+  "Forest Edge": require("../assets/images/forest_edge.webp"),
+  "Deeper Forest": require("../assets/images/forest_deeper.webp"),
+  "Forest Heart": require("../assets/images/forest_heart.webp"),
+  "Forest Rest Area": require("../assets/images/forest_rest_area.webp"),
+  "Forest Nest": require("../assets/images/forest_nest.webp"),
 };
-const ELDER_EMBER_ROOSTER_BACKGROUND = require("../assets/images/forest_heart_boss.png");
-const HUNTERS_CAMP_BACKGROUND = require("../assets/images/hunters_camp.png");
+const ELDER_EMBER_ROOSTER_BACKGROUND = require("../assets/images/forest_heart_boss.webp");
+const HUNTERS_CAMP_BACKGROUND = require("../assets/images/hunters_camp.webp");
 const ENCOUNTER_SKIP_HOLD_MS = 900;
 const MONSTER_IMAGES: Record<ForestMonsterId, ImageSourcePropType> = {
   forest_slime: require("../assets/images/forest_slime.png"),

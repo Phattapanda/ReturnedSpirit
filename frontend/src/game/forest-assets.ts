@@ -10,13 +10,13 @@ type ForestAssetEntry = {
 
 // Keep all require() calls static so Metro includes the complete Forest bundle.
 const FOREST_ASSETS: readonly ForestAssetEntry[] = [
-  { key: "forest_edge", kind: "image", module: require("../../assets/images/forest_edge.png") },
-  { key: "forest_deeper", kind: "image", module: require("../../assets/images/forest_deeper.png") },
-  { key: "forest_heart", kind: "image", module: require("../../assets/images/forest_heart.png") },
-  { key: "forest_rest_area", kind: "image", module: require("../../assets/images/forest_rest_area.png") },
-  { key: "forest_nest", kind: "image", module: require("../../assets/images/forest_nest.png") },
-  { key: "forest_heart_boss", kind: "image", module: require("../../assets/images/forest_heart_boss.png") },
-  { key: "hunters_camp", kind: "image", module: require("../../assets/images/hunters_camp.png") },
+  { key: "forest_edge", kind: "image", module: require("../../assets/images/forest_edge.webp") },
+  { key: "forest_deeper", kind: "image", module: require("../../assets/images/forest_deeper.webp") },
+  { key: "forest_heart", kind: "image", module: require("../../assets/images/forest_heart.webp") },
+  { key: "forest_rest_area", kind: "image", module: require("../../assets/images/forest_rest_area.webp") },
+  { key: "forest_nest", kind: "image", module: require("../../assets/images/forest_nest.webp") },
+  { key: "forest_heart_boss", kind: "image", module: require("../../assets/images/forest_heart_boss.webp") },
+  { key: "hunters_camp", kind: "image", module: require("../../assets/images/hunters_camp.webp") },
 
   { key: "forest_slime", kind: "image", module: require("../../assets/images/forest_slime.png") },
   { key: "feral_rabbit", kind: "image", module: require("../../assets/images/feral_rabbit.png") },

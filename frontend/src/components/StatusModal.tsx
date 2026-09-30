@@ -1,12 +1,6 @@
 import React, { useState } from "react";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  ScrollView,
-  Modal,
-  StyleSheet,
-} from "react-native";
+import { View, TouchableOpacity, ScrollView, Modal, StyleSheet } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import StatusEffectsModal from "@/src/components/status-effects-modal";
 import { useAudioManager } from "@/src/audio/AudioProvider";

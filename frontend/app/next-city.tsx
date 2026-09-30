@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View, type ImageSourcePropType } from "react-native";
+import { Image, Modal, ScrollView, StyleSheet, TouchableOpacity, View, type ImageSourcePropType } from "react-native";
+import { Text } from "@/src/i18n/localized-text";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -46,11 +47,11 @@ import { COPPER_PER_SILVER } from "@/src/game/currency-system";
 import { UI_NOTIFICATION_DURATION_MS } from "@/src/ui/timings";
 import { DEFAULT_GUEST_ROOM_STATE, GUEST_ROOM_REQUIREMENTS, acceptGuestRoomUpgradeQuest, advanceGuestRoomState, hasGuestRoomUpgradeItem, loadGuestRoomOrderAvailability, loadGuestRoomState, placeGuestRoomOrder, turnInGuestRoomUpgradeItem, type GuestRoomOrderAvailability, type GuestRoomState } from "@/src/game/guest-room-system";
 
-const MARKET_BACKGROUND = require("../assets/images/market.png");
-const ARTISAN_BACKGROUND = require("../assets/images/artisans_district.png");
-const ADVENTURERS_GUILD_BACKGROUND = require("../assets/images/adventurers_guild.png");
-const MERCHANT_GUILD_BACKGROUND = require("../assets/images/merchant_guild.png");
-const TEMPLE_BACKGROUND = require("../assets/images/temple.png");
+const MARKET_BACKGROUND = require("../assets/images/market.webp");
+const ARTISAN_BACKGROUND = require("../assets/images/artisans_district.webp");
+const ADVENTURERS_GUILD_BACKGROUND = require("../assets/images/adventurers_guild.webp");
+const MERCHANT_GUILD_BACKGROUND = require("../assets/images/merchant_guild.webp");
+const TEMPLE_BACKGROUND = require("../assets/images/temple.webp");
 const HOLY_SISTER = require("../assets/images/dialog/dialogue_holy_sister.png");
 const RECEPTIONIST = require("../assets/images/dialog/dialogue_receptionist.png");
 const RECEPTIONIST_PORTRAIT = require("../assets/images/receptionist.png");
@@ -98,9 +99,9 @@ const ARTISAN_VIEWS: readonly ViewId[] = ["artisan", "blacksmith", "blacksmith_b
 const ADVENTURERS_GUILD_VIEWS: readonly ViewId[] = ["guild", "expedition_shop", "support", "processing", "quests"];
 const MERCHANT_GUILD_VIEWS: readonly ViewId[] = ["merchant", "bulk", "imports", "contracts"];
 const GENERAL = [{ id: "rope", price: 12 }, { id: "cloth", price: 22 }, { id: "empty_bottle", price: 12 }, { id: "bag3", price: 400 }];
-const FARM_SHOP = ["egg", "fish", "white_meat", "red_meat", "seed_lettuce", "seed_cucumber", "seed_spinach", "seed_tomato", "seed_pumpkin"] as const;
+const FARM_SHOP = ["egg", "fish", "white_meat", "red_meat", "seed_lettuce", "seed_cucumber", "seed_spinach", "seed_tomato", "seed_pumpkin", "standard_fertilizer", "premium_fertilizer"] as const;
 const EXPEDITION_SHOP = [{ id: "torch", price: 30 }, { id: "return_bell", price: 77 }];
-const BLACKSMITH = [{ id: "tool_rusty_butchering_knife", price: 50 }, { id: "tool_iron_butchering_knife", price: 70 }, { id: "tool_kitchen_knife", price: 80 }, { id: "weapon_iron_dagger", price: 45 }, { id: "weapon_iron_shortsword", price: 60 }, { id: "armor_leather_bracers", price: 50 }, { id: "armor_leather_armor", price: 90 }, { id: "frying_pan", price: 100 }];
+const BLACKSMITH = [{ id: "tool_rusty_butchering_knife", price: 50 }, { id: "tool_iron_butchering_knife", price: 90 }, { id: "tool_kitchen_knife", price: 80 }, { id: "weapon_iron_dagger", price: 45 }, { id: "weapon_iron_shortsword", price: 60 }, { id: "armor_leather_bracers", price: 50 }, { id: "armor_leather_armor", price: 90 }, { id: "frying_pan", price: 100 }];
 const BULK_SHIPMENTS = [{ id: "potato" as const, price: 40 }, { id: "carrot" as const, price: 30 }, { id: "onion" as const, price: 50 }];
 const IMPORTS = [
   { id: "snowberry", price: 35, reputation: 0, quantity: 1, requiresCraftedSpices: false },
@@ -231,6 +232,8 @@ function merchantGuildIntroductionLines(
 }
 
 export default function NextCityScreen() {
+  const [abortConfirmation, setAbortConfirmation] = useState<{ title: string; merchant: boolean; run: () => Promise<{ ok: boolean; message: string }> } | null>(null);
+  const abortPending = useRef(false);
   const router = useRouter(); const insets = useSafeAreaInsets(); const audio = useAudioManager(); const params = useLocalSearchParams<{ returnTo?: string; arrival?: string }>();
   const crossfadeCityTheme = audio.crossfadeTo;
   const stopCityTheme = audio.stopGameplayMusic;
@@ -877,7 +880,10 @@ export default function NextCityScreen() {
           <TouchableOpacity
             disabled={busy || completed}
             style={[styles.wideButton, readyToTurnIn && styles.turnInReady, active && !readyToTurnIn && styles.abortQuestButton, (busy || completed) && styles.disabled]}
-            onPress={() => { void action(() => readyToTurnIn ? turnInQuest(id) : active ? abortQuest(id) : acceptQuest(id)); }}
+            onPress={() => {
+              if (active && !readyToTurnIn) setAbortConfirmation({ title: def.title, merchant: false, run: () => abortQuest(id) });
+              else void action(() => readyToTurnIn ? turnInQuest(id) : acceptQuest(id));
+            }}
           >
             <Text style={styles.wideButtonText}>{label}</Text>
           </TouchableOpacity>
@@ -908,7 +914,10 @@ export default function NextCityScreen() {
           <TouchableOpacity
             disabled={disabled}
             style={[styles.wideButton, readyToTurnIn && styles.turnInReady, accepted && !readyToTurnIn && styles.abortQuestButton, disabled && styles.disabled]}
-            onPress={() => { void action(() => readyToTurnIn ? fulfillMerchantContract(id) : accepted ? abortMerchantContract(id) : acceptMerchantContract(id)); }}
+            onPress={() => {
+              if (accepted && !readyToTurnIn) setAbortConfirmation({ title: def.title, merchant: true, run: () => abortMerchantContract(id) });
+              else void action(() => readyToTurnIn ? fulfillMerchantContract(id) : acceptMerchantContract(id));
+            }}
           >
             <Text style={styles.wideButtonText}>{label}</Text>
           </TouchableOpacity>
@@ -968,6 +977,23 @@ export default function NextCityScreen() {
         )}
         {thought && <Text selectable style={styles.thought}>{thought}</Text>}
       </ScrollView>
+      <Modal visible={abortConfirmation !== null} transparent animationType="fade" onRequestClose={() => setAbortConfirmation(null)}>
+        <View style={styles.orderOverlay}><View accessibilityViewIsModal style={styles.orderPanel}>
+          <Text accessibilityRole="header" style={styles.sectionTitle}>Abort this quest?</Text>
+          <Text style={styles.stockName}>{abortConfirmation?.title}</Text>
+          <Text style={styles.note}>{abortConfirmation?.merchant
+            ? "Aborting this quest costs 5 Merchant Reputation. Do you want to continue?"
+            : "Aborting this quest costs 5 Guild Reputation. Do you want to continue?"}</Text>
+          <TouchableOpacity testID="keep-quest" style={styles.wideButton} onPress={() => setAbortConfirmation(null)}><Text style={styles.wideButtonText}>Keep Quest</Text></TouchableOpacity>
+          <TouchableOpacity testID="confirm-abort-quest" style={[styles.wideButton, styles.abortQuestButton]} onPress={() => {
+            if (!abortConfirmation || abortPending.current) return;
+            abortPending.current = true;
+            const task = abortConfirmation.run;
+            setAbortConfirmation(null);
+            void action(task).finally(() => { abortPending.current = false; });
+          }}><Text style={styles.wideButtonText}>Abort Quest (-5 Reputation)</Text></TouchableOpacity>
+        </View></View>
+      </Modal>
       <Modal visible={workshopOrderOpen} transparent animationType="fade" onRequestClose={() => setWorkshopOrderOpen(false)}>
         <View style={styles.orderOverlay}><View style={styles.orderPanel}>
           <View style={styles.orderTitleRow}><Text style={styles.sectionTitle}>Build Workshop</Text><TouchableOpacity onPress={() => setWorkshopOrderOpen(false)}><Ionicons name="close" size={25} color="#F5E6C8" /></TouchableOpacity></View>
