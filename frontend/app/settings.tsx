@@ -10,7 +10,7 @@ import Slider from "@react-native-community/slider";
 
 import { useAudioManager } from "@/src/audio/AudioProvider";
 import { useHaptics } from "@/src/feedback/haptics-provider";
-import { updateGameSettings, type HapticsMode } from "@/src/settings/game-settings";
+import { AVAILABLE_GAME_LANGUAGES, updateGameSettings, type HapticsMode } from "@/src/settings/game-settings";
 import { useLanguage } from "@/src/i18n/use-language";
 
 const BG = require("../assets/images/mainpage_1.0.6.webp");
@@ -136,7 +136,7 @@ export default function Settings() {
             <Text testID="language-value" style={styles.sectionValue}>{language === "de" ? "Deutsch" : "English"}</Text>
           </View>
           <View style={styles.toggleRow}>
-            {(["en", "de"] as const).map(code => (
+            {AVAILABLE_GAME_LANGUAGES.map(code => (
               <TouchableOpacity key={code} testID={`language-${code}`} accessibilityRole="button"
                 accessibilityState={{ selected: language === code, disabled: languagePending }}
                 disabled={languagePending} style={[styles.toggleBtn, language === code && styles.toggleBtnActive]}

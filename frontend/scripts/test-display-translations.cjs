@@ -38,6 +38,28 @@ for (const english of ['Hold to skip', 'Keep holding...', 'Continue']) {
 }
 console.log(`Verified ${introLines} intro dialogue and choice entries in both languages.`);
 let checkedDescriptions = 0;
+let tutorialLines = 0;
+for (const file of ['src/KitchenScreenBase.tsx', 'src/GardenScreenBase.tsx']) {
+  const ast = ts.createSourceFile(file, fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  function visitTutorial(node) {
+    const isBubble = ts.isCallExpression(node) && node.expression.getText(ast) === 'showBubble';
+    const text = isBubble ? node.arguments[0] : ts.isPropertyAssignment(node) && node.name.getText(ast) === 'text' ? node.initializer : undefined;
+    if (text && ts.isStringLiteral(text) && text.text.startsWith('"')) {
+      assert.notEqual(t(text.text, 'de'), text.text, `Missing tutorial: ${text.text}`);
+      assert.equal(t(text.text, 'en'), text.text);
+      tutorialLines++;
+    }
+    ts.forEachChild(node, visitTutorial);
+  }
+  visitTutorial(ast);
+}
+assert.ok(tutorialLines > 50);
+assert.equal(t('Where am I?', 'de'), 'Wo bin ich?');
+assert.equal(t('Who are you?', 'de'), 'Wer bist du?');
+for (const phrase of ['two herbs in a cooking pot', 'unpack the Herb Bag on the table', 'split them', 'eat yours']) {
+  assert.notEqual(t(phrase, 'de'), phrase);
+}
+console.log(`Verified ${tutorialLines} tutorial dialogue and bubble entries.`);
 for (const file of ['src/game/item-system.ts', 'src/game/city-system.ts', 'app/next-city.tsx']) {
   const source = fs.readFileSync(path.join(__dirname, '..', file), 'utf8');
   const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);

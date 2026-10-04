@@ -974,11 +974,19 @@ export function getGradePriceBonus(item: BagItem | string): number {
     gradeLevel(item.grade) * 3 * Math.max(1, item.gradeIngredientCount ?? 1);
 }
 
-export function foodRecoveryBonus(item: BagItem | string, effectiveness = 1): number {
+/** Round only fractions >= 0.51 up (integer hundredths avoid floating-point boundary errors). */
+export function foodEffectivenessRecoveryBonus(recovery: number, effectiveness: number): number {
+  const hundredths = Math.max(0, Math.floor(recovery)) * 3 * Math.max(0, Math.floor(effectiveness) - 1);
+  return Math.floor(hundredths / 100) + (hundredths % 100 >= 51 ? 1 : 0);
+}
+
+export function foodRecoveryBonus(item: BagItem | string, effectiveness = 1, kind: "stamina" | "life" = "stamina"): number {
   const id = itemId(item);
   const attributes = ITEM_CATALOG[id]?.attributes ?? [];
   if (!attributes.includes(ITEM_ATTRIBUTE.EDIBLE) || getConsumableCategory(item) === CONSUMABLE_CATEGORY.POTION) return 0;
-  return (typeof item === "string" ? 0 : gradeLevel(item.grade) * 5) + Math.max(0, Math.floor(effectiveness));
+  const rankBonus = typeof item === "string" ? 0 : gradeLevel(item.grade) * 5;
+  const base = ITEM_CATALOG[id]?.[kind === "stamina" ? "staminaRecovery" : "lifeRecovery"] ?? 0;
+  return rankBonus + foodEffectivenessRecoveryBonus(base + rankBonus, effectiveness);
 }
 
 export function getGrantedStatusEffectId(itemOrId: BagItem | string): string | null {
@@ -1044,7 +1052,7 @@ export function applyLifeRecovery(
   const recovery = ITEM_CATALOG[itemId(itemOrId)]?.lifeRecovery ?? 0;
   const bonus = itemId(itemOrId) === "potion_healing_low_grade" ? potionRecoveryBonus(effectiveness) : 0;
   return Math.min(maximumLife, Math.max(0, currentLife) + Math.max(0, recovery) + bonus +
-    (recovery > 0 ? foodRecoveryBonus(itemOrId, effectiveness) :
+    (recovery > 0 ? foodRecoveryBonus(itemOrId, effectiveness, "life") :
       typeof itemOrId !== "string" && ITEM_CATALOG[itemOrId.id]?.mealTags?.length && gradeLevel(itemOrId.grade) > 0
-        ? foodRecoveryBonus(itemOrId, effectiveness) : 0));
+        ? foodRecoveryBonus(itemOrId, effectiveness, "life") : 0));
 }

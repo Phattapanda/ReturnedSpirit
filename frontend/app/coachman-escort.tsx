@@ -18,7 +18,7 @@ import { FOREST_MONSTERS, getForestAttackPreview } from "@/src/game/forest-dunge
 import { setCoachmanEscortPhase } from "@/src/game/coachman-escort-system";
 import { unlockNextCityAfterEscort } from "@/src/game/travel-system";
 import { PLAYER_AVATAR_KEY, normalizePlayerAvatarId, type PlayerAvatarId } from "@/src/game/player-avatar";
-import { COACHMAN_DIALOG_SCALE, DIALOG_CHARACTER_ASSETS, PLAYER_DIALOG_SCALE, getPlayerDialogAspectRatio, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
+import { COACHMAN_DIALOG_SCALE, DIALOG_CHARACTER_ASSETS, PLAYER_DIALOG_SCALE, getDialogExpressionForStamina, getPlayerDialogAspectRatio, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
 import SceneBackground from "@/src/components/SceneBackground";
 import { addKarmaPoints } from "@/src/game/progression";
 import RunEndingOverlay from "@/src/components/RunEndingOverlay";
@@ -158,14 +158,16 @@ export default function CoachmanEscortScreen() {
 
   useEffect(() => {
     void (async () => {
-      const [rawName, rawLife, rawStats, rawAvatar, rawBag] = await AsyncStorage.multiGet(["@game:player_name", "@game:life", PLAYER_STATS_KEY, PLAYER_AVATAR_KEY, PLAYER_BAG_KEY]);
+      const [rawName, rawLife, rawStats, rawAvatar, rawBag, rawStamina] = await AsyncStorage.multiGet(["@game:player_name", "@game:life", PLAYER_STATS_KEY, PLAYER_AVATAR_KEY, PLAYER_BAG_KEY, "@game:stamina"]);
       setPlayerName(rawName[1]?.trim() || "Adventurer");
       const loadedStats = rawStats[1] ? normalizePlayerStats(JSON.parse(rawStats[1])) : DEFAULT_PLAYER_STATS;
       setStats(loadedStats);
       setLife(Math.max(1, Number.parseInt(rawLife[1] ?? String(loadedStats.maximumLife), 10) || loadedStats.maximumLife));
       const avatarId = normalizePlayerAvatarId(rawAvatar[1]);
-      setPlayerPortrait(getPlayerDialogCharacter(avatarId, "normal", require("../assets/images/avatar1_normal.png")));
-      setPlayerScale(getPlayerDialogScale(avatarId, "normal"));
+      const savedStamina = rawStamina[1] === null ? loadedStats.maximumStamina : Number(rawStamina[1]);
+      const expression = getDialogExpressionForStamina(Number.isFinite(savedStamina) ? Math.max(0, savedStamina) : loadedStats.maximumStamina);
+      setPlayerPortrait(getPlayerDialogCharacter(avatarId, expression, require("../assets/images/avatar1_normal.png")));
+      setPlayerScale(getPlayerDialogScale(avatarId, expression));
       setPlayerAspectRatio(getPlayerDialogAspectRatio(avatarId));
       setCombatBag(rawBag[1] ? normalizePlayerBagData(JSON.parse(rawBag[1])) : DEFAULT_BAG);
       if (!isWalking) Animated.timing(blackFade, { toValue: 0, duration: 550, useNativeDriver: true }).start();

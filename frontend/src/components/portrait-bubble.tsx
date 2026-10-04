@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { StyleSheet, View, type LayoutChangeEvent } from "react-native";
 import { Text } from "@/src/i18n/localized-text";
+import { useLanguage } from "@/src/i18n/use-language";
 
 type PortraitBubbleProps = {
   anchorX: number;
@@ -29,12 +30,15 @@ export function portraitBubbleTop(portraitBottom: number, variant: "speech" | "t
 export default function PortraitBubble({
   anchorX,
   screenWidth,
-  text,
+  text: originalText,
   top,
   speaker,
   variant = "thought",
-  highlightedPhrases = [],
+  highlightedPhrases: originalPhrases = [],
 }: PortraitBubbleProps) {
+  const { t } = useLanguage();
+  const text = t(originalText);
+  const highlightedPhrases = originalPhrases.map(phrase => t(phrase));
   const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
   const isSpeech = variant === "speech";
   const maxWidth = Math.min(screenWidth - EDGE_GAP * 2, isSpeech ? 420 : 360);

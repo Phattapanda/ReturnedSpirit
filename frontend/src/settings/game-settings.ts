@@ -4,6 +4,9 @@ export const GAME_SETTINGS_KEY = "game_settings";
 
 export type HapticsMode = "off" | "light" | "medium" | "strong";
 export type GameLanguage = "en" | "de";
+// Temporary release switch; retain the German catalogs for later reactivation.
+export const GERMAN_LANGUAGE_ENABLED = false;
+export const AVAILABLE_GAME_LANGUAGES: readonly GameLanguage[] = GERMAN_LANGUAGE_ENABLED ? ["en", "de"] : ["en"];
 
 export type GameSettings = {
   language: GameLanguage;
@@ -35,7 +38,7 @@ function hapticsMode(value: unknown, legacyValue?: unknown): HapticsMode {
 export function normalizeGameSettings(raw: unknown): GameSettings {
   const settings = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
   return {
-    language: settings.language === "de" ? "de" : "en",
+    language: GERMAN_LANGUAGE_ENABLED && settings.language === "de" ? "de" : "en",
     musicVolume: volume(settings.musicVolume, DEFAULT_GAME_SETTINGS.musicVolume),
     sfxVolume: volume(settings.sfxVolume, DEFAULT_GAME_SETTINGS.sfxVolume),
     haptics: hapticsMode(settings.haptics, settings.vibration),

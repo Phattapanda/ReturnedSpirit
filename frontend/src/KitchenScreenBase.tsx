@@ -663,6 +663,7 @@ export default function KitchenScreen({
   entryStamina?: number;
   rupertAlchemyIntroRequested?: boolean;
 }) {
+  const { t } = useLanguage();
   const {
     setManagedTimeout: setTimeout,
     clearManagedTimeout: clearTimeout,
@@ -5495,7 +5496,7 @@ const blockedByTutorial = (tutActive && !(isDiningBtn && diningUnlocked)) || (ti
                 style={styles.nameInput}
                 value={nameInputVal}
                 onChangeText={setNameInputVal}
-                placeholder="Your name..."
+                placeholder={t("Your name...")}
                 placeholderTextColor="#A89880"
                 maxLength={24}
                 autoFocus

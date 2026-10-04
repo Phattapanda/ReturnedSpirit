@@ -14,7 +14,7 @@ export default function ItemGradeBadge({ item }: { item?: BagItem | null }) {
   </View>;
 }
 const styles = StyleSheet.create({
-  badge: { position: "absolute", top: 1, left: 1, minWidth: 19, height: 20, borderRadius: 4,
-    backgroundColor: "#211407", borderColor: "#E8D4A2", borderWidth: 1, alignItems: "center", justifyContent: "center", zIndex: 6 },
-  text: { color: "#E8D4A2", fontSize: 13, fontWeight: "bold", includeFontPadding: false },
+  badge: { position: "absolute", top: 1, left: 2, zIndex: 6 },
+  text: { color: "#E8D4A2", fontSize: 10, lineHeight: 12, fontWeight: "bold", includeFontPadding: false,
+    textShadowColor: "#211407", textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
 });

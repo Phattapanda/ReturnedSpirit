@@ -57,9 +57,25 @@ assert.equal(output([carrot("C", 2)], 10).quantity, soup.outputQuantity + 1);
 assert.equal(output([carrot("C", 2)], 20).quantity, soup.outputQuantity + 2);
 const batches = cooking.createRecipeOutputs(soup, 2, 20, 0, null, 1, [carrot("C", 2), carrot("D", 2)]);
 assert.deepEqual(batches.map(item => item.grade), ["C", "D"]);
-assert.equal(items.applyStaminaRecovery(c, 0, 100, 1), items.ITEM_CATALOG[c.id].staminaRecovery + 6);
+assert.equal(items.applyStaminaRecovery(c, 0, 100, 1), items.ITEM_CATALOG[c.id].staminaRecovery + 5);
+assert.equal(items.applyStaminaRecovery(c, 0, 100, 2), items.ITEM_CATALOG[c.id].staminaRecovery + 6);
 assert.equal(items.applyStaminaRecovery(c, 98, 100, 1), 100);
-assert.equal(items.applyLifeRecovery(c, 0, 100, 1), 6);
+assert.equal(items.applyLifeRecovery(c, 0, 100, 1), 5);
+assert.equal(items.applyLifeRecovery(c, 0, 100, 2), 5);
+assert.equal(items.foodEffectivenessRecoveryBonus(50, 2), 1); // 1.50 rounds down
+assert.equal(items.foodEffectivenessRecoveryBonus(17, 2), 1); // 0.51 rounds up
+assert.equal(items.foodEffectivenessRecoveryBonus(16, 2), 0); // 0.48 rounds down
+assert.equal(items.foodEffectivenessRecoveryBonus(50, 1), 0);
+assert.equal(items.foodEffectivenessRecoveryBonus(50, 3), 3);
+for (const effectiveness of [1, 2, 10]) {
+  const bonus = effectiveness - 1;
+  assert.equal(items.foodRecoveryBonus({ ...c, grade: "D" }, effectiveness),
+    items.foodEffectivenessRecoveryBonus(items.ITEM_CATALOG[c.id].staminaRecovery, effectiveness));
+  assert.equal(items.applyStaminaRecovery("potion_stamina_low_grade", 0, 1000, effectiveness),
+    items.ITEM_CATALOG.potion_stamina_low_grade.staminaRecovery + bonus);
+  assert.equal(items.applyLifeRecovery("potion_healing_low_grade", 0, 1000, effectiveness),
+    items.ITEM_CATALOG.potion_healing_low_grade.lifeRecovery + bonus);
+}
 assert.equal(items.applyLifeRecovery(c, 99, 100, 1), 100);
 const fireMeal = { ...cooking.createCraftedItem("soup_ember_egg", 1), grade: "B" };
 assert.equal(items.getItemBuffPotency(fireMeal, 1), 4);
