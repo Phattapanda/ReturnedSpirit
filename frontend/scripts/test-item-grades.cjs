@@ -25,6 +25,18 @@ const items = load(path.join(root, "src/game/item-system.ts"));
 const cooking = load(path.join(root, "src/game/cooking-system.ts"));
 const crops = load(path.join(root, "src/game/garden-crop-system.ts"));
 const effects = load(path.join(root, "src/game/status-effect-system.ts"));
+const statsSystem = load(path.join(root, "src/game/player-stats.ts"));
+const nearCap = { ...statsSystem.DEFAULT_PLAYER_STATS, level: 99, growthPoints: 30 };
+const capped = statsSystem.applyStatUpgrade(nearCap, "strength", 10).stats;
+assert.equal(capped.level, 100);
+assert.equal(capped.growthPoints, 20);
+for (const field of statsSystem.UPGRADABLE_FIELDS) {
+  const blocked = statsSystem.applyStatUpgrade(capped, field, 10);
+  assert.deepEqual(blocked.stats, capped);
+  assert.equal(blocked.newCurrentLife, null);
+}
+assert.equal(statsSystem.normalizePlayerStats({ ...capped, level: 150 }).level, 100);
+assert.equal(statsSystem.normalizePlayerStats({ ...capped, level: 150 }).growthPoints, 20);
 const { getRupertItemHint } = load(path.join(root, "src/game/rupert-item-hints.ts"));
 const hintItem = cooking.createCraftedItem("cucumber", 3);
 const hintBefore = JSON.stringify(hintItem);

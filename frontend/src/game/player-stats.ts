@@ -27,6 +27,7 @@ export type PlayerStats = {
 };
 
 export const PLAYER_STATS_KEY = "@game:player_stats";
+export const PLAYER_LEVEL_CAP = 100;
 
 export const DEFAULT_PLAYER_STATS: PlayerStats = {
   runBaseUpgrades: 0,
@@ -68,7 +69,7 @@ export function normalizePlayerStats(raw: unknown): PlayerStats {
     // starting bonus without mistaking Life bought with Growth Points for it.
     runBaseUpgrades: Math.min(10, normalizedInteger(candidate.runBaseUpgrades,
       Math.max(0, Math.floor((Number(candidate.maximumStamina) - 100) / 10)) || 0)),
-    level: normalizedInteger(candidate.level, 1, 1),
+    level: Math.min(PLAYER_LEVEL_CAP, normalizedInteger(candidate.level, 1, 1)),
     maximumStamina: normalizedInteger(candidate.maximumStamina, DEFAULT_PLAYER_STATS.maximumStamina, 1),
     maximumLife: normalizedInteger(candidate.maximumLife, DEFAULT_PLAYER_STATS.maximumLife, 1),
     strength: normalizedInteger(candidate.strength, 1, 1),
@@ -177,7 +178,7 @@ export function applyStatUpgrade(
   field: UpgradableField,
   currentLife: number,
 ): { stats: PlayerStats; newCurrentLife: number | null } {
-  if (stats.growthPoints < UPGRADE_GP_COST) return { stats, newCurrentLife: null };
+  if (stats.level >= PLAYER_LEVEL_CAP || stats.growthPoints < UPGRADE_GP_COST) return { stats, newCurrentLife: null };
   const updated = {
     ...stats,
     level: stats.level + 1,

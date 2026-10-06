@@ -8,6 +8,7 @@ import { useHaptics } from "@/src/feedback/haptics-provider";
 import {
   STAT_DESCRIPTIONS,
   UPGRADE_GP_COST,
+  PLAYER_LEVEL_CAP,
   applyStatUpgrade,
   getEffectiveEndurance,
   getEffectiveStrength,
@@ -41,7 +42,7 @@ export default function StatusModal({
 
   function handleUpgrade(field: UpgradableField) {
     if (upgradeLocked.current) return;
-    if (stats.growthPoints < UPGRADE_GP_COST) return;
+    if (stats.level >= PLAYER_LEVEL_CAP || stats.growthPoints < UPGRADE_GP_COST) return;
     upgradeLocked.current = true;
     const { stats: updated, newCurrentLife } = applyStatUpgrade(stats, field, currentLife);
     onStatsUpdated(updated, newCurrentLife);
@@ -89,7 +90,7 @@ export default function StatusModal({
           {/* Growth Points */}
           <View style={styles.gpRow}>
             <View>
-              <Text style={styles.levelLabel}>Level {stats.level}</Text>
+              <Text style={styles.levelLabel}>Level {stats.level}{stats.level >= PLAYER_LEVEL_CAP ? " (MAX)" : ""}</Text>
               <Text style={styles.gpLabel}>Growth Points</Text>
               <Text style={styles.gpHint}>10 Growth Points needed.</Text>
             </View>
@@ -109,7 +110,7 @@ export default function StatusModal({
           {/* Stats */}
           <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
             {statRows.map(({ label, field, value }) => {
-              const canAffordUpgrade = field !== undefined && stats.growthPoints >= UPGRADE_GP_COST;
+              const canAffordUpgrade = field !== undefined && stats.level < PLAYER_LEVEL_CAP && stats.growthPoints >= UPGRADE_GP_COST;
               return (
                 <View key={field ?? label} style={styles.statRow}>
                   <Text style={styles.statLabel}>{label}</Text>
