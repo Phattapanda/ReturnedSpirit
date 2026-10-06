@@ -34,6 +34,7 @@ import InventorySortButton from "@/src/components/inventory-sort-button";
 import StatusModal from "@/src/components/StatusModal";
 import QuestBookButton from "@/src/components/quest-book";
 import PortraitBubble, { portraitBubbleTop } from "@/src/components/portrait-bubble";
+import { getRupertItemHint } from "@/src/game/rupert-item-hints";
 import StoryDialogOverlay, { type StoryDialogChoice, type StoryDialogLine } from "@/src/components/story-dialog-overlay";
 import CharacterDialogFrame from "@/src/components/character-dialog-frame";
 import { COACHMAN_DIALOG_SCALE, DIALOG_CHARACTER_ASSETS, RUPERT_DIALOG_SCALE, getDialogExpressionForStamina, getPlayerDialogAspectRatio, getPlayerDialogCharacter, getPlayerDialogScale } from "@/src/assets/dialog-character-assets";
@@ -60,6 +61,7 @@ import {
   consumeRecipeIngredients,
   createCraftedItem,
   createRecipeOutputs,
+  summarizeRecipeOutput,
   discoverRecipe,
   findCookingRecipe,
   findCookingRecipeBlockedByToolLevel,
@@ -3170,10 +3172,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
   // ─────────────────────────────────────────────────────────────────────────
 
   function startCookingTutorial() {
-    // Clear any stale table items before tutorial begins
-    const emptyTable = Array(Math.max(BASE_KITCHEN_TABLE_SLOT_COUNT, tableItemsRef.current.length)).fill(null) as (BagItem | null)[];
-    setTableItems(emptyTable);
-    AsyncStorage.setItem(KITCHEN_TABLE_KEY, JSON.stringify(emptyTable)).catch(() => {});
+    // Items may already have been transferred or unpacked before Rupert speaks.
+    // Keep the table intact: those items have already been removed from the bag.
     setTutState("COOKING_UNPACK_WAIT");
     tsRef.current = "COOKING_UNPACK_WAIT";
     // The Player Bag pulse belongs only to the original bag-receiving tutorial.
@@ -3183,17 +3183,24 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     cookingShareDoneRef.current = false;
     cookingEatDoneRef.current = false;
     AsyncStorage.setItem(SK.COOKING_STEP, "1").catch(() => {});
-    setTimeout(() => showBubble(
+    checkCookingProgress(tableItemsRef.current);
+    setTimeout(() => {
+      if (tsRef.current !== "COOKING_UNPACK_WAIT") return;
+      showBubble(
       '"Please take the Herb Bag out of your bag and put it on the table."',
       "Rupert", "ALLOW_ITEM", null,
-      () => showBubble(
+      () => {
+        if (tsRef.current !== "COOKING_UNPACK_WAIT") return;
+        showBubble(
         '"You can unpack the Herb Bag on the table."',
         "Rupert", "ALLOW_ITEM", null, () => {}, "bubble.cooking.unpack_herb_bag",
         ["unpack the Herb Bag on the table"],
-      ),
+        );
+      },
       "bubble.cooking.unpack_request",
       ["take the Herb Bag out of your bag"],
-    ), 400);
+      );
+    }, 400);
   }
 
   /** Called after any table change during COOKING_UNPACK_WAIT with the updated table. */
@@ -3869,6 +3876,12 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
 
     const draggedItem = getCookingItemAtSlot(srcSlot);
     if (!draggedItem || draggedItem.id !== expectedItemId) return;
+    const rupertRect = layouts.current.rupert;
+    if (!rupertInDining && !dlgActive && (cur === "IDLE" || cur === "COOKING_DONE") && rupertRect &&
+        (inRect(absX, absY, rupertRect) || inRect(pointerX, pointerY, rupertRect))) {
+      showBubble(getRupertItemHint(draggedItem), "Rupert", "ALLOW_ITEM", null, () => {});
+      return;
+    }
     const garbageRect = layouts.current.garbage;
     if (garbageRect && inExpandedRect(absX, absY, garbageRect, 8)) {
       if (!isItemDiscardable(draggedItem)) {
@@ -3951,11 +3964,10 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
       else if (slot === CRAFT_TOOL_SLOT) newTool = item;
     };
 
-    // Kitchen Table stacks merge when the dragged item is dropped onto a
-    // compatible table stack. Recipe Ingredient/Tool slots intentionally keep
-    // their existing swap behavior so crafting semantics do not change here.
+    // Any source (including recipe slots) can merge into a compatible table
+    // stack. A full target leaves the source intact; overflow stays at source.
+    // Drops onto recipe slots retain their existing swap behavior.
     const canMergeOnTable =
-      isKitchenTableSlot(srcSlot) &&
       isKitchenTableSlot(destSlot) &&
       destItem !== null &&
       canStack(srcItem, destItem);
@@ -4125,8 +4137,8 @@ if (cur !== "IDLE") return; // Navigation was refreshed; leave active gameplay s
     if (craftCount < 1) return null;
     // Butchering is random; never roll loot merely to display a preview.
     if (!recipe.id.startsWith("butcher_")) {
-      return createRecipeOutputs(recipe, craftCount, getContainerStackLimit("kitchenTable"),
-        getEffectiveLuck(playerStats), tool, playerStats.effectiveness, ingredients)[0] ?? null;
+      return summarizeRecipeOutput(createRecipeOutputs(recipe, craftCount, getContainerStackLimit("kitchenTable"),
+        getEffectiveLuck(playerStats), tool, playerStats.effectiveness, ingredients), recipe.outputId);
     }
     const preview = createCraftedItem(recipe.outputId, recipe.outputQuantity * craftCount);
     return recipe.seasonedStage

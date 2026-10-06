@@ -25,6 +25,15 @@ const items = load(path.join(root, "src/game/item-system.ts"));
 const cooking = load(path.join(root, "src/game/cooking-system.ts"));
 const crops = load(path.join(root, "src/game/garden-crop-system.ts"));
 const effects = load(path.join(root, "src/game/status-effect-system.ts"));
+const { getRupertItemHint } = load(path.join(root, "src/game/rupert-item-hints.ts"));
+const hintItem = cooking.createCraftedItem("cucumber", 3);
+const hintBefore = JSON.stringify(hintItem);
+assert.match(getRupertItemHint(hintItem), /cold.*kitchen knife/);
+assert.equal(JSON.stringify(hintItem), hintBefore);
+assert.match(getRupertItemHint(cooking.createCraftedItem("tomato", 1)), /hot or cold/);
+assert.match(getRupertItemHint(cooking.createCraftedItem("ember_feather", 1)), /alchemy/);
+assert.match(getRupertItemHint(cooking.createCraftedItem("bag_herb", 1)), /Unpack/);
+assert.match(getRupertItemHint(cooking.createCraftedItem("wood", 1)), /elsewhere/);
 const carrot = (grade, quantity = 1) => ({ ...cooking.createCraftedItem("carrot", quantity), grade });
 assert.equal(grades.cropGrade({}), "D");
 assert.equal(grades.cropGrade({ premiumFertilizerUses: 1 }), "C");
@@ -57,6 +66,16 @@ assert.equal(output([carrot("C", 2)], 10).quantity, soup.outputQuantity + 1);
 assert.equal(output([carrot("C", 2)], 20).quantity, soup.outputQuantity + 2);
 const batches = cooking.createRecipeOutputs(soup, 2, 20, 0, null, 1, [carrot("C", 2), carrot("D", 2)]);
 assert.deepEqual(batches.map(item => item.grade), ["C", "D"]);
+assert.equal(cooking.summarizeRecipeOutput(batches, soup.outputId).quantity, soup.outputQuantity * 2);
+const herbRecipe = cooking.COOKING_RECIPES.find(recipe => recipe.outputId === "soup_herb");
+assert.ok(herbRecipe);
+const herbIngredients = herbRecipe.ingredients.map(item => cooking.createCraftedItem(item.id, item.quantity * 2));
+for (const effectiveness of [1, 10]) {
+  const outputs = cooking.createRecipeOutputs(herbRecipe, 2, 1, 0, null, effectiveness, herbIngredients);
+  assert.equal(cooking.summarizeRecipeOutput(outputs, herbRecipe.outputId).quantity,
+    (herbRecipe.outputQuantity + Math.floor(effectiveness / 10)) * 2);
+}
+assert.equal(cooking.summarizeRecipeOutput([], soup.outputId), null);
 assert.equal(items.applyStaminaRecovery(c, 0, 100, 1), items.ITEM_CATALOG[c.id].staminaRecovery + 5);
 assert.equal(items.applyStaminaRecovery(c, 0, 100, 2), items.ITEM_CATALOG[c.id].staminaRecovery + 6);
 assert.equal(items.applyStaminaRecovery(c, 98, 100, 1), 100);

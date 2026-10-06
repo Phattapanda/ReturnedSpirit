@@ -215,7 +215,8 @@ export default function DormitoryScreen() {
   const [playerBubble, setPlayerBubble]   = useState<string | null>(null);
   const playerBubbleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playerPortraitRef = useRef<View>(null);
-  const playerPortraitLayout = useRef<{ x: number; y: number; w: number; h: number } | null>(null);
+  const bubbleRootRef = useRef<View>(null);
+  const [playerPortraitLayout, setPlayerPortraitLayout] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
 
   // ── Modal states
   const [sleepConfirmOpen, setSleepConfirmOpen] = useState(false);
@@ -331,14 +332,21 @@ export default function DormitoryScreen() {
   // ─────────────────────────────────────────────────────────────────────────
   function measurePortrait() {
     playerPortraitRef.current?.measureInWindow((x, y, w, h) => {
-      playerPortraitLayout.current = { x, y, w, h };
+      if (w <= 0 || h <= 0) return;
+      bubbleRootRef.current?.measureInWindow((rootX, rootY) => {
+        setPlayerPortraitLayout(previous => {
+          const next = { x: x - rootX, y: y - rootY, w, h };
+          return previous && previous.x === next.x && previous.y === next.y
+            && previous.w === w && previous.h === h ? previous : next;
+        });
+      });
     });
   }
 
   useEffect(() => {
     const t = setTimeout(measurePortrait, 600);
     return () => clearTimeout(t);
-  }, [W, insets.top, setTimeout, clearTimeout]);
+  }, [W, insets.top, headerH, playerBubble, setTimeout, clearTimeout]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Pure helper: determine dormitory time-of-day and intro flag
@@ -1024,7 +1032,7 @@ export default function DormitoryScreen() {
   // ─────────────────────────────────────────────────────────────────────────
   function renderPlayerBubble() {
     if (!playerBubble) return null;
-    const L = playerPortraitLayout.current;
+    const L = playerPortraitLayout;
     const topPos = portraitBubbleTop(L ? L.y + L.h : (headerH > 0 ? headerH + 108 : insets.top + 180));
     const anchorX = L ? L.x + L.w / 2 : W * 0.32;
     const isEveningIntroState = roomState === "ROOM_EVENING_INTRO";
@@ -1044,7 +1052,7 @@ export default function DormitoryScreen() {
   // ─────────────────────────────────────────────────────────────────────────
   return (
     <TavernLocationTransition location="dormitory">
-    <View style={styles.root}>
+    <View ref={bubbleRootRef} collapsable={false} style={styles.root}>
       {/* ── Background (responsive, aspect-ratio preserving cover) ── */}
       <SceneBackground source={isEvening ? IMG.room_evening : IMG.room_morning} topOffset={headerH} />
       <View style={[StyleSheet.absoluteFill, { top: headerH }, styles.bgOverlay]} pointerEvents="none" />
@@ -1119,11 +1127,14 @@ export default function DormitoryScreen() {
         showsVerticalScrollIndicator={false}
         bounces={false}
         scrollEnabled={!sleepTransitioning}
+        onScroll={measurePortrait}
+        scrollEventThrottle={16}
       >
         {/* Portrait row: player + inventory bag (unlocked from Day 2) */}
         <View style={styles.portraitRow}>
           <TouchableOpacity
             ref={playerPortraitRef}
+            onLayout={measurePortrait}
             style={styles.circleWrap}
             onPress={() => setStatusOpen(true)}
             activeOpacity={0.8}

@@ -5,12 +5,12 @@ import { useLanguage } from "@/src/i18n/use-language";
 import { hasItemGrade, type BagItem } from "@/src/game/item-system";
 import { normalizeGrade } from "@/src/game/item-grade";
 
-export default function ItemGradeBadge({ item }: { item?: BagItem | null }) {
+export default function ItemGradeBadge({ item, fontSize = 10 }: { item?: BagItem | null; fontSize?: number }) {
   const { t } = useLanguage();
   if (!item || !hasItemGrade(item)) return null;
   const grade = normalizeGrade(item.grade);
   return <View pointerEvents="none" accessibilityLabel={`${t("Grade")} ${grade}`} style={styles.badge}>
-    <Text translate={false} style={styles.text}>{grade}</Text>
+    <Text translate={false} style={[styles.text, { fontSize, lineHeight: fontSize + 2 }]}>{grade}</Text>
   </View>;
 }
 const styles = StyleSheet.create({

@@ -13,11 +13,12 @@ import { loadElapsedDays, loadTitheState } from "@/src/game/tithe-system";
 import { claimTavernQuest, loadTavernQuestState, markAleIngredientsDialogueSeen, repairLegacyCleanQuestReward, subscribeTavernQuests, type TavernQuestId } from "@/src/game/tavern-quest-system";
 import { DEFAULT_BAG, PLAYER_BAG_KEY, normalizePlayerBagData, type PlayerBagData } from "@/src/game/item-system";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { GUEST_ROOM_REQUIREMENTS, loadGuestRoomOrderAvailability } from "@/src/game/guest-room-system";
 import { UI_NOTIFICATION_DURATION_MS } from "@/src/ui/timings";
 import { hasGuestRoomUpgradeItem, loadGuestRoomState, subscribeGuestRoomState, unlockGuestRoomOffer } from "@/src/game/guest-room-system";
 
 type QuestTab = "open" | "complete";
-type QuestBookEntry = { id: string; source: string; title: string; detail: string; emphasizedDetail?: string; tab: QuestTab; ready?: boolean; progress?: string; reward?: "potion" | "carrot_seed" | "copper" | "ale_upgrade" | "guest_rooms" | "fertilizer"; tavernQuestId?: TavernQuestId };
+type QuestBookEntry = { requirements?: { label: string; owned: number; needed: number }[]; id: string; source: string; title: string; detail: string; emphasizedDetail?: string; tab: QuestTab; ready?: boolean; progress?: string; reward?: "potion" | "carrot_seed" | "copper" | "ale_upgrade" | "guest_rooms" | "fertilizer"; tavernQuestId?: TavernQuestId };
 const NPC_ESCORT_PHASES = new Set<CoachmanEscortPhase>(["accepted", "journey", "combat", "post_combat", "city_arrival", "city_exploration"]);
 const REWARD_IMAGES: Record<NonNullable<QuestBookEntry["reward"]>, ImageSourcePropType> = {
   fertilizer: require("../../assets/images/fertilizer.png"),
@@ -35,6 +36,24 @@ async function loadQuestBookEntries(): Promise<QuestBookEntry[]> {
   let bag = { ...DEFAULT_BAG, slots: [...DEFAULT_BAG.slots] };
   try { if (rawBag) bag = normalizePlayerBagData(JSON.parse(rawBag)); } catch { /* use an empty normalized bag */ }
   const entries: QuestBookEntry[] = [];
+  if (guestRoom.constructionTracked && guestRoom.phase !== "locked") {
+    const availability = await loadGuestRoomOrderAvailability();
+    const building = guestRoom.phase === "building";
+    const complete = guestRoom.phase === "complete";
+    entries.push({
+      id: "build-first-guest-room", source: "Carpenter", title: "Build the first Guest Room",
+      detail: complete ? "Guest Room construction completed." : building
+        ? "Construction is underway. Return after three in-game days."
+        : "Gather the materials in Garden Storage and bring payment to the Carpenter. Tracking does not spend materials or coins.",
+      tab: complete ? "complete" : "open",
+      ready: !building && !complete && availability.canPlace,
+      requirements: building || complete ? undefined : [
+        ...([['nails', 'Nails'], ['wood', 'Wood'], ['stone', 'Stone'], ['paint', 'Paint'], ['cloth', 'Cloth']] as const)
+          .map(([id, label]) => ({ label, owned: availability.resources[id], needed: GUEST_ROOM_REQUIREMENTS[id] })),
+        { label: "Copper Coins", owned: availability.currencyCopper, needed: GUEST_ROOM_REQUIREMENTS.copper },
+      ],
+    });
+  }
   (Object.keys(QUESTS) as QuestId[]).forEach((id) => {
     const state = city.quests[id];
     if (state.status === "offered") return;
@@ -95,6 +114,13 @@ async function loadQuestBookEntries(): Promise<QuestBookEntry[]> {
 }
 
 function QuestDetail({ entry }: { entry: QuestBookEntry }) {
+  if (entry.requirements) return <View style={{ gap: 6 }}>
+    <Text style={styles.detail}>{entry.detail}</Text>
+    {entry.requirements.map(row => <View key={row.label} style={styles.questHeader}>
+      <Text style={styles.detail}>{row.label}</Text>
+      <Text style={[styles.progress, row.owned >= row.needed && styles.ready]}>{row.owned >= row.needed ? "✓ " : ""}{row.owned}/{row.needed}</Text>
+    </View>)}
+  </View>;
   if (!entry.emphasizedDetail || !entry.detail.includes(entry.emphasizedDetail)) return <Text style={styles.detail}>{entry.detail}</Text>;
   const [before, after] = entry.detail.split(entry.emphasizedDetail);
   return <Text style={styles.detail}>{before}<Text style={styles.detailEmphasis}>{entry.emphasizedDetail}</Text>{after}</Text>;

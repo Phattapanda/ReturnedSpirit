@@ -168,7 +168,7 @@ export function GuestCard({
     ]).start();
   }, [departing, departureOpacity, departureX]);
 
-  const serviceEnabled = (action: GuestServiceAction) => !!onService && (
+  const serviceEnabled = (action: GuestServiceAction) => !!onService && !(action === "talk" && guest.talkedThisVisit) && (
     Array.isArray(enabledService) ? enabledService.includes(action) : enabledService === action
   );
 
@@ -522,6 +522,10 @@ export default function DiningGuestArea({
     let preferenceDiscovery: GuestPreferenceDiscoveryResult | undefined;
     if (action === "talk") {
       const discovery = await discoverGuestPreference(guest.profile.id);
+      setGuests((current) => current.map((entry) => entry.profile.id === guest.profile.id
+        ? { ...entry, talkedThisVisit: true, learnedPreferenceFacts: discovery.learnedFactKeys }
+        : entry));
+      if (discovery.outcome === "already_talked") return;
       preferenceDiscovery = discovery;
       if (discovery.outcome === "learned") {
         setGuests((current) => current.map((entry) => entry.profile.id === guest.profile.id

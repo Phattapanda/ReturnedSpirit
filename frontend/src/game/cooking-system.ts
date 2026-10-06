@@ -536,6 +536,13 @@ export function consumeRecipeIngredients(
   return [...remaining.values()].every((quantity) => quantity === 0) ? next : null;
 }
 
+/** Summarize the primary output for the single result slot, across batches and stacks. */
+export function summarizeRecipeOutput(outputs: readonly BagItem[], outputId: string): BagItem | null {
+  const primary = outputs.filter(item => item.id === outputId);
+  if (!primary.length) return null;
+  return { ...primary[0], quantity: primary.reduce((total, item) => total + item.quantity, 0) };
+}
+
 export function createRecipeOutputs(
   recipe: CookingRecipe,
   craftCount = 1,

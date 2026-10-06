@@ -80,7 +80,7 @@ export type GuestPreferenceFactKey =
 
 export type GuestPreferenceDiscoveryResult =
   | { outcome: "learned"; factKey: GuestPreferenceFactKey; learnedFactKeys: GuestPreferenceFactKey[] }
-  | { outcome: "nothing_learned" | "already_known" | "no_preferences"; learnedFactKeys: GuestPreferenceFactKey[] };
+  | { outcome: "nothing_learned" | "already_known" | "no_preferences" | "already_talked"; learnedFactKeys: GuestPreferenceFactKey[] };
 
 export type GuestState = {
   version: 4;
@@ -97,6 +97,7 @@ export type GuestState = {
   giftDialogDaySerial: Record<string, number>;
   /** The day on which each guest has already received food or water. */
   servedDaySerial: Record<string, number>;
+  talkedDaySerial: Record<string, number>;
   /** Preference facts discovered by talking to each guest. */
   learnedPreferenceFacts: Record<string, GuestPreferenceFactKey[]>;
   /** The Merchant's first Dining Hall introduction only plays once per save. */
@@ -104,6 +105,7 @@ export type GuestState = {
 };
 
 export type GuestVisitView = {
+  talkedThisVisit?: boolean;
   profile: GuestProfile;
   favor: number;
   exchangeOffer: GuestExchangeOffer | null;
@@ -378,6 +380,7 @@ export const DEFAULT_GUEST_STATE: GuestState = {
   pendingFavorGifts: {},
   giftDialogDaySerial: {},
   servedDaySerial: {},
+  talkedDaySerial: {},
   learnedPreferenceFacts: {},
   merchantDiningIntroductionSeen: false,
 };
@@ -493,6 +496,9 @@ function normalizeGuestState(raw: unknown): GuestState {
     pendingFavorGifts,
     giftDialogDaySerial,
     servedDaySerial,
+    talkedDaySerial: Object.fromEntries(Object.entries(candidate.talkedDaySerial ?? {}).filter(
+      ([, day]) => typeof day === "number" && Number.isInteger(day) && day >= 0,
+    )),
     learnedPreferenceFacts,
     merchantDiningIntroductionSeen: candidate.merchantDiningIntroductionSeen === true,
   };
@@ -549,8 +555,16 @@ export function getGuestPreferenceFactKeys(profile: GuestProfile): GuestPreferen
   ];
 }
 
-/** Each conversation has a 33% chance to reveal one still-unknown preference. */
-export async function discoverGuestPreference(
+let conversationQueue: Promise<unknown> = Promise.resolve();
+
+/** Reserve one conversation per guest visit, including unsuccessful discovery rolls. */
+export function discoverGuestPreference(guestId: GuestId, random: () => number = Math.random): Promise<GuestPreferenceDiscoveryResult> {
+  const result = conversationQueue.then(() => discoverGuestPreferenceOnce(guestId, random));
+  conversationQueue = result.catch(() => {});
+  return result;
+}
+
+async function discoverGuestPreferenceOnce(
   guestId: GuestId,
   random: () => number = Math.random,
 ): Promise<GuestPreferenceDiscoveryResult> {
@@ -558,8 +572,14 @@ export async function discoverGuestPreference(
   if (!profile) return { outcome: "no_preferences", learnedFactKeys: [] };
 
   const allFacts = getGuestPreferenceFactKeys(profile);
-  const state = await loadGuestState();
+  let state = await loadGuestState();
   const learned = state.learnedPreferenceFacts[guestId] ?? [];
+  if (state.talkedDaySerial[guestId] === state.calendarDaySerial) {
+    return { outcome: "already_talked", learnedFactKeys: learned };
+  }
+  state = await saveGuestState({ ...state,
+    talkedDaySerial: { ...state.talkedDaySerial, [guestId]: state.calendarDaySerial },
+  });
   if (allFacts.length === 0) return { outcome: "no_preferences", learnedFactKeys: learned };
 
   const learnedSet = new Set(learned);
@@ -819,6 +839,7 @@ export async function prepareGuestsForDay(dayIndex: number): Promise<GuestVisitV
       selected: state.activeGuestId === profile.id,
       favorRewardDialog: rewardDialogs[profile.id] ?? null,
       learnedPreferenceFacts: state.learnedPreferenceFacts[profile.id] ?? [],
+      talkedThisVisit: state.talkedDaySerial[profile.id] === state.calendarDaySerial,
     };
   });
 }

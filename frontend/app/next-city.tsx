@@ -1007,6 +1007,13 @@ if (view === "sell") return <><Text style={styles.sectionTitle}>Sell Goods</Text
         <View style={styles.orderOverlay}><View style={styles.orderPanel}>
           <View style={styles.orderTitleRow}><Text style={styles.sectionTitle}>Build Guest Rooms</Text><TouchableOpacity onPress={() => setGuestRoomOrderOpen(false)}><Ionicons name="close" size={25} color="#F5E6C8" /></TouchableOpacity></View>
           <Text style={styles.note}>Renovate the first room on the second floor. Construction takes 3 in-game days.</Text>
+          <TouchableOpacity disabled={busy || guestRoomState.constructionTracked} style={[styles.wideButton, guestRoomState.constructionTracked && styles.disabled]} onPress={async () => {
+            setBusy(true);
+            try {
+              const { trackGuestRoomConstruction } = await import("@/src/game/guest-room-system");
+              setGuestRoomState(await trackGuestRoomConstruction());
+            } finally { setBusy(false); }
+          }}><Text style={styles.wideButtonText}>{guestRoomState.constructionTracked ? "Tracked in Questbook" : "Track in Questbook"}</Text></TouchableOpacity>
           {([['nails', 'Nails', GUEST_ROOM_REQUIREMENTS.nails], ['wood', 'Wood', GUEST_ROOM_REQUIREMENTS.wood], ['stone', 'Stone', GUEST_ROOM_REQUIREMENTS.stone], ['paint', 'Paint', GUEST_ROOM_REQUIREMENTS.paint], ['cloth', 'Cloth', GUEST_ROOM_REQUIREMENTS.cloth]] as const).map(([id, name, needed]) => <View key={id} style={styles.requirementRow}><Text style={styles.stockName}>{name}</Text><Text style={(guestRoomOrder?.resources[id] ?? 0) >= needed ? styles.requirementReady : styles.requirementMissing}>{guestRoomOrder?.resources[id] ?? 0}/{needed}</Text></View>)}
           <View style={styles.requirementRow}><Text style={styles.stockName}>Payment</Text><CurrencyPrice totalCopper={GUEST_ROOM_REQUIREMENTS.copper} /></View>
           <TouchableOpacity disabled={busy || !guestRoomOrder?.canPlace} style={[styles.wideButton, guestRoomOrder?.canPlace && styles.turnInReady, (!guestRoomOrder?.canPlace || busy) && styles.disabled]} onPress={() => { void confirmGuestRoomOrder(); }}><Text style={styles.wideButtonText}>Place an order.</Text></TouchableOpacity>

@@ -811,7 +811,7 @@ function BagSlot({ item, size, selected, onPressIn, onLongPress, onPress }: Slot
       {imgSrc ? (
         <>
           <Image source={imgSrc} style={styles.slotImg} resizeMode="contain" resizeMethod="resize" />
-          <><ItemGradeBadge item={item} /><SeasonedItemBadge visible={item?.seasonedStage !== undefined || !!item?.weaponEnhanced || !!item?.armorEnhanced} /></>
+          <><ItemGradeBadge item={item} fontSize={13} /><SeasonedItemBadge visible={item?.seasonedStage !== undefined || !!item?.weaponEnhanced || !!item?.armorEnhanced} /></>
           <ItemDurabilityBadge item={item} />
           {item?.containedQuantity != null && item.containedQuantity > 0 && (
             <View style={styles.contentsCircle}>

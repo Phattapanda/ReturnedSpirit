@@ -25,6 +25,7 @@ export const GUEST_ROOM_REQUIREMENTS = {
 export type GuestRoomPhase = "locked" | "available" | "building" | "complete";
 export type GuestRoomUpgradePhase = "locked" | "available" | "quest_active" | "building" | "complete";
 export type GuestRoomState = {
+  constructionTracked: boolean;
   version: 2;
   phase: GuestRoomPhase;
   orderPlacedDaySerial: number | null;
@@ -38,6 +39,7 @@ export type GuestRoomState = {
 };
 
 export const DEFAULT_GUEST_ROOM_STATE: GuestRoomState = {
+  constructionTracked: false,
   version: 2,
   phase: "locked",
   orderPlacedDaySerial: null,
@@ -77,6 +79,7 @@ function normalizeState(raw: unknown): GuestRoomState {
       ? value.upgradePhase as GuestRoomUpgradePhase
       : phase === "complete" ? "available" : "locked",
     upgradeCompletionDaySerial: normalizeDay(value.upgradeCompletionDaySerial),
+    constructionTracked: value.constructionTracked === true,
   };
 }
 
@@ -91,6 +94,12 @@ export async function loadGuestRoomState(): Promise<GuestRoomState> {
   const raw = await AsyncStorage.getItem(GUEST_ROOM_STATE_KEY);
   try { return normalizeState(raw ? JSON.parse(raw) : null); }
   catch { return { ...DEFAULT_GUEST_ROOM_STATE }; }
+}
+
+export async function trackGuestRoomConstruction(): Promise<GuestRoomState> {
+  const state = await loadGuestRoomState();
+  if (state.phase !== "available" || state.constructionTracked) return state;
+  return saveState({ ...state, constructionTracked: true });
 }
 
 export function subscribeGuestRoomState(listener: (state: GuestRoomState) => void): () => void {
@@ -147,6 +156,7 @@ export async function placeGuestRoomOrder(): Promise<{
     cloth: availability.resources.cloth - GUEST_ROOM_REQUIREMENTS.cloth,
   };
   const next: GuestRoomState = {
+    constructionTracked: state.constructionTracked,
     version: 2,
     phase: "building",
     orderPlacedDaySerial: guestState.calendarDaySerial,
